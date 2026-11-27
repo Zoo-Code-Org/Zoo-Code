@@ -137,49 +137,62 @@ function lineContainer(line: string): { strip: number; container: FenceContainer
 }
 
 /**
- * Bytes of `line` to strip while reading inside `container`, or -1 when
- * the line carries no container prefix and so leaves the container.
+ * The whitespace run at `start`: the byte offset where it ends and the
+ * document column it reaches. CommonMark expands a tab to the next
+ * four-column tab stop.
  */
-function containerStrip(container: FenceContainer, line: string): number {
+function whitespaceRun(line: string, start: number, column: number): { at: number; column: number } {
+	let at = start
+	while (at < line.length) {
+		const char = line[at]
+		if (char === " ") {
+			column += 1
+		} else if (char === "	") {
+			column += 4 - (column % 4)
+		} else {
+			break
+		}
+		at += 1
+	}
+	return { at, column }
+}
+
+/**
+ * Bytes of `line` to strip while reading inside `container`, with the
+ * document column the strip point reaches, or null when the line
+ * carries no container prefix and so leaves the container. A tab
+ * partly consumed by the strip keeps its residual columns in the
+ * content region, which the fenced-closer check must count.
+ */
+function containerStrip(container: FenceContainer, line: string): { strip: number; column: number } | null {
 	switch (container.kind) {
 		case "none":
-			return 0
+			return { strip: 0, column: 0 }
 		case "quote": {
 			let rest = line
 			let stripped = 0
 			for (let level = 0; level < container.depth; level++) {
 				const match = QUOTE_LEVEL.exec(rest)
 				if (match === null) {
-					return -1
+					return null
 				}
 				stripped += match[0].length
 				rest = rest.slice(match[0].length)
 			}
-			return stripped
+			return { strip: stripped, column: stripped }
 		}
 		case "list": {
 			if (/^\s*$/.test(line)) {
 				// A blank line neither leaves the item nor closes the fence.
-				return 0
+				return { strip: 0, column: 0 }
 			}
 			// CommonMark expands a tab to the next four-column tab stop, so
 			// a tab-indented line can satisfy the item's content indent:
-			// measure columns, and strip the bytes that reach the indent.
-			// Space-indented lines keep the plain space count.
-			let column = 0
-			let at = 0
-			while (at < line.length && column < container.indent) {
-				const char = line[at]
-				if (char === " ") {
-					column += 1
-				} else if (char === "\t") {
-					column += 4 - (column % 4)
-				} else {
-					break
-				}
-				at += 1
-			}
-			return column >= container.indent ? at : -1
+			// measure columns, and strip the bytes that carry them. A tab
+			// overshooting the indent leaves its residual columns to the
+			// content region.
+			const run = whitespaceRun(line, 0, 0)
+			return run.column >= container.indent ? { strip: run.at, column: run.column } : null
 		}
 	}
 }
@@ -465,27 +478,47 @@ export class InvokeRecoveryScanner {
 
 	/** Applies one complete line to the fence state. */
 	private advanceFence(line: string): void {
+		const fence = this.fence
+		if (fence === null) {
+			this.detectFence(line)
+			return
+		}
 		// CommonMark ends an unclosed fenced block when its container
 		// (a block quote or a list item) ends; the line is then read
 		// outside that container, so it may open a new fence.
-		if (this.fence !== null && containerStrip(this.fence.container, line) === -1) {
+		const stripped = containerStrip(fence.container, line)
+		if (stripped === null) {
 			this.fence = null
-		}
-		if (this.fence !== null) {
-			// Fence lines are read behind the opening fence's own
-			// container: a quote-prefixed line inside a top-level fence
-			// is literal content, and only a same-container line can
-			// close the fence.
-			const content = line.slice(containerStrip(this.fence.container, line))
-			const closer = new RegExp(`^ {0,3}${this.fence.char}{${this.fence.width},}\\s*$`)
-			if (closer.test(content)) {
-				this.fence = null
-			}
 			return
 		}
-		// Fence detection skips the line's own container prefix: a
-		// quoted or list-held fence is still a fence, so the block it
-		// wraps stays quoted.
+		// Fence lines are read behind the opening fence's own
+		// container: a quote-prefixed line inside a top-level fence
+		// is literal content, and only a same-container line can
+		// close the fence.
+		const content = line.slice(stripped.strip)
+		// The closing fence may sit at most three columns inside the
+		// container, measured at tab stops: a tab partly consumed by
+		// the strip keeps its residual columns in the content, so
+		// a tab-space closer line deeper than three columns stays
+		// fence content instead of ending the block.
+		const base = fence.container.kind === "list" ? fence.container.indent : stripped.strip
+		const run = whitespaceRun(content, 0, stripped.column)
+		const body = content.slice(run.at)
+		let width = 0
+		while (width < body.length && body[width] === fence.char) {
+			width += 1
+		}
+		if (run.column - base <= 3 && width >= fence.width && /^\s*$/.test(body.slice(width))) {
+			this.fence = null
+		}
+	}
+
+	/**
+	 * Opens a fence on a complete line outside any fence. The line's
+	 * own container prefix is skipped, so a quoted or list-held fence
+	 * is still a fence and the block it wraps stays quoted.
+	 */
+	private detectFence(line: string): void {
 		const { strip, container } = lineContainer(line)
 		const content = line.slice(strip)
 		const tilde = /^ {0,3}(~{3,})/.exec(content)

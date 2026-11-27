@@ -311,8 +311,44 @@ describe("InvokeRecoveryScanner", () => {
 		// tab-indented line still satisfies the list item's content
 		// indent: the fence stays open and the example stays text, never
 		// recovers.
-		const fixture = `- ~~~\n\tcode\n  <invoke name="get_weather"></invoke>\n  ~~~\nafter`
+		const fixture = `- ~~~\n	code\n  <invoke name="get_weather"></invoke>\n  ~~~\nafter`
 		const events = scanChunked(fixture, [5, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it.each([
+		["four-column", `	  ~~~`],
+		["five-column", `	   ~~~`],
+	])("keeps a %s tab-space closer line inside a list item as fence content", (_label, closerLine) => {
+		// CommonMark measures a closing fence in columns inside the
+		// container: a tab partly consumed by the 2-column item indent
+		// keeps its residual columns, so `	  ~~~` sits 4 columns deep
+		// and `	   ~~~` sits 5 - both are fence content, never a
+		// closer. The fenced example stays text and recovers nothing.
+		const fixture = `- ~~~\n${closerLine}\n  <invoke name="get_weather"></invoke>\n  ~~~`
+		const events = scanChunked(fixture, [5, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("still closes a list-item fence on a closer line three columns inside", () => {
+		// `	 ~~~` sits three columns inside the item (tab stop 4 minus
+		// the 2-column indent, plus one space): at most three columns
+		// close, so the fence ends and a later call is live again.
+		const fixture = `- ~~~\n	 ~~~\n\n${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [5, 30, 30])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe(`- ~~~\n	 ~~~\n\n`)
+	})
+
+	it("closes a quoted fence on a tab closer within three columns", () => {
+		// The quote path measures the same columns: `> 	 ~~~` sits
+		// three columns inside the quote, so the fence closes there and
+		// the next quoted fence line opens a NEW fence that keeps the
+		// following call quoted.
+		const fixture = `> ~~~\n> 	 ~~~\n> ~~~\n> ${bareWeatherCall("Rome")}\n> ~~~`
+		const events = scanChunked(fixture, [6, 30, 30])
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(fixture)
 	})

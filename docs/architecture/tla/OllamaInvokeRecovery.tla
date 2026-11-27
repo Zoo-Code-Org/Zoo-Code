@@ -42,7 +42,7 @@
 \* property test covers it), the parameter schema typing, TagMatcher
 \* reasoning tags, abort paths, and token costs.
 \* Cost: each cfg checks in a few seconds on one TLC worker.
-\* Result: OllamaInvokeRecovery.cfg (Fixed) pass in 70 states. HoldAll fails
+\* Result: OllamaInvokeRecovery.cfg (Fixed) pass in 81 states. HoldAll fails
 \* LiveStream. Unfixed fails NoLostCall and NoBlockTextLeak. NoGuard fails
 \* NoPhantomCall and LiveStream (TLC reports LiveStream first). NoSuppress
 \* fails NoBlockTextLeak. NoFinishFlush fails NoLostText. EarlyEmit fails
@@ -71,6 +71,15 @@
 \* false: the unknown-name verdict, not the quote guard, keeps it text).
 \* Covered: the tab-stop list-indent rule sits below the token
 \* abstraction, pinned by a scanner unit test. Gap: none new.
+\* Review round 5 (on fc8dfff2d): the closing-fence indent rule (a
+\* strip tab keeps residual columns; at most three columns inside the
+\* container close) sits below the token abstraction like the other
+\* container rules - Tokens sees a fence line as one T_FENCE token
+\* with no byte or column structure. Covered: the fence run's Quoted
+\* oracle already keeps a quoted example text. Gap: the line-level
+\* rule, pinned by scanner unit tests (tab-space closer lines at 4
+\* and 5 columns stay fenced, 3 columns closes, quoted tab closers
+\* close).
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
