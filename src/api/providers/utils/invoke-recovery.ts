@@ -21,9 +21,9 @@ import type { OpenAI } from "openai"
  *   open block runs before that block's recovered call, and a block that
  *   closed before a native arrival recovers first.
  * - A block quoted by markdown context (an open fenced code block,
- *   including one inside a block quote container, or an inline code span
- *   open on the opener's line) is never recovered; its bytes flush as
- *   text. An unterminated block or an unknown tool name
+ *   including one behind a block-quote or list-item container, or an
+ *   inline code span open on the opener's line) is never recovered; its
+ *   bytes flush as text. An unterminated block or an unknown tool name
  *   also stays text. Wrapper tags are dropped only around a recovered
  *   call, together with the whitespace directly inside the skeleton.
  * - The verdict depends only on the byte content, so any chunking of the
@@ -98,17 +98,75 @@ function deadCandidateLength(text: string): number {
 interface FenceState {
 	char: "`" | "~"
 	width: number
+	/** The container prefix the opening fence line carried. */
+	container: FenceContainer
 }
 
 /**
- * Length of the leading Markdown container prefix of a complete line.
- * CommonMark opens and closes fenced code blocks inside block quotes,
- * where every level contributes up to three indent bytes, a `>` byte,
- * and one optional space.
+ * The Markdown container a fence lives in. CommonMark: the closing
+ * fence is read behind the same container prefix, and an unclosed
+ * fence ends when its container ends. A top-level fence has none, so
+ * a quote-prefixed line inside it is literal content, never a closer.
  */
-function containerPrefixEnd(line: string): number {
-	const match = /^(?: {0,3}> ?)+/.exec(line)
-	return match === null ? 0 : match[0].length
+type FenceContainer = { kind: "none" } | { kind: "quote"; depth: number } | { kind: "list"; indent: number }
+
+const QUOTE_PREFIX = /^(?: {0,3}> ?)+/
+const QUOTE_LEVEL = /^ {0,3}> ?/
+const LIST_MARKER = /^ {0,3}(?:[-+*]|\d{1,9}[.)])( +)/
+
+/**
+ * The container prefix of a complete line: how many bytes to strip
+ * before reading the line's own block content, and which container
+ * those bytes belong to.
+ */
+function lineContainer(line: string): { strip: number; container: FenceContainer } {
+	const quote = QUOTE_PREFIX.exec(line)
+	if (quote !== null) {
+		const depth = (quote[0].match(/>/g) ?? []).length
+		return { strip: quote[0].length, container: { kind: "quote", depth } }
+	}
+	const list = LIST_MARKER.exec(line)
+	if (list !== null) {
+		// CommonMark: 1-4 spaces after the marker set the content
+		// indent; a wider run indents the content by marker width + 1.
+		const markerWidth = list[0].length - list[1].length
+		const indent = list[1].length <= 4 ? list[0].length : markerWidth + 1
+		return { strip: indent, container: { kind: "list", indent } }
+	}
+	return { strip: 0, container: { kind: "none" } }
+}
+
+/**
+ * Bytes of `line` to strip while reading inside `container`, or -1 when
+ * the line carries no container prefix and so leaves the container.
+ */
+function containerStrip(container: FenceContainer, line: string): number {
+	switch (container.kind) {
+		case "none":
+			return 0
+		case "quote": {
+			let rest = line
+			let stripped = 0
+			for (let level = 0; level < container.depth; level++) {
+				const match = QUOTE_LEVEL.exec(rest)
+				if (match === null) {
+					return -1
+				}
+				stripped += match[0].length
+				rest = rest.slice(match[0].length)
+			}
+			return stripped
+		}
+		case "list": {
+			if (/^\s*$/.test(line)) {
+				// A blank line neither leaves the item nor closes the fence.
+				return 0
+			}
+			const leading = /^ */.exec(line)
+			const spaces = leading === null ? 0 : leading[0].length
+			return spaces >= container.indent ? container.indent : -1
+		}
+	}
 }
 
 export class InvokeRecoveryScanner {
@@ -392,26 +450,39 @@ export class InvokeRecoveryScanner {
 
 	/** Applies one complete line to the fence state. */
 	private advanceFence(line: string): void {
-		// Fence detection skips container prefixes: a quoted fence is
-		// still a fence, so the block it wraps stays quoted.
-		const content = line.slice(containerPrefixEnd(line))
+		// CommonMark ends an unclosed fenced block when its container
+		// (a block quote or a list item) ends; the line is then read
+		// outside that container, so it may open a new fence.
+		if (this.fence !== null && containerStrip(this.fence.container, line) === -1) {
+			this.fence = null
+		}
 		if (this.fence !== null) {
+			// Fence lines are read behind the opening fence's own
+			// container: a quote-prefixed line inside a top-level fence
+			// is literal content, and only a same-container line can
+			// close the fence.
+			const content = line.slice(containerStrip(this.fence.container, line))
 			const closer = new RegExp(`^ {0,3}${this.fence.char}{${this.fence.width},}\\s*$`)
 			if (closer.test(content)) {
 				this.fence = null
 			}
 			return
 		}
+		// Fence detection skips the line's own container prefix: a
+		// quoted or list-held fence is still a fence, so the block it
+		// wraps stays quoted.
+		const { strip, container } = lineContainer(line)
+		const content = line.slice(strip)
 		const tilde = /^ {0,3}(~{3,})/.exec(content)
 		if (tilde) {
 			// A tilde fence accepts any info string.
-			this.fence = { char: "~", width: tilde[1].length }
+			this.fence = { char: "~", width: tilde[1].length, container }
 			return
 		}
 		const backtick = /^ {0,3}(`{3,})/.exec(content)
 		if (backtick && !content.slice(backtick[0].length).includes("`")) {
 			// A backtick fence's info string must contain no backtick.
-			this.fence = { char: "`", width: backtick[1].length }
+			this.fence = { char: "`", width: backtick[1].length, container }
 		}
 	}
 }

@@ -55,6 +55,13 @@
 \* sink subsequence with Events. Gap (below the token abstraction, pinned
 \* by scanner unit tests): marker whitespace rules, case-insensitive close
 \* search on the original bytes, and the container prefix of fence lines.
+\* Review round 3 (on 12b6def76): added TailDrop to Next, so the wrap and
+\* natTail runs complete and NativeOrder checks their sinks instead of
+\* stalling at the wrapper close. Covered: the wrapped unknown-name and
+\* inline-code-wrapped negatives are NoPhantomCall's oracle (unit tests
+\* added). Gap: the fence container rules (same-depth quote levels,
+\* list-item indent, container exit closes the fence) sit below the token
+\* abstraction, pinned by scanner unit tests.
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
@@ -285,6 +292,7 @@ Next ==
     \/ Native
     \/ Hold
     \/ Stream
+    \/ TailDrop
     \/ HoldAdv
     \/ Resolve
 

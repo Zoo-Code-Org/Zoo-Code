@@ -65,6 +65,9 @@ describe("InvokeRecoveryScanner", () => {
 		`A ${weatherCall("Berlin")} B ${bareWeatherCall("Rome")} C`,
 		`<function_calls>\njust prose in a wrapper\n`,
 		`2 < 3 <inv partial that never closes`,
+		`~~~\n> ~~~\n${bareWeatherCall("Rome")}\n~~~`,
+		`> ~~~\n> example\n\n${bareWeatherCall("Rome")}`,
+		`- ~~~\n  ${bareWeatherCall("Rome")}\n  ~~~\nafter`,
 	]
 	const normalize = (events: RecoveryEvent[]) => ({
 		text: text(events),
@@ -137,6 +140,25 @@ describe("InvokeRecoveryScanner", () => {
 		)
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(`<invoke name="unknown_tool"><parameter name="a">b</parameter></invoke>`)
+	})
+
+	it("keeps a wrapped unknown tool as text", () => {
+		// The wrapper skeleton around an unknown name must stay text,
+		// wrapper tags included: stepWrapper rejects the opener when
+		// the name is not offered.
+		const fixture = `<function_calls><invoke name="unknown_tool"><parameter name="a">b</parameter></invoke></function_calls>`
+		const events = scanChunked(fixture, [17, 30, 40])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("keeps an inline-code-wrapped function_calls block as text", () => {
+		// A live code span quotes the whole wrapped skeleton.
+		const fixture =
+			'use `<function_calls><invoke name="get_weather"><parameter name="location">Berlin</parameter></invoke></function_calls>` verbatim'
+		const events = scanChunked(fixture, [6, 40, 40])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
 	})
 
 	it("flushes an unterminated block as text at finish", () => {
@@ -229,7 +251,10 @@ describe("InvokeRecoveryScanner", () => {
 		expect(calls(scanChunked(fixture, [fixture.length]))).toStrictEqual(expected)
 		expect(calls(scanChunked(fixture, [37, 44, 38]))).toStrictEqual(expected)
 		expect(calls(scanChunked(fixture, [79, fixture.length - 79]))).toStrictEqual(expected)
+		// The skeleton must never leak to the text sink, in any split.
+		expect(text(scanChunked(fixture, [fixture.length]))).toBe("")
 		expect(text(scanChunked(fixture, [37, 44, 38]))).toBe("")
+		expect(text(scanChunked(fixture, [79, fixture.length - 79]))).toBe("")
 	})
 
 	it("keeps a fence inside a block quote as text", () => {
@@ -237,6 +262,33 @@ describe("InvokeRecoveryScanner", () => {
 		// quotes: the quoted example must stay text, never recover.
 		const fixture = `> ~~~\n> ${bareWeatherCall("Rome")}\n> ~~~\nafter`
 		const events = scanChunked(fixture, [6, 40, 20])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("keeps a quote-prefixed line inside a top-level fence as fence content", () => {
+		// CommonMark: fenced content is literal text. A top-level
+		// fence does not close on `> ~~~`, so the example stays text.
+		const fixture = `~~~\n> ~~~\n${bareWeatherCall("Rome")}\n~~~`
+		const events = scanChunked(fixture, [4, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("closes a quoted fence when its block quote ends and recovers a later call", () => {
+		// CommonMark ends an unclosed fenced block when its enclosing
+		// block quote ends: the call outside the quote is live again.
+		const fixture = `> ~~~\n> example\n\n${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [6, 30, 30])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe(`> ~~~\n> example\n\n`)
+	})
+
+	it("keeps a fence inside a list item as text", () => {
+		// CommonMark opens and closes fenced code blocks inside list
+		// items: the example stays text, never recovers.
+		const fixture = `- ~~~\n  ${bareWeatherCall("Rome")}\n  ~~~\nafter`
+		const events = scanChunked(fixture, [5, 30, 10])
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(fixture)
 	})

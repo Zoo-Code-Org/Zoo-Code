@@ -306,6 +306,14 @@ describe("NativeOllamaHandler pseudo tool-call recovery", () => {
 		expect(textOf(parts)).toBe(`~~~\n${quoted}\n~~~`)
 	})
 
+	it("keeps a wrapped invoke with an unoffered name as text", async () => {
+		const fixture = `<function_calls><invoke name="unknown_tool"><parameter name="a">b</parameter></invoke></function_calls>`
+		const parts = await run({ message: { content: fixture } })
+
+		expect(callsOf(parts)).toStrictEqual([])
+		expect(textOf(parts)).toBe(fixture)
+	})
+
 	it("keeps streaming prose live while tools are offered", async () => {
 		const handler = makeHandler()
 		let releaseSecondChunk!: () => void
