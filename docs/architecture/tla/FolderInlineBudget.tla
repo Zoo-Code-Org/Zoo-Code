@@ -58,8 +58,10 @@
 \* binary detection, note wording, and the read_file guidance format. Note
 \* text and its format rule are code pins covered by unit tests.
 \* Cost: each run takes under 2 minutes. Agent time is not measured.
-\* Result: FolderInlineBudget.cfg (Fixed) holds all invariants (2048
-\* states). The MC sabotage (Unfixed) breaks TotalCapInv alone (1449 states,
+\* Result: FolderInlineBudget.cfg (Fixed; MaxChars=4, PerFileCharsCap=3,
+\* TotalCharsCap=5) holds all invariants (13500 states). Every pin binds:
+\* used reaches 4, shown reaches 2, shownChars reaches 3, and usedChars
+\* reaches 5. The MC sabotage (Unfixed) breaks TotalCapInv alone (1449 states,
 \* the no-cap reproduction). PartialCharge breaks ChargeConsistentInv alone
 \* (578 states). NoPerFile breaks PerFileCapInv with the total line cap
 \* still holding (961 states). NoCharCap breaks CharPerFileCapInv with the
@@ -69,7 +71,12 @@
 \* Review (PR 2680 round 5): 1 added (the complete-line prefix charge: the
 \* PrefixChars oracle replaces the flat Chars oracle, ChargeConsistentInv,
 \* and the PartialCharge sabotage; thread on FolderInlineBudget.tla:118).
-\* Totals over rounds 4-5: 2 covered, 3 added, 1 gap (the read_file guidance
+\* Review (PR 2680 round 6): 1 added (the fixed profile now exercises both
+\* line guards: PerFileCharsCap=1 let FittingLines keep at most one line per
+\* file, so the line pins held even when FixedStep dropped the line caps;
+\* the caps are MaxChars=4, PerFileCharsCap=3, TotalCharsCap=5 with pins at
+\* the cap values; thread on FolderInlineBudget.cfg:10).
+\* Totals over rounds 4-6: 2 covered, 4 added, 1 gap (the read_file guidance
 \* format is below the model's abstraction; the ledger carries no path or
 \* format, so the plain-offset versus extracted-format rule is pinned by
 \* unit tests in folder-mention.spec.ts).
