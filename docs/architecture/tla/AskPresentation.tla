@@ -16,7 +16,10 @@
 \* A message is [kind, answered]. Only ca carries answered true. The host stamps it when the ask is settled.
 \* Variables: in the snapshot, shown the Run button state, loc the ask index that the user answered locally.
 \* Not modeled: the Proceed/Kill buttons of ou, response routing of a click, terminal rows.
-\* Gap: thread 4658203883 (Deny must answer the command, not cancel the stream). The sink here is button state, not the posted response. Vitest pins the routing.
+\* Gap: thread 4658203883 (Deny must answer the command, not cancel the stream)
+\* and review 6087624965 (text feedback for a recovered ask must route to
+\* messageResponse past the streaming queue guard). The sink here is button
+\* state, not the posted response. Vitest pins the routing.
 \* Cost and result lines were written after the TLC runs. See Result below.
 
 EXTENDS Naturals, Sequences

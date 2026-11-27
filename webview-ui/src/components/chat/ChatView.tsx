@@ -776,14 +776,29 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					return
 				}
 
+				// (#998 review 6087624965) A recovered command ask can sit
+				// behind a partial text say: isStreaming is true while the
+				// ask still waits. Its text feedback must fall through to the
+				// messageResponse branch, not the queue — the host can claim
+				// a queued message for an unprotected command ask as
+				// yesButtonClicked, so text like "do not run this" would
+				// approve the command. Queueing stays when no command ask
+				// waits. This mirrors the Deny handler's pending-command
+				// exception.
+				const pendingCommandAsk =
+					clineAskRef.current === "command"
+						? messagesRef.current.findLast((message: ClineMessage) =>
+								isPendingCommandAsk(message, answeredCommandAskTsRef.current),
+							)
+						: undefined
+
 				// Queue message if:
-				// - Task is busy (sendingDisabled)
-				// - API request in progress (isStreaming)
+				// - Task is busy (sendingDisabled) or streaming (isStreaming),
+				//   unless a pending command ask waits for the reply
 				// - Queue has items (preserve message order during drain)
 				// - Command is running (command_output) - user's message should be queued for AI, not sent to terminal
 				if (
-					sendingDisabled ||
-					isStreaming ||
+					((sendingDisabled || isStreaming) && !pendingCommandAsk) ||
 					messageQueue.length > 0 ||
 					clineAskRef.current === "command_output"
 				) {

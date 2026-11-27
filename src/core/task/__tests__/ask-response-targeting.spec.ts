@@ -380,38 +380,45 @@ describe("ask response targeting", () => {
 			() => "answered" as const,
 			() => "thrown" as const,
 		)
-		await vi.waitFor(() => {
-			if (!releaseFirstPublication) {
-				throw new Error("first publication not parked yet")
-			}
-		})
+		try {
+			await vi.waitFor(() => {
+				if (!releaseFirstPublication) {
+					throw new Error("first publication not parked yet")
+				}
+			})
 
-		// A newer ask races in and completes its publication: its token is
-		// armed and lastMessageTs has moved to the newer ask.
-		const secondAsk = task.ask("command", "echo two", false)
-		await vi.waitFor(() => {
-			if (access.awaitingAskTarget === undefined) {
-				throw new Error("second ask not armed yet")
-			}
-		})
-		const secondToken = access.awaitingAskTarget
+			// A newer ask races in and completes its publication: its token is
+			// armed and lastMessageTs has moved to the newer ask.
+			const secondAsk = task.ask("command", "echo two", false)
+			await vi.waitFor(() => {
+				if (access.awaitingAskTarget === undefined) {
+					throw new Error("second ask not armed yet")
+				}
+			})
+			const secondToken = access.awaitingAskTarget
 
-		// The older publication resumes. Its arm must be skipped (the ask is
-		// superseded), or it would steal the newer arm and the superseded
-		// cleanup would wipe it, leaving the newer ask with no armed target.
-		releaseFirstPublication!()
-		const firstOutcome = await Promise.race([
-			firstAsk,
-			new Promise((resolve) => setTimeout(resolve, 400)).then(() => "pending" as const),
-		])
-		expect(firstOutcome).toBe("thrown")
-		expect(access.awaitingAskTarget).toBe(secondToken)
+			// The older publication resumes. Its arm must be skipped (the ask is
+			// superseded), or it would steal the newer arm and the superseded
+			// cleanup would wipe it, leaving the newer ask with no armed target.
+			releaseFirstPublication!()
+			const firstOutcome = await Promise.race([
+				firstAsk,
+				new Promise((resolve) => setTimeout(resolve, 400)).then(() => "pending" as const),
+			])
+			expect(firstOutcome).toBe("thrown")
+			expect(access.awaitingAskTarget).toBe(secondToken)
 
-		// The newer ask still answers with its own approval.
-		setTimeout(() => {
-			task.approveAsk()
-		}, 0)
-		expect(await secondAsk).toMatchObject({ response: "yesButtonClicked" })
+			// The newer ask still answers with its own approval.
+			setTimeout(() => {
+				task.approveAsk()
+			}, 0)
+			expect(await secondAsk).toMatchObject({ response: "yesButtonClicked" })
+		} finally {
+			// The afterEach abort latch cannot unblock a publication parked on
+			// this deferred: release it here so cleanup can settle the tracked
+			// asks even when an earlier assertion fails (review 6087624965).
+			releaseFirstPublication?.()
+		}
 	})
 
 	it("emits TaskInteractive when the ask stays pending past the two-second delay", async () => {

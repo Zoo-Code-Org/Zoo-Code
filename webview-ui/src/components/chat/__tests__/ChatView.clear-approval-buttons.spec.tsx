@@ -897,6 +897,33 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
 	})
 
+	it("text feedback for a recovered command ask routes past the streaming queue guard (review 6087624965)", async () => {
+		const { getByRole, queryByText } = renderChatView()
+
+		// Recovered command ask behind a partial text say: the controls are
+		// enabled while isStreaming stays true (the last message is partial).
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("text", 3, true)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		// The user answers the ask with text feedback instead of Run/Deny.
+		// While isStreaming the footer button is the stop button, so the
+		// textarea's Enter path is the real submit route to handleSendMessage.
+		await act(async () => {
+			fireEvent.input(getByRole("textbox"), { target: { value: "do not run this" } })
+		})
+		await act(async () => {
+			fireEvent.keyDown(getByRole("textbox"), { key: "Enter" })
+		})
+
+		// The reply must answer the ask, not queue: Task.ts can claim a
+		// queued message for an unprotected command ask as yesButtonClicked,
+		// so queued text would approve the command it was meant to stop.
+		expect(asked("messageResponse")).toBe(true)
+		expect(sentTypes()).not.toContain("queueMessage")
+	})
+
 	it("a direct text reply keeps a trailing say from restoring Run/Deny before the host stamp (#998 review)", async () => {
 		const { getByRole } = renderChatView()
 
