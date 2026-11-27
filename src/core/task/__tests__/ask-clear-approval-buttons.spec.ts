@@ -437,6 +437,9 @@ describe("command-ask marking across a mixed history (#998 review)", () => {
 		const task = buildTask(undefined)
 		const command = commandAsk(Date.now() - 1)
 		task.clineMessages.push(command)
+		// Owned row, like the messageResponse test: the ownership checks then
+		// pass and the response-kind exclusion is what leaves the row unmarked.
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = command.ts
 
 		task.handleWebviewAskResponse("objectResponse")
 

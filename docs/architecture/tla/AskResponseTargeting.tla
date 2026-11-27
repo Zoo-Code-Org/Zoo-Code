@@ -60,6 +60,13 @@
 \* spec, the two tests, and the Task.ts gate (find + fix + verify).
 \* Null result: none — the first version found the entry-window leak the plain
 \* between-ask orphan does not cover, and the isBlocking fast path around the wait.
+\* Review ratchet (r4, threads 4715054203 and 4715054207): both findings were
+\* verification-artifact repairs, so both count as covered — the model already
+\* expressed each rule. ConsumeNoGate now carries the ~tsBumped[k] guard the
+\* fixed Consume has (without it a bump-trace NoStaleConsumption violation could
+\* mask a broken ownership-gate check in the must-fail cfg), and the objectResponse
+\* negative test seeds the owning row ts so the response-kind exclusion, not the
+\* unset stamp, is what leaves the row unmarked.
 
 EXTENDS Naturals
 

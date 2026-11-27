@@ -4,11 +4,14 @@ EXTENDS AskResponseTargeting
 
 \* Sabotage 1: the ownership gate at the consume step is removed. This is the
 \* unfixed consume: any pending response satisfies the ask that reads it. The
-\* lifecycle (awaiting, cur) mirrors the fixed Consume, so the gate is the only
-\* delta. OnlyOwnResponse must fail.
+\* lifecycle (awaiting, cur) and the ts guard mirror the fixed Consume, so the
+\* gate is the only delta (review r4: without the guard this variant fails
+\* NoStaleConsumption instead, masking a broken ownership-gate check).
+\* OnlyOwnResponse must fail.
 ConsumeNoGate(k) ==
     /\ cur = k
     /\ ~ended[k]
+    /\ ~tsBumped[k]
     /\ pending
     /\ consumed' = [consumed EXCEPT ![k] = TRUE]
     /\ consumedWhile' = [consumedWhile EXCEPT ![k] = ghostArrival]
