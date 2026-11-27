@@ -24,6 +24,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { MODEL_FETCH_TIMEOUT_MS, Task } from "../Task"
+import { buildCleanConversationHistory } from "../cleanConversationHistory"
 import { SYSTEM_PROMPT } from "../../prompts/system"
 import { createRateLimitClock } from "../RateLimitClock"
 import { summarizeConversation } from "../../condense"
@@ -63,10 +64,6 @@ type TaskTestAccess = {
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
-	buildCleanConversationHistory: (
-		messages: ApiMessage[],
-		requestModelInfo: ModelInfo,
-	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
 	attemptApiRequestWithActiveApi: () => AsyncGenerator<ApiStreamChunk>
 	condenseContextWithActiveApi: () => Promise<void>
 	retiredApis: Set<unknown>
@@ -7189,12 +7186,19 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 
-			const threadedInfo: ModelInfo = { contextWindow: 32_000, supportsPromptCache: false }
+			const threadedInfo: ModelInfo = {
+				contextWindow: 32_000,
+				supportsPromptCache: false,
+				preserveReasoning: true,
+			}
 			const lateInfo: ModelInfo = {
 				contextWindow: 128_000,
 				supportsPromptCache: true,
-				// Divergent policy: only the late metadata excludes it.
+				// Divergent policy: only the late metadata excludes the tool, and
+				// only the late snapshot would strip plain-text reasoning from the
+				// request history.
 				excludedTools: ["read_file"],
+				preserveReasoning: false,
 			}
 			const fetchState = { resolved: false }
 			let resolveFetch!: () => void
@@ -7224,7 +7228,6 @@ describe("Cline", () => {
 				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
 			)
 			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
-			const cleanHistorySpy = vi.spyOn(getTaskTestAccess(task), "buildCleanConversationHistory")
 			// Hold the prompt build open so the metadata fetch can land after the
 			// snapshot was captured but before context sizing runs.
 			let releasePrompt!: () => void
@@ -7232,9 +7235,33 @@ describe("Cline", () => {
 				releasePrompt = () => resolve("mock system prompt")
 			})
 			vi.mocked(SYSTEM_PROMPT).mockImplementationOnce(() => promptGate)
-			task.apiConversationHistory = [
+			// The assistant message carries an embedded plain-text reasoning block,
+			// so the cleaned history's shape depends on which snapshot's
+			// preserveReasoning flag the cleaner resolved.
+			const embeddedReasoningBlock = {
+				type: "reasoning",
+				text: "hidden chain of thought",
+				summary: [],
+			} as unknown as Anthropic.Messages.ContentBlockParam
+			const fixtureHistory: ApiMessage[] = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+				{
+					role: "assistant",
+					content: [embeddedReasoningBlock, { type: "text", text: "answer" }],
+					ts: Date.now(),
+				},
 			]
+			task.apiConversationHistory = fixtureHistory
+			// The default condense mock resolves with empty messages, which the
+			// condense flow overwrites the history with; return the fixture so
+			// the request proceeds with both messages and the cleaner's output
+			// stays observable at createMessage.
+			vi.mocked(summarizeConversation).mockResolvedValueOnce({
+				messages: fixtureHistory,
+				summary: "summary",
+				cost: 0,
+				newContextTokens: 1,
+			})
 
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this request starts from.
@@ -7260,8 +7287,14 @@ describe("Cline", () => {
 			// The threaded snapshot replaces the per-request guard entirely.
 			expect(safeSpy).not.toHaveBeenCalled()
 			// The cleaned request history resolves its model-dependent flags from
-			// the same threaded snapshot, not from a fresh handler re-read.
-			expect(cleanHistorySpy).toHaveBeenCalledWith(expect.any(Array), threadedInfo)
+			// the same threaded snapshot: the assistant message keeps its embedded
+			// plain-text reasoning, which the late re-read's snapshot
+			// (preserveReasoning: false) would have stripped to a bare string.
+			const sentMessages = requireDefined(vi.mocked(task.api.createMessage).mock.calls.at(-1)?.[1])
+			expect(sentMessages[1]).toStrictEqual({
+				role: "assistant",
+				content: [embeddedReasoningBlock, { type: "text", text: "answer" }],
+			})
 			// Condensing ran because sizing resolved from the 32k threaded
 			// window; a 128k re-read would have cleared the threshold instead.
 			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore + 1)
@@ -7286,26 +7319,15 @@ describe("Cline", () => {
 		}
 
 		function historyFor(preserveReasoning: boolean) {
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
-			// The handler re-read deliberately disagrees with the threaded
-			// snapshot: any output that follows the re-read instead of the
-			// parameter flips the assertions below.
-			vi.spyOn(task.api, "getModel").mockReturnValue({
-				id: "lazy-router-model",
-				info: { contextWindow: 1_000, supportsPromptCache: false, preserveReasoning: !preserveReasoning },
-			})
-
+			// The shared helper is a pure projection of its inputs: its
+			// model-dependent flags resolve solely from the threaded
+			// requestModelInfo parameter, never from a handler re-read.
 			const requestModelInfo: ModelInfo = {
 				contextWindow: 1_000,
 				supportsPromptCache: false,
 				preserveReasoning,
 			}
-			return getTaskTestAccess(task).buildCleanConversationHistory([reasoningMessage], requestModelInfo)
+			return buildCleanConversationHistory([reasoningMessage], requestModelInfo)
 		}
 
 		it("keeps plain-text reasoning when the threaded snapshot sets preserveReasoning", () => {

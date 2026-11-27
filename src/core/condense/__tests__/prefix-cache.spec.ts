@@ -357,4 +357,105 @@ describe("Condense request prefix cache", () => {
 		expect(sent.length).toBeGreaterThanOrEqual(expectedPrefix.length + 1)
 		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
 	})
+
+	describe("reasoning items and reasoning_details the task request sends", () => {
+		function historyWithReasoningMessage(reasoningMessage: ApiMessage): ApiMessage[] {
+			return [
+				{ role: "user", content: [textBlock("Task: refactor the parser")] },
+				reasoningMessage,
+				{ role: "assistant", content: [textBlock("Refactoring the parser now")] },
+			]
+		}
+
+		it("sends a standalone encrypted reasoning message as a reasoning item like the task request", async () => {
+			const handler = new CapturingApiHandler()
+			// A standalone reasoning message is stored with a type, not a role;
+			// that stored shape is not part of Anthropic's message union.
+			const reasoningMessage = {
+				type: "reasoning",
+				summary: [{ type: "summary_text", text: "Planning the refactor" }],
+				encrypted_content: "enc_standalone_1",
+				id: "rs_standalone_1",
+			} as unknown as ApiMessage
+			const messages = historyWithReasoningMessage(reasoningMessage)
+			// Freeze the expectation before the call: an in-place mutation of the
+			// history must not leak into the observed prefix.
+			const expectedPrefix = structuredClone(expectedTaskShaped(messages, handler))
+
+			await summarizeConversation({
+				messages,
+				apiHandler: handler,
+				systemPrompt: taskSystemPrompt,
+				taskId,
+			})
+
+			const sent = handler.requests[0].messages
+			expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
+			expect(sent[1]).toStrictEqual({
+				type: "reasoning",
+				summary: [{ type: "summary_text", text: "Planning the refactor" }],
+				encrypted_content: "enc_standalone_1",
+				id: "rs_standalone_1",
+			})
+		})
+
+		it("does not send a standalone plain-text reasoning message", async () => {
+			const handler = new CapturingApiHandler()
+			const reasoningMessage = {
+				type: "reasoning",
+				text: "plain thinking about the refactor",
+				summary: [],
+			} as unknown as ApiMessage
+			const messages = historyWithReasoningMessage(reasoningMessage)
+			// Freeze the expectation before the call: an in-place mutation of the
+			// history must not leak into the observed prefix.
+			const expectedPrefix = structuredClone(expectedTaskShaped(messages, handler))
+
+			await summarizeConversation({
+				messages,
+				apiHandler: handler,
+				systemPrompt: taskSystemPrompt,
+				taskId,
+			})
+
+			const sent = handler.requests[0].messages
+			expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
+			// The task request skips the plain-text reasoning message, so the
+			// condense prefix must skip it in any shape too.
+			expect(JSON.stringify(sent)).not.toContain("plain thinking about the refactor")
+			expect(sent.some((item) => "type" in item && item.type === "reasoning")).toBe(false)
+		})
+
+		it("carries reasoning_details on the assistant message like the task request", async () => {
+			const handler = new CapturingApiHandler()
+			const reasoningDetails = [{ type: "reasoning_detail", text: "OpenRouter detail" }]
+			const messages: ApiMessage[] = [
+				{ role: "user", content: [textBlock("Task: refactor the parser")] },
+				{
+					role: "assistant",
+					content: [textBlock("Refactoring the parser now")],
+					reasoning_details: reasoningDetails,
+				} as ApiMessage,
+			]
+			// Freeze the expectation before the call: an in-place mutation of the
+			// history must not leak into the observed prefix.
+			const expectedPrefix = structuredClone(expectedTaskShaped(messages, handler))
+
+			await summarizeConversation({
+				messages,
+				apiHandler: handler,
+				systemPrompt: taskSystemPrompt,
+				taskId,
+			})
+
+			const sent = handler.requests[0].messages
+			expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
+			const assistant = sent.find((item) => "role" in item && item.role === "assistant")
+			expect(assistant).toStrictEqual({
+				role: "assistant",
+				content: "Refactoring the parser now",
+				reasoning_details: reasoningDetails,
+			})
+		})
+	})
 })
