@@ -1889,10 +1889,10 @@ describe("DeepSeekHandler", () => {
 			// the pointer: the compiled document has no patternProperties
 			// location left, so a retained reference could not resolve its
 			// string alternative and the value the original accepted for the
-			// key x would break. The inert $defs sibling keeps applying
-			// beside the inlined target under one allOf conjunct.
+			// key x would break. The inert $defs sibling stays on the outer
+			// schema beside the allOf conjunct (review 4723722028).
 			expect(params.additionalProperties).toStrictEqual({
-				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }, { $defs: { value: { type: "string" } } }] }],
+				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }], $defs: { value: { type: "string" } } }],
 			})
 			assertNoDanglingLocalRefs(params)
 			expect(String(params.description)).toContain("patternProperties")
@@ -1922,7 +1922,7 @@ describe("DeepSeekHandler", () => {
 			const params = tools[0].function.parameters as unknown as Record<string, unknown>
 			// The same relocation for the second schema-valued closed rule.
 			expect(params.unevaluatedProperties).toStrictEqual({
-				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }, { $defs: { value: { type: "string" } } }] }],
+				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }], $defs: { value: { type: "string" } } }],
 			})
 			assertNoDanglingLocalRefs(params)
 		})
@@ -2001,10 +2001,197 @@ describe("DeepSeekHandler", () => {
 			// (review 4719419428); the same relocation applies to it, since
 			// the compiled document loses the contains location too.
 			expect(params.unevaluatedItems).toStrictEqual({
-				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }, { $defs: { v: { type: "string" } } }] }],
+				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }], $defs: { v: { type: "string" } } }],
 			})
 			assertNoDanglingLocalRefs(params)
 			expect(String(params.description)).toContain("contains")
+		})
+
+		it("keeps a moved reference's sibling evaluation rule on the outer schema (review 4723722028)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: {
+								"^x": {
+									$defs: { v: { properties: { a: { type: "string" } } } },
+									$ref: "#/patternProperties/^x/$defs/v",
+									unevaluatedProperties: false,
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// unevaluatedProperties is an evaluation keyword: Draft 2020-12
+			// collects its annotations from adjacent keywords and from the
+			// schemas the same object applies in place, and a sibling allOf
+			// branch is not one of those. Moved inside the conjunct it would no
+			// longer see the inlined target's evaluations and would reject
+			// {"x":{"a":"ok"}} although the original accepts it (an ajv
+			// 2020-12 probe of this exact pair rejects the nested shape and
+			// accepts this one). On the outer schema the conjunct feeds it the
+			// same annotations the reference did, so the instance stays valid.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [
+					{ type: "number" },
+					{
+						allOf: [{ properties: { a: { type: "string" } } }],
+						$defs: { v: { properties: { a: { type: "string" } } } },
+						unevaluatedProperties: false,
+					},
+				],
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("keeps a moved reference's existing allOf conjuncts while its siblings move outside (review 4723722028)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: {
+								"^x": {
+									$defs: { v: { type: "string" } },
+									allOf: [{ required: ["y"] }],
+									$ref: "#/patternProperties/^x/$defs/v",
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// An existing allOf sibling was a conjunct before the rewrite and
+			// stays one: only the inlined target joins the conjunct array, the
+			// other keywords keep their outer position.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [
+					{ type: "number" },
+					{ allOf: [{ type: "string" }, { required: ["y"] }], $defs: { v: { type: "string" } } },
+				],
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("keeps a $ref-shaped const literal unrewritten (review 4723722038)", () => {
+			const literal = { $ref: "#/patternProperties/^x/$defs/v" }
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: {
+								"^x": {
+									$defs: { v: { type: "string" } },
+									properties: { cmd: { const: literal } },
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// const carries instance data, not a schema: the "$ref"-shaped
+			// object is the value a caller asserts against, and rewriting it
+			// into the resolved schema changed the accepted inputs.
+			const rule = (params.additionalProperties as Record<string, unknown>).anyOf as unknown[]
+			expect(rule[1]).toStrictEqual({
+				$defs: { v: { type: "string" } },
+				properties: { cmd: { const: { $ref: "#/patternProperties/^x/$defs/v" } } },
+			})
+			// assertNoDanglingLocalRefs does not apply here: the literal's
+			// pointer is instance data under const, which a validator compares
+			// for equality and never resolves.
+		})
+
+		const literalCases: [string, Record<string, unknown>][] = [
+			["enum", { enum: [{ $ref: "#/patternProperties/^x/$defs/v" }] }],
+			["default", { default: { $ref: "#/patternProperties/^x/$defs/v" } }],
+			["examples", { examples: [{ $ref: "#/patternProperties/^x/$defs/v" }] }],
+		]
+		it.each(literalCases)("keeps the $0 literal unrewritten (review 4723722038)", (keyword, literal) => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: {
+								"^x": {
+									$defs: { v: { type: "string" } },
+									properties: { cmd: literal },
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			const rule = (params.additionalProperties as Record<string, unknown>).anyOf as unknown[]
+			expect(rule[1]).toStrictEqual({
+				$defs: { v: { type: "string" } },
+				properties: { cmd: literal },
+			})
+		})
+
+		it("relaxes a branched reference graph whose relocation exceeds the budget (review 4723722021)", () => {
+			const defs: Record<string, unknown> = { d0: { type: "string" } }
+			for (let level = 1; level <= 16; level++) {
+				const pointer = `#/patternProperties/^x/$defs/d${level - 1}`
+				defs[`d${level}`] = { allOf: [{ $ref: pointer }, { $ref: pointer }] }
+			}
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: {
+								"^x": { $defs: defs, $ref: "#/patternProperties/^x/$defs/d16" },
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The graph is acyclic, so the cycle check never fires, and each
+			// level is referenced twice: unbounded relocation would build 2^16
+			// leaves from one small schema and block the synchronous request
+			// path. Past MAX_RELOCATION_NODES the relocation abandons and the
+			// retained closed rule relaxes instead.
+			expect(params.additionalProperties).toBe(true)
 		})
 	})
 })

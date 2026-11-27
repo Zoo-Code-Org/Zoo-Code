@@ -25,7 +25,13 @@
  *   reference that only resolves through a removed location: such a pointer
  *   is inlined with its compiled target, and a rule that references itself
  *   through the removed location relaxes the retained rule instead (issue
- *   #547 review 6089521528), removing contains relaxes a
+ *   #547 review 6089521528), a relocation that would grow past the
+ *   expansion budget relaxes the retained rule instead (issue #547 review
+ *   4723722021), literal values under const, enum, default and examples are
+ *   never rewritten (issue #547 review 4723722038), a moved reference's
+ *   sibling keywords stay on the outer schema beside the inlined target so
+ *   Draft 2020-12 annotation visibility survives (issue #547 review
+ *   4723722028), removing contains relaxes a
  *   retained unevaluatedItems restriction the same way, and a retained
  *   prefixItems is no complete evaluator: only a retained items keeps the
  *   array restriction (issue #547 review 4719935091), a oneOf whose branches - or
@@ -75,6 +81,18 @@ const DEEPSEEK_REJECTED_SCHEMA_KEYWORDS = new Set([
 // Guards against pathological (deeply nested or cyclic-by-construction)
 // schemas: past this depth the remaining nodes are passed through uncompiled.
 const MAX_SCHEMA_DEPTH = 32
+
+// A relocation may inline an acyclic reference graph whose output grows
+// exponentially (each level referenced twice doubles the copy count), and
+// cycle detection cannot see that. Relocation counts the nodes it creates
+// and abandons past this budget; the caller relaxes the retained rule
+// instead of moving it (issue #547 review 4723722021).
+const MAX_RELOCATION_NODES = 4096
+
+// Literal-valued keywords carry instance data, not schemas: a "$ref"-shaped
+// object inside them is a value a caller asserts against, never a reference
+// to inline (issue #547 review 4723722038).
+const LITERAL_VALUE_KEYWORDS = new Set(["const", "enum", "default", "examples"])
 
 /**
  * Per-document memo of finished node compilations. The same schema object at
@@ -206,13 +224,21 @@ function pointerTraversesLostKey(ref: string): boolean {
  * replaced with its resolved, compiled target - the same schema a retained
  * pointer would have resolved to - so the moved rule keeps the constraints
  * it declared instead of an unresolvable reference. Siblings of a rewritten
- * "$ref" keep applying beside the inlined target under one allOf conjunct
- * (Draft 2020-12 applies a reference in addition to its siblings). The rule
- * is passed through unchanged when its pointer is external, never resolved
- * locally even in the original, or still resolves in the compiled document.
- * Sets cyclic.hit when the rule references itself through the lost location:
- * no finite inlining represents such a rule, and the caller relaxes instead
- * of moving it. Pure: the input node is never mutated.
+ * "$ref" stay on the outer schema beside the inlined target under one allOf
+ * conjunct: Draft 2020-12 collects evaluation annotations from adjacent
+ * keywords and from the schemas one object applies in place, and a sibling
+ * allOf branch is not such an application, so an evaluation keyword moved
+ * inside the conjunct would lose sight of the inlined target's annotations
+ * and reject values the original accepted (issue #547 review 4723722028).
+ * Literal values under const, enum, default and examples are instance data,
+ * never schemas, and pass through untouched (issue #547 review 4723722038).
+ * The rule is passed through unchanged when its pointer is external, never
+ * resolved locally even in the original, or still resolves in the compiled
+ * document. An acyclic reference graph can still branch, so relocation
+ * counts the nodes it creates and abandons past MAX_RELOCATION_NODES - the
+ * caller then relaxes instead of moving the rule (issue #547 review
+ * 4723722021). abandon.hit marks both the cycle stop and the budget stop.
+ * Pure: the input node is never mutated.
  */
 function relocateMovedRefs(
 	node: unknown,
@@ -220,15 +246,21 @@ function relocateMovedRefs(
 	depth: number,
 	memo: SchemaCompileMemo,
 	chain: Set<unknown>,
-	cyclic: { hit: boolean },
+	abandon: { hit: boolean },
+	budget: { remaining: number },
 ): unknown {
-	if (cyclic.hit) {
+	if (abandon.hit) {
 		return node
 	}
 	if (Array.isArray(node)) {
+		budget.remaining -= 1
+		if (budget.remaining <= 0) {
+			abandon.hit = true
+			return node
+		}
 		const out: unknown[] = []
 		for (const entry of node) {
-			out.push(relocateMovedRefs(entry, root, depth, memo, chain, cyclic))
+			out.push(relocateMovedRefs(entry, root, depth, memo, chain, abandon, budget))
 		}
 		return out
 	}
@@ -247,7 +279,7 @@ function relocateMovedRefs(
 			return node
 		}
 		if (chain.has(resolved.target)) {
-			cyclic.hit = true
+			abandon.hit = true
 			return node
 		}
 		chain.add(resolved.target)
@@ -257,30 +289,61 @@ function relocateMovedRefs(
 			depth,
 			memo,
 			chain,
-			cyclic,
+			abandon,
+			budget,
 		)
 		chain.delete(resolved.target)
-		if (cyclic.hit) {
+		if (abandon.hit) {
 			return node
 		}
+		budget.remaining -= 1
+		if (budget.remaining <= 0) {
+			abandon.hit = true
+			return node
+		}
+		const conjuncts: unknown[] = [inlined]
 		const rest: Record<string, unknown> = {}
 		for (const [key, value] of Object.entries(node)) {
 			if (key === "$ref") {
 				continue
 			}
-			defineOwnKey(rest, key, relocateMovedRefs(value, root, depth, memo, chain, cyclic))
+			if (key === "allOf" && Array.isArray(value)) {
+				// Existing conjuncts stay conjuncts; only the inlined target
+				// joins them, every other keyword keeps its outer position.
+				conjuncts.push(...value)
+				continue
+			}
+			if (LITERAL_VALUE_KEYWORDS.has(key)) {
+				defineOwnKey(rest, key, value)
+				continue
+			}
+			defineOwnKey(rest, key, relocateMovedRefs(value, root, depth, memo, chain, abandon, budget))
 		}
-		if (cyclic.hit) {
+		if (abandon.hit) {
 			return node
 		}
-		if (Object.keys(rest).length === 0) {
+		if (Object.keys(rest).length === 0 && conjuncts.length === 1) {
 			return inlined
 		}
-		return { allOf: [inlined, rest] }
+		const out: Record<string, unknown> = {}
+		defineOwnKey(out, "allOf", conjuncts)
+		for (const [key, value] of Object.entries(rest)) {
+			defineOwnKey(out, key, value)
+		}
+		return out
+	}
+	budget.remaining -= 1
+	if (budget.remaining <= 0) {
+		abandon.hit = true
+		return node
 	}
 	const out: Record<string, unknown> = {}
 	for (const [key, value] of Object.entries(node)) {
-		defineOwnKey(out, key, relocateMovedRefs(value, root, depth, memo, chain, cyclic))
+		if (LITERAL_VALUE_KEYWORDS.has(key)) {
+			defineOwnKey(out, key, value)
+			continue
+		}
+		defineOwnKey(out, key, relocateMovedRefs(value, root, depth, memo, chain, abandon, budget))
 	}
 	return out
 }
@@ -496,16 +559,18 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 		const patternRules: unknown[] = []
 		let relocatable = true
 		for (const rule of Object.values(removed.patternProperties)) {
-			const cyclic = { hit: false }
+			const abandon = { hit: false }
+			const budget = { remaining: MAX_RELOCATION_NODES }
 			const relocated = relocateMovedRefs(
 				compileSchemaNode(rule, depth + 1, root, memo),
 				root,
 				depth,
 				memo,
 				new Set(),
-				cyclic,
+				abandon,
+				budget,
 			)
-			if (cyclic.hit) {
+			if (abandon.hit) {
 				relocatable = false
 				break
 			}
@@ -557,7 +622,8 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 			// accepts any item. The same relocation applies to the moved
 			// rule: the compiled document loses the contains location too
 			// (issue #547 review 6089521528).
-			const cyclic = { hit: false }
+			const abandon = { hit: false }
+			const budget = { remaining: MAX_RELOCATION_NODES }
 			const relaxed = isRecord(removed.contains)
 				? relocateMovedRefs(
 						compileSchemaNode(removed.contains, depth + 1, root, memo),
@@ -565,10 +631,11 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 						depth,
 						memo,
 						new Set(),
-						cyclic,
+						abandon,
+						budget,
 					)
 				: {}
-			if (cyclic.hit) {
+			if (abandon.hit) {
 				defineOwnKey(result, "unevaluatedItems", true)
 			} else {
 				defineOwnKey(result, "unevaluatedItems", { anyOf: [result.unevaluatedItems, relaxed] })

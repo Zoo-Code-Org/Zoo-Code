@@ -42,19 +42,32 @@
 \*             (review 4719336022).
 \* Failure 15: a moved pattern rule keeps a $ref whose pointer only resolves
 \*             through the removed patternProperties location - the compiled
-\*             document has no such location left, the reference cannot
-\*             resolve, and the value the original accepted for the key
+\*             document has no such location left, and the value the original accepted for the key
 \*             breaks (review 6089521528).
+\* Failure 16: a literal-valued keyword inside a moved pattern rule carries
+\*             instance data whose "$ref"-shaped value is rewritten as a
+\*             schema - the literal changes and inputs the original
+\*             accepted break (review 4723722038).
+\* Failure 17: a moved rule references an acyclic branched graph and
+\*             relocation without a bound grows its output exponentially,
+\*             blocking the synchronous request path (review 4723722021).
+\* Failure 18: a moved reference's sibling evaluation keyword moves inside
+\*             the allOf conjunct - it no longer sees the inlined target's
+\*             annotations and rejects values the original accepted
+\*             (review 4723722028).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
 \*             SatPreserved, SiblingConjunctKept, ArraySatKept,
-\*             MovedRefResolvable.
+\*             MovedRefResolvable, LiteralPreserved, ExpansionBounded,
+\*             MovedRefSiblingOuter.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
 \* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate, KeepUnevaluated and
 \* Expect: KeepUepSchema fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept.
 \* Expect: KeepDependent fails ForbiddenAbsent. KeepContainsUneval and
 \* Expect: KeepPrefixEvaluator fail ArraySatKept. KeepMovedRef fails
-\* Expect: MovedRefResolvable.
+\* Expect: MovedRefResolvable. RewriteLiteral fails LiteralPreserved.
+\* Expect: UnboundedDiamond fails ExpansionBounded. AbsorbRefSibling fails
+\* Expect: MovedRefSiblingOuter.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -66,7 +79,9 @@
 \* 4714821172 - work is not expressible in this model's source-to-sink
 \* abstraction, pinned by the linear-work timing test; the same holds for the
 \* reference-target memoization (review 4719419419, pinned by the
-\* repeated-reference timing test)), surrogate sanitization,
+\* repeated-reference timing test)), the relocation budget is modeled as
+\* the relaxation decision ExpansionBounded, its constant is pinned by the
+\* branched-graph regression test (review 4723722021), surrogate sanitization,
 \* the strict flag plumbing, MCP name checks,
 \* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
 \* regression test for review 4712438384).
@@ -75,7 +90,9 @@
 \* KeepPattern fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded.
 \* NotTighten, KeepOneOf, KeepClosed and KeepConditional each fail
 \* SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. TLC found no state
-\* outside the sabotages.
+\* outside the sabotages. RewriteLiteral fails LiteralPreserved;
+\* UnboundedDiamond fails ExpansionBounded; AbsorbRefSibling fails
+\* MovedRefSiblingOuter.
 \* Cost: TLC runs in seconds. Agent time is not measured.
 \* Review: 3 added (4712438380, 4712438393, 4712438405), 1 gap (4712438384
 \* __proto__ own-property semantics are a JS artifact, pinned by the
@@ -94,6 +111,13 @@
 \* reference that only resolves through a removed location, the pointer is
 \* inlined with its compiled target and a self-referencing rule relaxes the
 \* retained rule instead, MovedRefResolvable), 0 covered, 0 gap.
+\* Round 9 (reviews 4723722021, 4723722028, 4723722038): 3 added (literal
+\* values under const, enum, default and examples are never rewritten,
+\* LiteralPreserved; a relocation that exceeds the expansion budget relaxes
+\* the retained closed rule instead of shipping the expanded tree,
+\* ExpansionBounded; a moved reference's sibling evaluation keywords stay on
+\* the outer schema beside the inlined allOf target,
+\* MovedRefSiblingOuter), 0 covered, 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
@@ -101,7 +125,8 @@ CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "KeepDependent", "KeepRefPredicate",
                                   \* "KeepUnevaluated", "KeepContainsUneval",
                                   \* "KeepPrefixEvaluator", "KeepUepSchema"
-                                  \* or "KeepMovedRef"
+                                  \* or "KeepMovedRef", "RewriteLiteral",
+                                  \* "UnboundedDiamond", "AbsorbRefSibling"
 
 VARIABLE in
 
@@ -126,14 +151,20 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* the closed-object rule shaped as a schema-valued unevaluatedProperties
 \* restriction that must re-admit the removed pattern rules (uepSchema2),
 \* and the pattern rule itself being only a $ref whose pointer resolves
-\* through the removed patternProperties location (movedRef2).
+\* through the removed patternProperties location (movedRef2), the moved
+\* rule carrying a literal-valued keyword with a "$ref"-shaped value
+\* (literalRef2), the moved rule referencing an acyclic branched graph that
+\* exceeds the relocation budget (budgetDiamond2), and the moved $ref
+\* carrying a sibling evaluation keyword (refSibling2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
            anyOf2 : BOOLEAN, dep2 : BOOLEAN, ref2 : BOOLEAN,
            uneval2 : BOOLEAN, containsClosed2 : BOOLEAN,
            arrEvaluator2 : BOOLEAN, partialPrefix2 : BOOLEAN,
-           uepSchema2 : BOOLEAN, movedRef2 : BOOLEAN]
+           uepSchema2 : BOOLEAN, movedRef2 : BOOLEAN,
+           literalRef2 : BOOLEAN, budgetDiamond2 : BOOLEAN,
+           refSibling2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -173,6 +204,9 @@ Decisions(i) ==
          uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
          movedRefInlined |-> i.closed2 /\ i.uepSchema2 /\ i.movedRef2,
+         literalKept |-> TRUE,
+         diamondRelaxed |-> i.budgetDiamond2,
+         siblingOnOuter |-> TRUE,
          siblingKept |-> TRUE,
          uiRelaxed |-> i.containsClosed2 /\ (~i.arrEvaluator2 \/ i.partialPrefix2)]
     IN CASE Variant = "ForceRequired" ->
@@ -210,6 +244,12 @@ Decisions(i) ==
         [fixed EXCEPT !["uepSchemaKept"] = FALSE]
     [] Variant = "KeepMovedRef" ->
         [fixed EXCEPT !["movedRefInlined"] = FALSE]
+    [] Variant = "RewriteLiteral" ->
+        [fixed EXCEPT !["literalKept"] = FALSE]
+    [] Variant = "UnboundedDiamond" ->
+        [fixed EXCEPT !["diamondRelaxed"] = FALSE]
+    [] Variant = "AbsorbRefSibling" ->
+        [fixed EXCEPT !["siblingOnOuter"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -225,6 +265,9 @@ TypeOK ==
     /\ Decisions(in).siblingKept \in BOOLEAN
     /\ Decisions(in).uiRelaxed \in BOOLEAN
     /\ Decisions(in).movedRefInlined \in BOOLEAN
+    /\ Decisions(in).literalKept \in BOOLEAN
+    /\ Decisions(in).diamondRelaxed \in BOOLEAN
+    /\ Decisions(in).siblingOnOuter \in BOOLEAN
 
 Init == in \in Inputs
 Next == UNCHANGED in
@@ -303,5 +346,30 @@ ArraySatKept ==
 \* no moved position at all.
 MovedRefResolvable ==
     (in.movedRef2 /\ in.closed2 /\ in.uepSchema2) => Decisions(in).movedRefInlined
+
+\* Safety (review 4723722038): a literal-valued keyword inside a moved rule
+\* (const, enum, default, examples) carries instance data - a "$ref"-shaped
+\* value there is data the caller asserts against, never a schema reference,
+\* and relocation must leave it verbatim. The observable scenario is the
+\* moved-rule re-admission shape (closed2 with the uepSchema2 rule), where
+\* the rule re-enters the compiled document.
+LiteralPreserved ==
+    (in.literalRef2 /\ in.closed2 /\ in.uepSchema2) => Decisions(in).literalKept
+
+\* Safety (review 4723722021): a moved rule may reference an acyclic branched
+\* graph whose relocation output grows exponentially; past the expansion
+\* budget the relocation abandons and the retained closed rule relaxes
+\* instead of shipping the expanded tree.
+ExpansionBounded ==
+    (in.budgetDiamond2 /\ in.closed2 /\ in.uepSchema2) => Decisions(in).diamondRelaxed
+
+\* Safety (review 4723722028): a moved reference's sibling evaluation keyword
+\* stays on the outer schema beside the inlined target's allOf - Draft
+\* 2020-12 collects evaluation annotations from adjacent keywords and the
+\* schemas one object applies in place, and a sibling allOf branch is not
+\* one of those, so a sibling moved inside the conjunct would lose the
+\* target's annotations and reject values the original accepted.
+MovedRefSiblingOuter ==
+    (in.movedRef2 /\ in.closed2 /\ in.uepSchema2 /\ in.refSibling2) => Decisions(in).siblingOnOuter
 
 ====
