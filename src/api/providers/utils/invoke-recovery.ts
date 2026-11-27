@@ -559,7 +559,7 @@ export class InvokeRecoveryScanner {
 		while (width < body.length && body[width] === fence.char) {
 			width += 1
 		}
-		if (run.column - base <= 3 && width >= fence.width && /^\s*$/.test(body.slice(width))) {
+		if (run.column - base <= 3 && width >= fence.width && /^[ \t]*\r?$/.test(body.slice(width))) {
 			this.fence = null
 		}
 	}

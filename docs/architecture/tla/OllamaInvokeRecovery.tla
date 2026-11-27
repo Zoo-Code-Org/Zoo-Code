@@ -42,7 +42,7 @@
 \* property test covers it), the parameter schema typing, TagMatcher
 \* reasoning tags, abort paths, and token costs.
 \* Cost: each cfg checks in a few seconds on one TLC worker.
-\* Result: OllamaInvokeRecovery.cfg (Fixed) pass in 81 states. HoldAll fails
+\* Result: OllamaInvokeRecovery.cfg (Fixed) pass in 89 states. HoldAll fails
 \* LiveStream. Unfixed fails NoLostCall and NoBlockTextLeak. NoGuard fails
 \* NoPhantomCall and LiveStream (TLC reports LiveStream first). NoSuppress
 \* fails NoBlockTextLeak. NoFinishFlush fails NoLostText. EarlyEmit fails
@@ -114,6 +114,16 @@
 \* example text. Gap: the two line-level rules, pinned by scanner
 \* unit tests (>\t~~~ opens the quoted fence; the ~~~ line that ends
 \* a quoted fence re-opens a top-level fence over the call below).
+\* Review round on 7d6bb8ac3: the closing-fence suffix rule (only
+\* spaces and tabs after the closer run, a terminal CR of a CRLF pair
+\* stays allowed) sits below the token abstraction like the other
+\* container rules - the closer line is one T_FENCE token with no
+\* byte structure, and Quoted stays the run oracle. Covered: the
+\* fence run's Quoted oracle already keeps a quoted example text.
+\* Added: no new invariant (below the token abstraction). Gap: the
+\* line-level rule, pinned by scanner unit tests (a closer line whose
+\* suffix holds U+00A0 stays fence content; trailing spaces, a
+\* trailing tab, and a bare CRLF line end still close).
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode

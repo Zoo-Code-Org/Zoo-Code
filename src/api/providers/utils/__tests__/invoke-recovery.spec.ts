@@ -426,6 +426,31 @@ ${bareWeatherCall("Rome")}`,
 		expect(text(events)).toBe(fixture)
 	})
 
+	it("keeps a closer line whose suffix has a non-breaking space as fence content", () => {
+		// CommonMark allows only spaces and tabs after a closing fence
+		// run. A U+00A0 behind the run is content, so the fence stays
+		// open: the call below stays quoted text and recovers nothing.
+		const fixture = `>\t~~~\n> ~~~\u00a0\n> ${bareWeatherCall("Rome")}\n> ~~~`
+		const events = scanChunked(fixture, [6, 30, 30])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it.each([
+		["trailing spaces", "~~~ \r\n"],
+		["a trailing tab", "~~~\t\r\n"],
+		["a bare CRLF line end", "~~~\r\n"],
+	])("closes a quoted fence on a CRLF closer with %s behind the run", (_label, closerBody) => {
+		// feedContext splits lines on LF and leaves the CR of a CRLF
+		// pair on the line, so a closer's suffix can end in CR. Spaces
+		// and a CR stay allowed after the run; only the three closers
+		// end the fence and the call below recovers.
+		const fixture = `> ~~~\r\n> example\r\n> ${closerBody}\r\n\r\n${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [6, 30, 30])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe(`> ~~~\r\n> example\r\n> ${closerBody}\r\n\r\n`)
+	})
+
 	it("opens a quoted fence whose opener pads the marker with a tab", () => {
 		// CommonMark consumes one column of a tab as the quote marker's
 		// optional padding: the fence after `>\t` sits three residual
