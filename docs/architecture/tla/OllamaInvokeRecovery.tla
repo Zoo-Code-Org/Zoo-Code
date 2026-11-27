@@ -90,6 +90,18 @@
 \* unit tests (a >\t ~~~ closer closes three columns deep, the
 \* re-opened fence requotes the example, and the span-width and
 \* nested-depth negatives stay text).
+\* Review round 7 (on 50fcc34e9): the quote-level indent rule (a
+\* strip tab's residual columns count toward the next level's
+\* three-column marker limit; past that limit the level and the
+\* fence it held end) sits below the token abstraction like the
+\* other container rules - Tokens sees a fence line as one T_FENCE
+\* token with no byte or column structure. Quoted stays the run
+\* oracle. Covered: the fence run's Quoted oracle already keeps a
+\* quoted example text. Added: no new invariant (below the token
+\* abstraction). Gap: the line-level rule, pinned by scanner unit
+\* tests (a second marker four columns in through a tab residual
+\* plus two spaces ends the quoted fence and the call below
+\* recovers; three columns in stays quoted).
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode

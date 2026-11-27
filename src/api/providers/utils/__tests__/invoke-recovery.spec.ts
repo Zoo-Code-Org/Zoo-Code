@@ -76,6 +76,13 @@ describe("InvokeRecoveryScanner", () => {
 		`~~~\n> ~~~\n${bareWeatherCall("Rome")}\n~~~`,
 		`> ~~~\n> example\n\n${bareWeatherCall("Rome")}`,
 		`> ~~~\n>\t ~~~\n> ~~~\n> ${bareWeatherCall("Rome")}\n> ~~~`,
+		`> > ~~~
+>\t  > example
+${bareWeatherCall("Rome")}`,
+		`> > ~~~
+>\t > example
+> > ${bareWeatherCall("Rome")}
+> > ~~~`,
 		`- ~~~\n  ${bareWeatherCall("Rome")}\n  ~~~\nafter`,
 	]
 	const normalize = (events: RecoveryEvent[]) => ({
@@ -296,6 +303,31 @@ describe("InvokeRecoveryScanner", () => {
 		const events = scanChunked(fixture, [8, 40, 10])
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(fixture)
+	})
+
+	it.each([
+		[
+			"four columns in ends the quoted fence",
+			`> > ~~~\n>\t  > example\n${bareWeatherCall("Rome")}`,
+			[{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }],
+			`> > ~~~\n>\t  > example\n`,
+		],
+		[
+			"three columns in keeps the quoted fence",
+			`> > ~~~\n>\t > example\n> > ${bareWeatherCall("Rome")}\n> > ~~~`,
+			[],
+			`> > ~~~\n>\t > example\n> > ${bareWeatherCall("Rome")}\n> > ~~~`,
+		],
+	])("counts residual tab columns at the next quote level: %s", (_label, fixture, expectedCalls, expectedText) => {
+		// CommonMark limits a quote marker to three columns inside the
+		// enclosing content region. A tab partly consumed as the outer
+		// marker's padding leaves residual columns there: with two more
+		// spaces the second marker sits four columns in, so the inner
+		// quote ends, its fence ends, and the call below is live again;
+		// with one space it sits three in and stays quoted.
+		const events = scanChunked(fixture, [8, 40, 10])
+		expect(calls(events)).toStrictEqual(expectedCalls)
+		expect(text(events)).toBe(expectedText)
 	})
 
 	it("keeps a quote-prefixed line inside a top-level fence as fence content", () => {

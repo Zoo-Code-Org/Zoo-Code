@@ -182,6 +182,14 @@ function containerStrip(
 				if (match === null) {
 					return null
 				}
+				// CommonMark: a quote marker carries at most three columns
+				// of indentation inside the enclosing content region. The
+				// residual columns of a tab partly consumed at the previous
+				// level count toward that limit even though the match only
+				// sees the literal spaces behind them.
+				if (column + match[0].indexOf(">") - base > 3) {
+					return null
+				}
 				stripped += match[0].length
 				column += match[0].length
 				base = column
