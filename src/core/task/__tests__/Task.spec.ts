@@ -490,7 +490,7 @@ describe("Cline", () => {
 	}
 
 	describe("empty-response retries", () => {
-		it("restores the user message before a confirmed empty-response retry", async () => {
+		it("keeps the saved user message before a confirmed empty-response retry", async () => {
 			const task = await createTaskWithManualRetries()
 			let retryHistory: ApiMessage[] | undefined
 			let retryUserMessageCount: number | undefined
@@ -526,7 +526,7 @@ describe("Cline", () => {
 			expect(retryUserMessageCount).toBe(1)
 		})
 
-		it("restores the user message and records the failure when retry is declined", async () => {
+		it("keeps the saved user message and records the failure when retry is declined", async () => {
 			const task = await createTaskWithManualRetries()
 
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
@@ -535,8 +535,15 @@ describe("Cline", () => {
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(result).toBe(false)
+			// The decline keeps the saved user turn before the failure record (issue #2691).
 			expect(task.apiConversationHistory).toMatchObject([
-				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "original user request" },
+						{ type: "text", text: "" },
+					],
+				},
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })

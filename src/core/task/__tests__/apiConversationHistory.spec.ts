@@ -14,6 +14,23 @@ describe("prepareApiConversationMessage", () => {
 		vi.useRealTimers()
 	})
 
+	it("creates a fresh identity for each user turn", () => {
+		const api = {
+			createMessage: vi.fn<ApiHandler["createMessage"]>(),
+			getModel: vi.fn<ApiHandler["getModel"]>(),
+			countTokens: vi.fn<ApiHandler["countTokens"]>(),
+			getModelCacheScope: vi.fn<ApiHandler["getModelCacheScope"]>(),
+		}
+		const options = { api, apiConfiguration: {}, apiConversationHistory: [] }
+		const first = prepareApiConversationMessage({ ...options, message: { role: "user", content: "first" } })
+		const second = prepareApiConversationMessage({ ...options, message: { role: "user", content: "second" } })
+		expect(first.ts).toBe(Date.now())
+		expect(second.ts).toBe(Date.now())
+		expect(first.messageId).toMatch(/^[0-9a-f-]{36}$/)
+		expect(second.messageId).toMatch(/^[0-9a-f-]{36}$/)
+		expect(second.messageId).not.toBe(first.messageId)
+	})
+
 	it("prepends Anthropic thinking blocks with thought signatures", () => {
 		const result = prepareApiConversationMessage({
 			message: { role: "assistant", content: "answer" },

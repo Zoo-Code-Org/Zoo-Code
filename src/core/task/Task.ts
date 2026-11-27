@@ -4012,7 +4012,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			pendingContent?: Promise<Anthropic.Messages.ContentBlockParam[]> // Resolved after the request row shows
 			includeFileDetails: boolean
 			retryAttempt?: number
-			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
 		}
 
 		const stack: StackItem[] = [
@@ -4118,12 +4117,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Add environment details as its own text block, separate from tool
 			// results.
 			const finalUserContent = [...contentWithoutEnvDetails, { type: "text" as const, text: environmentDetails }]
-			// See shouldAddUserMessageToHistory for the full add/skip rules (retry/empty/removed).
+			// Retries reuse the saved turn. Empty content can resume a turn already in history.
 			const isEmptyUserContent = currentUserContent.length === 0
 			const shouldAddUserMessage = shouldAddUserMessageToHistory({
 				retryAttempt: currentItem.retryAttempt,
 				isEmptyUserContent,
-				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
@@ -5258,27 +5256,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await this.say("error", "MODEL_NO_ASSISTANT_MESSAGES")
 					}
 
-					// IMPORTANT: We already added the user message to
-					// apiConversationHistory at line 1876. Since the assistant failed to respond,
-					// we need to remove that message before retrying to avoid having two consecutive
-					// user messages (which would cause tool_result validation errors).
 					const state = await this.providerRef.deref()?.getState()
-					// Only pop the user message that this iteration added. When
-					// shouldAddUserMessage is false (empty continuation, resumed history,
-					// or flushPendingToolResultsToHistory message) there is nothing to
-					// remove, and popping would corrupt history.
-					let removedCurrentUserMessage = false
-					if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
-						const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
-						if (lastMessage.role === "user") {
-							this.apiConversationHistory.pop()
-							this.messageCounts.user--
-							removedCurrentUserMessage = true
-						}
-					}
-
-					// Check if we should auto-retry or prompt the user
-					// Reuse the state variable from above
+					// Keep the saved user turn in place for retry, decline, or cancellation.
+					// Wait for the automatic retry or ask the user for a retry decision.
 					if (state?.autoApprovalEnabled) {
 						// Auto-retry with backoff - don't persist failure message when retrying
 						await this.backoffAndAnnounce(
@@ -5295,19 +5275,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							)
 							break
 						}
-
-						// Push the same content back onto the stack to retry, incrementing the retry attempt counter.
-						// Only mark userMessageWasRemoved when we actually removed one -- the
-						// restore branch in shouldAddUserMessageToHistory must only fire once.
-						stack.push({
-							userContent: currentUserContent,
-							includeFileDetails: false,
-							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							userMessageWasRemoved: removedCurrentUserMessage,
-						})
-
-						// Continue to retry the request
-						continue
 					} else {
 						// Prompt the user for retry decision
 						const { response } = await this.ask(
@@ -5317,29 +5284,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
-
-							// Push the same content back to retry. Only mark userMessageWasRemoved
-							// when we actually removed one so the restore fires exactly once.
-							stack.push({
-								userContent: currentUserContent,
-								includeFileDetails: false,
-								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-								userMessageWasRemoved: removedCurrentUserMessage,
-							})
-
-							// Continue to retry the request
-							continue
 						} else {
-							// User declined to retry. Re-add the user message only if this
-							// iteration removed one, so the history and counter stay consistent.
-							if (removedCurrentUserMessage) {
-								await this.addToApiConversationHistory({
-									role: "user",
-									content: currentUserContent,
-								})
-								this.messageCounts.user++
-							}
-
 							await this.say(
 								"error",
 								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
@@ -5353,8 +5298,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								content: [{ type: "text", text: "Failure: I did not provide a response." }],
 							})
 							this.messageCounts.assistant++
+							return false
 						}
 					}
+
+					// Retry the request without adding the saved user turn again.
+					stack.push({
+						userContent: currentUserContent,
+						includeFileDetails: false,
+						retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+					})
+					continue
 				}
 
 				// If we reach here without continuing, return false (will always be false for now)

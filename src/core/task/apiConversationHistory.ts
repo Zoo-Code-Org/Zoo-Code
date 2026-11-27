@@ -139,7 +139,11 @@ function prepareUserMessage(message: Anthropic.MessageParam, apiConversationHist
 	}
 
 	const validatedMessage = validateAndFixToolResultIds(messageToAdd, historyForValidation)
-	return { ...validatedMessage, messageId: crypto.randomUUID(), ts: Date.now() }
+	return {
+		...validatedMessage,
+		messageId: crypto.randomUUID(),
+		ts: Date.now(),
+	}
 }
 
 function prependContentBlock(message: any, block: any): void {
