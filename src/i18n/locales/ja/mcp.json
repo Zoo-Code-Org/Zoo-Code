@@ -38,6 +38,7 @@
 			"authenticateButton": "認証する",
 			"cancelled": "OAuth認証がキャンセルされました",
 			"timedOut": "OAuth認証がタイムアウトしました",
+			"retriesExhausted": "\"{{name}}\"のOAuthサインインは繰り返し失敗しました。サーバーに再接続して再度サインインしてください。",
 			"connected": "OAuth認証後、MCPサーバー \"{{name}}\" が正常に接続されました。"
 		}
 	}

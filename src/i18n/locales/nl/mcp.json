@@ -39,6 +39,7 @@
 			"authenticateButton": "Authenticeren",
 			"cancelled": "OAuth-authenticatie is geannuleerd",
 			"timedOut": "OAuth-authenticatie is verlopen",
+			"retriesExhausted": "OAuth-aanmelding voor \"{{name}}\" is na herhaalde pogingen mislukt. Verbind de server opnieuw om opnieuw aan te melden.",
 			"connected": "MCP-server \"{{name}}\" is succesvol verbonden na OAuth-authenticatie."
 		}
 	}

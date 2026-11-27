@@ -343,6 +343,11 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		// Reuse the cached registration only for the issuer that created it. Otherwise
 		// the stored client_secret would go to an authorization server the MCP server chose.
 		if (cachedData?.client_info && cachedData.issuer === this._authServerMeta?.issuer) {
+			// The SDK can start an authorization for a cached client without going
+			// through DCR, so start the listener here too. redirectUrl then carries
+			// the active port instead of 0, and redirectToAuthorization() keeps the
+			// authorization URL's redirect_uri in sync with that port.
+			await this._ensureCallbackServer()
 			// Use the full DCR response, override redirect_uris with the
 			// current port (which may have changed between sessions).
 			this._clientInfo = {
@@ -452,6 +457,13 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		// to our caller).  We do NOT open the browser here — that is deferred to
 		// openBrowser(), which McpHub calls only after the user confirms the toast.
 		await this._ensureCallbackServer()
+
+		// The SDK built this URL before the listener started, so it can carry
+		// port 0 (a cached client returns early from registerClientIfNeeded()
+		// and never starts the listener there). Override redirect_uri now that
+		// the listener owns its final port. This covers the first connect and
+		// a later 401.
+		authorizationUrl.searchParams.set("redirect_uri", this.redirectUrl)
 
 		// Workaround for SDK metadata discovery bug (see utils/oauth.ts for issue links).
 		// The SDK's discoverOAuthMetadata() builds a wrong well-known URL for issuers

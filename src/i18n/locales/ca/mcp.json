@@ -40,6 +40,7 @@
 			"authenticateButton": "Autenticar",
 			"cancelled": "L'autenticació OAuth ha estat cancel·lada",
 			"timedOut": "L'autenticació OAuth ha expirat",
+			"retriesExhausted": "L'inici de sessió OAuth per \"{{name}}\" ha fallat després de diversos intents. Torna a connectar el servidor per iniciar la sessió de nou.",
 			"connected": "El servidor MCP \"{{name}}\" s'ha connectat correctament després de l'autenticació OAuth."
 		}
 	}

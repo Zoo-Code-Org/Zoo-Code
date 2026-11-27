@@ -39,6 +39,7 @@
 			"authenticateButton": "Authenticate",
 			"cancelled": "OAuth authentication was cancelled",
 			"timedOut": "OAuth authentication timed out",
+			"retriesExhausted": "OAuth sign-in for \"{{name}}\" failed after repeated retries. Reconnect the server to sign in again.",
 			"connected": "MCP server \"{{name}}\" connected successfully after OAuth authentication."
 		}
 	}

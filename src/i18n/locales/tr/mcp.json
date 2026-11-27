@@ -39,6 +39,7 @@
 			"authenticateButton": "Kimlik Doğrula",
 			"cancelled": "OAuth kimlik doğrulaması iptal edildi",
 			"timedOut": "OAuth kimlik doğrulaması zaman aşımına uğradı",
+			"retriesExhausted": "\"{{name}}\" için OAuth oturum açma işlemi tekrarlanan denemelerden sonra başarısız oldu. Tekrar oturum açmak için sunucuya yeniden bağlanın.",
 			"connected": "MCP sunucusu \"{{name}}\" OAuth kimlik doğrulamasından sonra başarıyla bağlandı."
 		}
 	}

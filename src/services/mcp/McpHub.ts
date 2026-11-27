@@ -37,7 +37,13 @@ import { GlobalFileNames } from "../../shared/globalFileNames"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 
 import { fileExistsAtPath } from "../../utils/fs"
-import { TOKEN_EXPIRY_BUFFER_MS, OAUTH_FLOW_TIMEOUT_MS } from "./constants"
+import {
+	OAUTH_FLOW_TIMEOUT_MS,
+	OAUTH_TOKEN_RETRY_BASE_DELAY_MS,
+	OAUTH_TOKEN_RETRY_MAX_ATTEMPTS,
+	OAUTH_TOKEN_RETRY_MAX_DELAY_MS,
+	TOKEN_EXPIRY_BUFFER_MS,
+} from "./constants"
 import { SecretStorageService } from "./SecretStorageService"
 import { McpOAuthClientProvider } from "./McpOAuthClientProvider"
 import { arePathsEqual, getWorkspacePath } from "../../utils/path"
@@ -63,6 +69,17 @@ export type DisconnectedMcpConnection = {
 }
 
 export type McpConnection = ConnectedMcpConnection | DisconnectedMcpConnection
+
+/**
+ * A registered OAuth flow watcher: the cross-window token subscription, its
+ * flow timeout, and the shared removal path that also ends the flow.
+ */
+interface McpOAuthWatcher {
+	unsubscribe: () => void
+	abortHandle: NodeJS.Timeout
+	/** Ends the flow this watcher belongs to. Idempotent; never removes another flow's entry. */
+	endFlow: () => void
+}
 
 // Enum for disable reasons
 export enum DisableReason {
@@ -201,8 +218,10 @@ export class McpHub {
 	private sanitizedNameRegistry: Map<string, string> = new Map()
 	private initializationPromise: Promise<void>
 	private secretStorage?: SecretStorageService
-	private reauthPromises: Map<string, Promise<void>> = new Map()
-	private _oauthWatchers: Map<string, { unsubscribe: () => void; abortHandle: NodeJS.Timeout }> = new Map()
+	private reauthPromises: Map<ConnectedMcpConnection, Promise<void>> = new Map()
+	private _oauthWatchers: Map<string, McpOAuthWatcher> = new Map()
+	/** Tracks automatic reconnects that reuse a saved token the server rejected, per server URL. */
+	private oauthTokenRetries: Map<string, { tokenKey: string | undefined; count: number }> = new Map()
 
 	constructor(provider: ClineProvider, secretStorage?: SecretStorageService) {
 		this.providerRef = new WeakRef(provider)
@@ -904,7 +923,10 @@ export class McpHub {
 							// Mid-session re-auth triggered by a tool call (401)
 							connection.server.status = "connecting"
 
-							const reauthKey = `${name}:${source}`
+							// Key the re-auth flow by the connection itself, not the server
+							// name. A key shared across connections lets an old flow swallow
+							// the 401 of a newer connection and leave it connecting forever.
+							const reauthKey = connection
 							let reauthPromise = this.reauthPromises.get(reauthKey)
 							if (!reauthPromise) {
 								reauthPromise = this._initiateOAuthFlow(
@@ -1071,10 +1093,21 @@ export class McpHub {
 			connection.server.error = ""
 			connection.server.instructions = client.getInstructions()
 
+			// A successful connect also resets the rejected-token retry bound.
+			if (configInjected.type === "streamable-http" && configInjected.url) {
+				this.oauthTokenRetries.delete(configInjected.url)
+			}
+
+			// The list requests below can each take up to the request timeout. Update
+			// the panel now so the server shows connected immediately, then update it
+			// again when the tool, resource, and template lists arrive.
+			await this.notifyWebviewOfServerChanges()
+
 			// Initial fetch of tools and resources
 			connection.server.tools = await this.fetchToolsList(name, source)
 			connection.server.resources = await this.fetchResourcesList(name, source)
 			connection.server.resourceTemplates = await this.fetchResourceTemplatesList(name, source)
+			await this.notifyWebviewOfServerChanges()
 		} catch (error) {
 			await pendingAuthProvider?.close()
 			// Update status with error
@@ -1147,10 +1180,31 @@ export class McpHub {
 		unsubscribeCrossWindow()
 
 		if (!this.isDisposed && tokenToUse && Date.now() < tokenToUse.expires_at - TOKEN_EXPIRY_BUFFER_MS) {
+			// The server just rejected this saved token. Reconnect after a delay, a
+			// bounded number of times. Without the bound, an always-rejecting server
+			// turns this path into an unlimited reconnect loop.
+			const tokenKey = tokenToUse.tokens?.access_token
+			const retryState = this.oauthTokenRetries.get(serverUrl)
+			const attempt = retryState && retryState.tokenKey === tokenKey ? retryState.count + 1 : 1
+			if (attempt > OAUTH_TOKEN_RETRY_MAX_ATTEMPTS) {
+				// A new token resets the count; the same rejected token does not get
+				// another automatic retry. End with a visible error instead.
+				this.oauthTokenRetries.delete(serverUrl)
+				await this._surfaceOAuthReconnectFailure(name, source, t("mcp:oauth.flow.retriesExhausted", { name }))
+				return
+			}
+			this.oauthTokenRetries.set(serverUrl, { tokenKey, count: attempt })
+			await delay(Math.min(OAUTH_TOKEN_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), OAUTH_TOKEN_RETRY_MAX_DELAY_MS))
 			await authProvider.close()
 			await this.deleteConnection(name, source)
-			await this.connectToServer(name, config, source)
-			await this.notifyWebviewOfServerChanges()
+			try {
+				await this.connectToServer(name, config, source)
+				await this.notifyWebviewOfServerChanges()
+			} catch (error) {
+				// A reconnect that throws must not propagate out of this detached flow:
+				// connectToServer already surfaced the error on the server status.
+				console.error(`[McpHub] OAuth reconnect failed for "${name}":`, error)
+			}
 			return
 		}
 
@@ -1178,6 +1232,24 @@ export class McpHub {
 		)
 	}
 
+	/**
+	 * Ends a reconnect episode with a visible error: the server status becomes
+	 * disconnected and the message is recorded, so the panel shows why the
+	 * sign-in did not finish.
+	 */
+	private async _surfaceOAuthReconnectFailure(
+		name: string,
+		source: "global" | "project",
+		message: string,
+	): Promise<void> {
+		const conn = this.findConnection(name, source)
+		if (conn && conn.server.status !== "connected") {
+			conn.server.status = "disconnected"
+			this.appendErrorMessage(conn, message)
+			await this.notifyWebviewOfServerChanges()
+		}
+	}
+
 	private _runOAuthFlow(
 		name: string,
 		source: "global" | "project",
@@ -1192,16 +1264,18 @@ export class McpHub {
 	): Promise<void> {
 		const watcherKey = `${name}:${source}`
 
-		// Cancel any existing watcher for this connection before starting a new one
-		const existing = this._oauthWatchers.get(watcherKey)
-		if (existing) {
-			existing.unsubscribe()
-			clearTimeout(existing.abortHandle)
-			this._oauthWatchers.delete(watcherKey)
-		}
+		// Cancel any existing watcher for this connection before starting a new one.
+		// The shared removal path also ends the replaced flow, so it cannot stay
+		// pending after its watcher is gone.
+		this._endOAuthWatcher(watcherKey)
 
 		return new Promise<void>((resolve) => {
 			let disposed = false
+			// A const holder keeps the TDZ safety: the cancellation callback can fire
+			// synchronously during registration, before the assignment completes. It
+			// then reads undefined and cleanup() runs without a disposable, which is
+			// correct.
+			const cancellation = { disposable: undefined as vscode.Disposable | undefined }
 
 			const cleanup = (disposable?: vscode.Disposable) => {
 				if (disposed) return
@@ -1209,7 +1283,10 @@ export class McpHub {
 				clearTimeout(timeoutHandle)
 				unsubscribe()
 				disposable?.dispose()
-				this._oauthWatchers.delete(watcherKey)
+				// An ended flow must not remove a newer flow's watcher for this key.
+				if (this._oauthWatchers.get(watcherKey) === watcher) {
+					this._oauthWatchers.delete(watcherKey)
+				}
 			}
 
 			// --- Cross-window token watcher ---
@@ -1219,7 +1296,7 @@ export class McpHub {
 				// from another window fired after _completeOAuthFlow already succeeded).
 				const conn = this.findConnection(name, source)
 				if (!conn || conn.server.status === "connected") {
-					cleanup(cancellationDisposable)
+					cleanup(cancellation.disposable)
 					return
 				}
 				try {
@@ -1228,7 +1305,7 @@ export class McpHub {
 					// fired while getOAuthData was in flight.
 					if (disposed || this.isDisposed) return
 					if (data && Date.now() < data.expires_at - TOKEN_EXPIRY_BUFFER_MS) {
-						cleanup(cancellationDisposable)
+						cleanup(cancellation.disposable)
 						await authProvider.close()
 						await this.deleteConnection(name, source)
 						const validatedConfig = this.validateServerConfig(config, name)
@@ -1237,7 +1314,18 @@ export class McpHub {
 						resolve()
 					}
 				} catch (err) {
+					// A reconnect that throws must not leave this flow pending: end the
+					// flow and surface the error on the server status.
 					console.error(`[McpHub] OAuth token watcher failed for "${name}":`, err)
+					cleanup(cancellation.disposable)
+					void authProvider.close()
+					const conn = this.findConnection(name, source)
+					if (conn && conn.server.status !== "connected") {
+						conn.server.status = "disconnected"
+						this.appendErrorMessage(conn, err instanceof Error ? err.message : `${err}`)
+						void this.notifyWebviewOfServerChanges()
+					}
+					resolve()
 				}
 			}
 
@@ -1252,7 +1340,7 @@ export class McpHub {
 			// --- Timeout ---
 			const timeoutHandle = setTimeout(() => {
 				if (disposed) return
-				cleanup(cancellationDisposable)
+				cleanup(cancellation.disposable)
 				void authProvider.close()
 				const conn = this.findConnection(name, source)
 				if (conn && conn.server.status === "connecting") {
@@ -1269,18 +1357,29 @@ export class McpHub {
 			// synchronously inside onCancellationRequested(...), and cleanup() must find
 			// the watcher entry in the map in order to delete it. Registering after the
 			// callback would leave an orphan entry that survives disposal.
-			this._oauthWatchers.set(watcherKey, { unsubscribe, abortHandle: timeoutHandle })
+			const watcher: McpOAuthWatcher = {
+				unsubscribe,
+				abortHandle: timeoutHandle,
+				// Shared removal path: an external removal (deleteConnection, flow
+				// replacement, dispose) ends this flow instead of leaving it pending.
+				endFlow: () => {
+					if (disposed) return
+					cleanup(cancellation.disposable)
+					resolve()
+				},
+			}
+			this._oauthWatchers.set(watcherKey, watcher)
 
 			// --- Cancellation (progress bar's Cancel button) ---
-			const cancellationDisposable = cancellationToken.onCancellationRequested(() => {
+			cancellation.disposable = cancellationToken.onCancellationRequested(() => {
 				if (disposed) return
-				// Don't pass cancellationDisposable here: if the token was already
+				// Don't pass cancellation.disposable here: if the token was already
 				// cancelled at registration time, VS Code fires this callback
 				// synchronously inside onCancellationRequested(...) — before the
-				// `const cancellationDisposable = ...` assignment completes, so the
-				// binding is still in the TDZ. VS Code also disposes its own
-				// listener once the token transitions to cancelled, so explicit
-				// disposal from inside the callback would be redundant anyway.
+				// assignment completes, so the holder still holds undefined. VS Code
+				// also disposes its own listener once the token transitions to
+				// cancelled, so explicit disposal from inside the callback would be
+				// redundant anyway.
 				cleanup()
 				void authProvider.close()
 				const conn = this.findConnection(name, source)
@@ -1295,7 +1394,7 @@ export class McpHub {
 			// In test mode, skip user interaction and proceed directly to complete the OAuth flow.
 			if (process.env.MCP_OAUTH_TEST_MODE === "true") {
 				void (async () => {
-					cleanup(cancellationDisposable)
+					cleanup(cancellation.disposable)
 					try {
 						await this._completeOAuthFlow(
 							authProvider,
@@ -1333,12 +1432,24 @@ export class McpHub {
 				const tokens = await this.secretStorage!.getOAuthData(serverUrl, oauthClientId)
 				if (disposed) return
 				if (tokens && Date.now() < tokens.expires_at - TOKEN_EXPIRY_BUFFER_MS) {
-					cleanup(cancellationDisposable)
-					await authProvider.close()
-					await this.deleteConnection(name, source)
-					const validatedFastPathConfig = this.validateServerConfig(config, name)
-					await this.connectToServer(name, validatedFastPathConfig, source)
-					await this.notifyWebviewOfServerChanges()
+					cleanup(cancellation.disposable)
+					try {
+						await authProvider.close()
+						await this.deleteConnection(name, source)
+						const validatedFastPathConfig = this.validateServerConfig(config, name)
+						await this.connectToServer(name, validatedFastPathConfig, source)
+						await this.notifyWebviewOfServerChanges()
+					} catch (error) {
+						// A reconnect that throws must not leave this flow pending: end the
+						// flow and surface the error on the server status.
+						await authProvider.close().catch(() => {})
+						const conn = this.findConnection(name, source)
+						if (conn && conn.server.status !== "connected") {
+							conn.server.status = "disconnected"
+							this.appendErrorMessage(conn, error instanceof Error ? error.message : `${error}`)
+							void this.notifyWebviewOfServerChanges()
+						}
+					}
 					resolve()
 					return
 				}
@@ -1346,7 +1457,7 @@ export class McpHub {
 				// Clean up before exchanging tokens — this sets disposed=true so the
 				// cross-window token watcher doesn't race to reconnect when SecretStorage
 				// fires onDidChange during token exchange inside _completeOAuthFlow.
-				cleanup(cancellationDisposable)
+				cleanup(cancellation.disposable)
 				try {
 					await this._completeOAuthFlow(authProvider, transport, connection, name, source, cancellationToken)
 				} catch {
@@ -1595,15 +1706,29 @@ export class McpHub {
 		}
 	}
 
-	async deleteConnection(name: string, source?: "global" | "project"): Promise<void> {
-		// Cancel any active OAuth token watchers for this connection
-		const watcherKey = `${name}:${source}`
+	/**
+	 * Shared removal path for an OAuth watcher: ends the flow the watcher
+	 * belongs to. deleteConnection(), flow replacement in _runOAuthFlow(), and
+	 * dispose() must all go through this so a removed watcher never leaves its
+	 * flow pending. The flow's own cleanup unsubscribes and clears the timeout,
+	 * so each listener still runs exactly once.
+	 *
+	 * @returns true when a watcher was registered under this key.
+	 */
+	private _endOAuthWatcher(watcherKey: string): boolean {
 		const watcher = this._oauthWatchers.get(watcherKey)
-		if (watcher) {
-			watcher.unsubscribe()
-			clearTimeout(watcher.abortHandle)
-			this._oauthWatchers.delete(watcherKey)
-		}
+		if (!watcher) return false
+		// Remove first so the ended flow's cleanup cannot see this entry again,
+		// and so it can never remove a newer flow's watcher under this key.
+		this._oauthWatchers.delete(watcherKey)
+		watcher.endFlow()
+		return true
+	}
+
+	async deleteConnection(name: string, source?: "global" | "project"): Promise<void> {
+		// Cancel any active OAuth flow for this connection. The shared path also
+		// ends the flow, so tool calls waiting on it are released immediately.
+		this._endOAuthWatcher(`${name}:${source}`)
 
 		// Clean up file watchers for this server
 		this.removeFileWatchersForServer(name)
@@ -2302,7 +2427,10 @@ export class McpHub {
 				// Mid-session re-auth triggered by a tool call (401)
 				connection.server.status = "connecting"
 
-				const reauthKey = `${serverName}:${source || connection.server.source || "global"}`
+				// Key the re-auth flow by the connection itself, not the server name.
+				// A key shared across connections lets an old flow swallow the 401 of a
+				// newer connection, and a tool call would wait on the wrong flow.
+				const reauthKey = connection
 				let reauthPromise = this.reauthPromises.get(reauthKey)
 
 				if (!reauthPromise) {
@@ -2557,13 +2685,13 @@ export class McpHub {
 
 		this.isProgrammaticUpdate = false
 
-		// Cancel all active OAuth token watchers and in-flight reauth promises
-		for (const { unsubscribe, abortHandle } of this._oauthWatchers.values()) {
-			unsubscribe()
-			clearTimeout(abortHandle)
+		// End all active OAuth flows and in-flight reauth promises through the
+		// shared removal path, so nothing stays pending after disposal.
+		for (const watcherKey of [...this._oauthWatchers.keys()]) {
+			this._endOAuthWatcher(watcherKey)
 		}
-		this._oauthWatchers.clear()
 		this.reauthPromises.clear()
+		this.oauthTokenRetries.clear()
 
 		this.removeAllFileWatchers()
 

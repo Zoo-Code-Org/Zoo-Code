@@ -38,6 +38,7 @@
 			"authenticateButton": "Autentikasi",
 			"cancelled": "Autentikasi OAuth dibatalkan",
 			"timedOut": "Autentikasi OAuth habis waktu",
+			"retriesExhausted": "Proses masuk OAuth untuk \"{{name}}\" gagal setelah beberapa kali percobaan. Sambungkan ulang server untuk masuk kembali.",
 			"connected": "Server MCP \"{{name}}\" berhasil terhubung setelah autentikasi OAuth."
 		}
 	}
