@@ -387,4 +387,35 @@ describe("NativeOllamaHandler pseudo tool-call recovery", () => {
 			},
 		])
 	})
+
+	it("stays byte-identical when an explicitly empty tools list is offered", async () => {
+		const handler = makeHandler()
+		mockChat.mockImplementation(async function* () {
+			yield { message: { content: wrappedWeatherCall("Berlin") } }
+			yield {
+				message: {
+					content: "",
+					tool_calls: [{ function: { name: "get_weather", arguments: { location: "Paris" } } }],
+				},
+			}
+		})
+		const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }], {
+			...makeCreateMessageMetadata(),
+			tools: [],
+		})
+		const parts = await collectStream(stream)
+
+		// Recovery stays off without usable function tools: the markup
+		// stays text and the native call keeps the legacy id/index order.
+		expect(textOf(parts)).toBe(wrappedWeatherCall("Berlin"))
+		expect(callsOf(parts)).toStrictEqual([
+			{
+				type: "tool_call_partial",
+				index: 0,
+				id: "ollama-tool-0",
+				name: "get_weather",
+				arguments: JSON.stringify({ location: "Paris" }),
+			},
+		])
+	})
 })

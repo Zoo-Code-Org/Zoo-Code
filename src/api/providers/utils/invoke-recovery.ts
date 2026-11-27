@@ -20,9 +20,10 @@ import type { OpenAI } from "openai"
  *   the sink order is resolution order: a native that arrives inside an
  *   open block runs before that block's recovered call, and a block that
  *   closed before a native arrival recovers first.
- * - A block quoted by markdown context (an open fenced code block, or an
- *   inline code span open on the opener's line) is never recovered; its
- *   bytes flush as text. An unterminated block or an unknown tool name
+ * - A block quoted by markdown context (an open fenced code block,
+ *   including one inside a block quote container, or an inline code span
+ *   open on the opener's line) is never recovered; its bytes flush as
+ *   text. An unterminated block or an unknown tool name
  *   also stays text. Wrapper tags are dropped only around a recovered
  *   call, together with the whitespace directly inside the skeleton.
  * - The verdict depends only on the byte content, so any chunking of the
@@ -36,7 +37,17 @@ import type { OpenAI } from "openai"
 
 export type RecoveryEvent = { kind: "text"; text: string } | { kind: "call"; name: string; arguments: string }
 
-const MARKERS = ["<function_calls>", "</function_calls>", "<invoke>", "<invoke ", "</invoke>"] as const
+const MARKERS = ["<function_calls>", "</function_calls>", "<invoke>", "</invoke>"] as const
+
+/**
+ * An invoke opener that carries a name: `<invoke` followed by one
+ * whitespace byte, the same separators INVOKE_OPENER accepts. The
+ * nameless `<invoke>` form stays a literal marker above.
+ */
+const INVOKE_OPENER_MARKER = /^<invoke(?=\s|$)/i
+
+/** The marker classes the scanner can sit on. */
+type Marker = (typeof MARKERS)[number] | "invoke-opener"
 
 const WRAPPER_OPEN = "<function_calls>"
 const WRAPPER_CLOSE = "</function_calls>"
@@ -55,13 +66,18 @@ const PARAMETER = /<parameter\s+name\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>([\s\S]*?)
 /** True when `text` is a proper prefix of some marker. */
 function isMarkerPrefix(text: string): boolean {
 	const lower = text.toLowerCase()
-	return MARKERS.some((marker) => marker.length > text.length && marker.startsWith(lower))
+	const literal = MARKERS.some((marker) => marker.length > text.length && marker.startsWith(lower))
+	return literal || INVOKE_OPENER_MARKER.test(text)
 }
 
 /** The complete marker that starts `text`, if any. */
-function matchMarker(text: string): (typeof MARKERS)[number] | undefined {
+function matchMarker(text: string): Marker | undefined {
 	const lower = text.toLowerCase()
-	return MARKERS.find((marker) => lower.startsWith(marker))
+	const literal = MARKERS.find((marker) => lower.startsWith(marker))
+	if (literal !== undefined) {
+		return literal
+	}
+	return INVOKE_OPENER_MARKER.test(text) ? "invoke-opener" : undefined
 }
 
 /** True when a hold must wait for more bytes to decide `text`. */
@@ -82,6 +98,17 @@ function deadCandidateLength(text: string): number {
 interface FenceState {
 	char: "`" | "~"
 	width: number
+}
+
+/**
+ * Length of the leading Markdown container prefix of a complete line.
+ * CommonMark opens and closes fenced code blocks inside block quotes,
+ * where every level contributes up to three indent bytes, a `>` byte,
+ * and one optional space.
+ */
+function containerPrefixEnd(line: string): number {
+	const match = /^(?: {0,3}> ?)+/.exec(line)
+	return match === null ? 0 : match[0].length
 }
 
 export class InvokeRecoveryScanner {
@@ -173,7 +200,7 @@ export class InvokeRecoveryScanner {
 			// A stray closer or a nameless invoke can never be a live call.
 			return [true, ...this.flushHead(marker.length)]
 		}
-		if (marker === "<invoke ") {
+		if (marker === "invoke-opener") {
 			return this.decideInvokeOpener()
 		}
 		// Not a complete marker: flush the dead candidate head and re-scan.
@@ -240,8 +267,11 @@ export class InvokeRecoveryScanner {
 
 	/** Holds the block interior until `</invoke>` resolves the verdict. */
 	private stepBlock(): [boolean, ...RecoveryEvent[]] {
-		const lower = this.pending.toLowerCase()
-		const closeAt = lower.indexOf(INVOKE_CLOSE, this.cursor)
+		// Case-insensitive search on the ORIGINAL string: a lowercased
+		// copy can change length (U+0130 lowercases to two code points),
+		// which shifts the offset and makes slice/drop cut extra bytes.
+		const closeMatch = /<\/invoke>/i.exec(this.pending.slice(this.cursor))
+		const closeAt = closeMatch === null ? -1 : this.cursor + closeMatch.index
 		if (closeAt === -1) {
 			return [false]
 		}
@@ -362,21 +392,24 @@ export class InvokeRecoveryScanner {
 
 	/** Applies one complete line to the fence state. */
 	private advanceFence(line: string): void {
+		// Fence detection skips container prefixes: a quoted fence is
+		// still a fence, so the block it wraps stays quoted.
+		const content = line.slice(containerPrefixEnd(line))
 		if (this.fence !== null) {
 			const closer = new RegExp(`^ {0,3}${this.fence.char}{${this.fence.width},}\\s*$`)
-			if (closer.test(line)) {
+			if (closer.test(content)) {
 				this.fence = null
 			}
 			return
 		}
-		const tilde = /^ {0,3}(~{3,})/.exec(line)
+		const tilde = /^ {0,3}(~{3,})/.exec(content)
 		if (tilde) {
 			// A tilde fence accepts any info string.
 			this.fence = { char: "~", width: tilde[1].length }
 			return
 		}
-		const backtick = /^ {0,3}(`{3,})/.exec(line)
-		if (backtick && !line.slice(backtick[0].length).includes("`")) {
+		const backtick = /^ {0,3}(`{3,})/.exec(content)
+		if (backtick && !content.slice(backtick[0].length).includes("`")) {
 			// A backtick fence's info string must contain no backtick.
 			this.fence = { char: "`", width: backtick[1].length }
 		}

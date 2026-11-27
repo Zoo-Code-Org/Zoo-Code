@@ -119,9 +119,14 @@ describe("InvokeRecoveryScanner", () => {
 
 	it("does not treat a backtick fence line with a backtick info string as a fence opener", () => {
 		// CommonMark: a backtick fence's info string must contain no
-		// backtick, so ```lang`value is prose and its runs are span markers.
-		const events = scanChunked("```lang`value\nplain\n```\nrest", [8, 10, 10])
-		expect(calls(events)).toStrictEqual([])
+		// backtick, so ```lang`value is prose and its runs are span
+		// markers. The offered call after that line must still recover:
+		// an empty-call assertion would pass even if the scanner wrongly
+		// opened a fence at the invalid line and quoted the call.
+		const fixture = "```lang`value\nplain\n" + bareWeatherCall("Rome") + "\n```\nrest"
+		const events = scanChunked(fixture, [8, 10, 10])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("```lang`value\nplain\n\n```\nrest")
 	})
 
 	it("keeps an unknown tool name as text", () => {
@@ -186,6 +191,87 @@ describe("InvokeRecoveryScanner", () => {
 		const events = scanChunked(fixture, [3, 20, 40])
 		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Berlin"}' }])
 		expect(text(events)).toBe("<invalid prose ")
+	})
+
+	it.each([
+		["newline", "bare", `<invoke\nname="get_weather"><parameter name="location">Rome</parameter></invoke>`],
+		["tab", "bare", `<invoke\tname="get_weather"><parameter name="location">Rome</parameter></invoke>`],
+		[
+			"newline",
+			"wrapped",
+			`<function_calls>\n<invoke\nname="get_weather"><parameter name="location">Rome</parameter></invoke></function_calls>`,
+		],
+		[
+			"tab",
+			"wrapped",
+			`<function_calls>\n<invoke\tname="get_weather"><parameter name="location">Rome</parameter></invoke></function_calls>`,
+		],
+	])("recovers a %s call whose opener uses a %s separator after invoke", (_sep, _shape, fixture) => {
+		// XML whitespace after `invoke` is legal opener syntax; the marker
+		// probe must hand such openers to the parser, not emit them as text.
+		const events = scanChunked(fixture, [16, 30, 20])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("")
+	})
+
+	it("recovers both calls of adjacent bare blocks split by a dotted capital I", () => {
+		// U+0130 lowercases to two code points, so a lowercased copy of
+		// the hold is longer than the hold itself: the close offset must
+		// come from the original string, or drop() eats the next call's
+		// `<` and recovery starts depending on chunk boundaries.
+		const fixture =
+			`<invoke name="get_weather"><parameter name="city">\u0130stanbul</parameter></invoke>` +
+			`<invoke name="get_weather"><parameter name="city">Rome</parameter></invoke>`
+		const expected = [
+			{ kind: "call", name: "get_weather", arguments: '{"city":"\u0130stanbul"}' },
+			{ kind: "call", name: "get_weather", arguments: '{"city":"Rome"}' },
+		]
+		expect(calls(scanChunked(fixture, [fixture.length]))).toStrictEqual(expected)
+		expect(calls(scanChunked(fixture, [37, 44, 38]))).toStrictEqual(expected)
+		expect(calls(scanChunked(fixture, [79, fixture.length - 79]))).toStrictEqual(expected)
+		expect(text(scanChunked(fixture, [37, 44, 38]))).toBe("")
+	})
+
+	it("keeps a fence inside a block quote as text", () => {
+		// CommonMark opens and closes fenced code blocks inside block
+		// quotes: the quoted example must stay text, never recover.
+		const fixture = `> ~~~\n> ${bareWeatherCall("Rome")}\n> ~~~\nafter`
+		const events = scanChunked(fixture, [6, 40, 20])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("recovers a live call after a closed tilde fence", () => {
+		// A closed fence stops quoting: the call after it is live.
+		const fixture = `~~~\ncode\n~~~\n\n${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [4, 30, 30])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("~~~\ncode\n~~~\n\n")
+	})
+
+	it("recovers a live call after a closed inline code span on the same line", () => {
+		const fixture = "`x` " + bareWeatherCall("Rome")
+		const events = scanChunked(fixture, [2, 30, 10])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("`x` ")
+	})
+
+	it("recovers a single-quoted invoke name", () => {
+		const fixture = `<invoke name='get_weather'><parameter name="location">Rome</parameter></invoke>`
+		const events = scanChunked(fixture, [7, 30, 20])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("")
+	})
+
+	it.each([
+		["unquoted attribute", `<invoke name=get_weather><parameter name="a">b</parameter></invoke>`],
+		["empty quoted name", `<invoke name=""><parameter name="a">b</parameter></invoke>`],
+		["stray invoke closer", "text </invoke> more"],
+		["nameless invoke opener", "text <invoke> more"],
+	])("keeps a malformed opener (%s) as text", (_label, fixture) => {
+		const events = scanChunked(fixture, [6, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
 	})
 
 	it("offeredToolNames reads only usable function tools", () => {
