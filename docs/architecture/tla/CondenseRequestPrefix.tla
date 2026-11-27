@@ -32,6 +32,10 @@
 \* Not modeled: synthetic tool results (an append-only suffix, so prefix
 \* safe), summary selection and condenseParent tags, token counts, the folded
 \* file context, and provider-side transforms past createMessage.
+\* Findings (PR 2698 round 2): Merge now merges user pairs only (added; the
+\* condense call site passes roles = ["user"], thread on Merge line 60).
+\* The default-template and frozen-prefix assertions are pinned in
+\* prefix-cache.spec.ts (covered: the PrefixUnchanged oracle tests).
 \* Cost: TLC runs each config in a few seconds.
 
 EXTENDS Naturals, Sequences
@@ -51,13 +55,14 @@ Histories == UNION {[1..n -> Msgs] : n \in 1..MaxMsgs}
 \* "tr" are tool blocks turned into text, "s" is the condense instruction.
 Instr == [role |-> "user", blocks |-> <<"s">>]
 
-\* The task request merges consecutive same-role (user) messages.
+\* The task request merges consecutive user messages only: the condense call
+\* passes roles = ["user"], so assistant messages are never merged.
 RECURSIVE Merge(_)
 Merge(h) ==
     IF Len(h) <= 1 THEN h
     ELSE LET rest == Merge(SubSeq(h, 2, Len(h)))
              first == h[1]
-         IN IF rest[1].role = first.role
+         IN IF rest[1].role = first.role /\ first.role = "user"
             THEN <<[role |-> first.role, blocks |-> first.blocks \o rest[1].blocks]>>
                      \o SubSeq(rest, 2, Len(rest))
             ELSE <<first>> \o rest

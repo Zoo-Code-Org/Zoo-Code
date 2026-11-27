@@ -18,6 +18,7 @@ import type { ApiHandlerCreateMessageMetadata } from "../../../api"
 import type { ApiStream } from "../../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../../api/transform/image-cleaning"
 import { BaseProvider } from "../../../api/providers/base-provider"
+import { supportPrompt } from "../../../shared/support-prompt"
 import { mergeConsecutiveApiMessages } from "../../task/mergeConsecutiveApiMessages"
 import type { ApiMessage } from "../../task-persistence/apiMessages"
 import {
@@ -133,6 +134,9 @@ describe("Condense request prefix cache", () => {
 			const instruction = buildCondenseInstruction(undefined)
 			expect(instruction).toContain("SYSTEM OPERATION")
 			expect(instruction).toContain("DO NOT call any tools")
+			// The full default template must ride along: a guard-only return
+			// would drop the summary instructions.
+			expect(instruction).toContain(supportPrompt.default.CONDENSE)
 		})
 
 		it("wraps a custom condensing prompt with the same guard", () => {
@@ -159,6 +163,9 @@ describe("Condense request prefix cache", () => {
 	it("keeps the task-shaped history as a byte-identical prefix and appends one instruction suffix", async () => {
 		const handler = new CapturingApiHandler()
 		const messages = buildHistory()
+		// Freeze the expectation before the call: an in-place mutation of the
+		// history must not leak into the observed prefix.
+		const expectedPrefix = structuredClone(expectedTaskShaped(messages, handler))
 
 		await summarizeConversation({
 			messages,
@@ -168,7 +175,6 @@ describe("Condense request prefix cache", () => {
 		})
 
 		const sent = handler.requests[0].messages
-		const expectedPrefix = expectedTaskShaped(messages, handler)
 		expect(sent).toHaveLength(expectedPrefix.length + 1)
 		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
 	})
@@ -228,6 +234,10 @@ describe("Condense request prefix cache", () => {
 			},
 		]
 
+		// Freeze the expectation before the call: an in-place mutation of the
+		// history must not leak into the observed prefix.
+		const expectedPrefix = structuredClone(expectedTaskShaped(messages, handler))
+
 		await summarizeConversation({
 			messages,
 			apiHandler: handler,
@@ -236,7 +246,6 @@ describe("Condense request prefix cache", () => {
 		})
 
 		const sent = handler.requests[0].messages
-		const expectedPrefix = expectedTaskShaped(messages, handler)
 		expect(sent).toHaveLength(expectedPrefix.length + 2)
 		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
 		const synthetic = sent[expectedPrefix.length]
@@ -284,6 +293,9 @@ describe("Condense request prefix cache", () => {
 	])("keeps the task-shaped prefix intact $name", async ({ messages }) => {
 		const handler = new CapturingApiHandler()
 		const history = messages()
+		// Freeze the expectation before the call: an in-place mutation of the
+		// history must not leak into the observed prefix.
+		const expectedPrefix = structuredClone(expectedTaskShaped(history, handler))
 
 		await summarizeConversation({
 			messages: history,
@@ -293,7 +305,6 @@ describe("Condense request prefix cache", () => {
 		})
 
 		const sent = handler.requests[0].messages
-		const expectedPrefix = expectedTaskShaped(history, handler)
 		expect(sent.length).toBeGreaterThanOrEqual(expectedPrefix.length + 1)
 		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
 	})
