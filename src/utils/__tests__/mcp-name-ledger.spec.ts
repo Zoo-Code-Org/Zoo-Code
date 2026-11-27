@@ -155,6 +155,44 @@ describe("mcp tool name ledger", () => {
 			expect(parseMcpToolName("mcp__svc__prod__readfile")).toBeNull()
 		})
 
+		it("a key recorded for two pairs refuses its echoed name instead of the legacy split", () => {
+			// Regression evidence (CR pre-merge check, PR 2669): two builds
+			// whose tool names sanitize to one wire form conflict on one key.
+			// The candidate-key loop finds the conflicted key under this echo;
+			// removing that check (or the echo-binding refusal) lets the
+			// legacy split return a pair no safe resolution backs.
+			buildMcpToolName("svc__prod", "readfile")
+			buildMcpToolName("svc__prod", "read.file")
+			expect(parseMcpToolName("mcp__svc__prod__readfile")).toBeNull()
+		})
+
+		it("an echo shared at an underscore boundary resolves to nothing", () => {
+			// CR thread 4713678648: "svc_" + separator and separator + "_ping"
+			// both echo as mcp__svc___ping. The separator overlaps the names'
+			// own underscore, so no split of the echo recovers the recorded
+			// keys: mcp--svc_--ping and mcp--svc--_ping. Two pairs bind one
+			// echoed name, and the parse must refuse it instead of handing
+			// back the one pair the normalized form happens to hit.
+			buildMcpToolName("svc_", "ping")
+			buildMcpToolName("svc", "_ping")
+			expect(parseMcpToolName("mcp__svc___ping")).toBeNull()
+		})
+
+		it("one recording at an underscore boundary still resolves through its echo", () => {
+			// With a single record the echo is unambiguous, so it resolves to
+			// the recorded pair even though the echo overlaps the server's own
+			// underscore. Both canonical names also keep resolving through
+			// their exact wire forms once the second scope records.
+			buildMcpToolName("svc_", "ping")
+			expect(parseMcpToolName("mcp__svc___ping")).toStrictEqual({
+				serverName: "svc_",
+				toolName: "ping",
+			})
+			buildMcpToolName("svc", "_ping")
+			expect(parseMcpToolName("mcp--svc_--ping")).toStrictEqual({ serverName: "svc_", toolName: "ping" })
+			expect(parseMcpToolName("mcp--svc--_ping")).toStrictEqual({ serverName: "svc", toolName: "_ping" })
+		})
+
 		it("a name with more underscore runs than the enumeration bound keeps the legacy split", () => {
 			// Seven "__" runs exceed MAX_CANDIDATE_SEPARATORS; no ledger key
 			// is recorded for this shape, so the split decides.

@@ -13,8 +13,10 @@
 \* name stops resolving. Resolution must never pick one scope's pair, because
 \* that routes the other scope's calls to the wrong server.
 \* Invariant: ExactRoundTrip. A resolved pair was advertised under that exact
-\* function name. The fix records the original pair in a ledger at build time
-\* and reads it back at parse time. Split remains the fallback for unknown names.
+\* function name, and a call resolves to nothing only when the name was
+\* ambiguous at call time. The fix records the original pair in a ledger at
+\* build time and reads it back at parse time. Split remains the fallback for
+\* unknown names.
 \* Invariant: FirstPairStable. A recorded pair never changes while the ledger lives.
 \* Invariant: AmbiguousNamesRefuse. A name advertised for two different pairs
 \* resolves to nothing.
@@ -29,14 +31,24 @@
 \* | McpToolNameLedger.cfg   | implemented behavior               | holds (16,560 states) |
 \* | ...NoLedger.cfg         | parse skips the ledger             | fails ExactRoundTrip (1,284) |
 \* | ...NoRecord.cfg         | build forgets to record            | fails ExactRoundTrip (1,284) |
-\* | ...LastWins.cfg         | each build overwrites              | fails FirstPairStable (257) |
+\* | ...LastWins.cfg         | each build overwrites              | fails FirstPairStable (1,281) |
 \* | ...NoRefuse.cfg         | first-wins without conflict marking | fails AmbiguousNamesRefuse (4,131) |
+\* | ...RefuseAll.cfg        | sink refuses every advertised name | fails ExactRoundTrip (1,284) |
 \* Found: NoLedger fails on the first call after a dotted advertise, as expected.
 \* NoRefuse fails on the call after the second scope records a different pair.
 \* Review (PR 2669, 2026-11-26): 1 added (AmbiguousNamesRefuse, CR thread
 \* 4712051715), 1 restructured (LedgerMode moved to the MC module, CR thread
 \* 4712051706), 1 gap (CR thread 4712051724: the "__" echo rewrite of the
 \* separators is not modeled; parser tests pin it in NativeToolCallParser.spec).
+\* Review (PR 2669 round 2, 2026-11-27): 2 added (CR thread 4713678630:
+\* ExactRoundTrip requires a result for an unambiguous call, pinned by the
+\* new RefuseAll sabotage; CR thread 4713678633: LastWins now accumulates
+\* pairs and initializes firstPair, so it fails FirstPairStable on the
+\* overwrite, not on the first record), 2 gaps (CR thread 4713678648: the
+\* echo forms and the shared-echo refusal stay unmodeled, pinned by
+\* mcp-name-ledger.spec.ts; CR thread 4713678638: per-test ledger isolation
+\* is test-order state, pinned by the beforeEach/afterEach in
+\* NativeToolCallParser.spec.ts).
 \* Not modeled: normalizeMcpToolName separator repair and the echo forms, the
 \* 64-char truncation, McpHub connection state, and tool execution.
 \* Tests: mcp-name-ledger.spec.ts.
@@ -129,13 +141,17 @@ TypeOK ==
     /\ callRes \in AnyPair \cup {NullPair}
     /\ callAmb \in BOOLEAN
 
-\* Safety 1: a resolved pair was advertised under that exact function name.
-\* NullPair is no resolution, so a refused call does not violate the rule.
-ExactRoundTrip == callF = None \/ callRes = NullPair \/
-    (\E rec \in built :
+\* Safety 1: a resolved pair was advertised under that exact function name,
+\* and a call resolves to nothing only when the name was ambiguous at call
+\* time. A sink that refused every advertised name would otherwise satisfy
+\* the rule while never round-tripping anything (CR thread 4713678630).
+ExactRoundTrip ==
+    \/ callF = None
+    \/ (callAmb /\ callRes = NullPair)
+    \/ \E rec \in built :
         /\ rec.f = callF
         /\ rec.srv = callRes[1]
-        /\ rec.tl = callRes[2])
+        /\ rec.tl = callRes[2]
 
 \* Safety 2: a recorded pair never changes while the ledger lives.
 FirstPairStable == \A fnm \in Fnames :

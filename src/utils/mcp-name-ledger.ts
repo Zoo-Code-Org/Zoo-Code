@@ -7,6 +7,10 @@
  * names: a tool "System.readFile" reaches the server as "SystemreadFile"
  * (issue #2338). The ledger records the original pair under the exact
  * function name at advertisement time and hands it back at parse time.
+ * It also indexes every record under the name's echo form, the string a
+ * model produces when it rewrites each "--" separator as "__", so a
+ * parser can check all bindings of an echoed name before it resolves
+ * anything (CR thread 4713678648).
  */
 
 export interface McpToolAlias {
@@ -26,6 +30,15 @@ interface LedgerEntry extends McpToolAlias {
 const ledger = new Map<string, LedgerEntry>()
 
 /**
+ * Echo form -> the function names recorded under it. Two distinct function
+ * names can share one echo form when a separator overlaps an underscore the
+ * server or tool name already carries: "mcp--svc_--ping" and
+ * "mcp--svc--_ping" both echo as "mcp__svc___ping". A shared echo binds two
+ * pairs to one name and must refuse (CR thread 4713678648).
+ */
+const echoIndex = new Map<string, string[]>()
+
+/**
  * Record the original server and tool names under an advertised function name.
  *
  * The first record for a name wins while every build repeats the same pair.
@@ -39,10 +52,19 @@ export function recordMcpToolAlias(functionName: string, serverName: string, too
 	const entry = ledger.get(functionName)
 	if (!entry) {
 		ledger.set(functionName, { serverName, toolName, conflicted: false })
-		return
-	}
-	if (entry.serverName !== serverName || entry.toolName !== toolName) {
+	} else if (entry.serverName !== serverName || entry.toolName !== toolName) {
 		entry.conflicted = true
+	}
+	// Index the record under its echo form. sanitizeMcpName collapses "--"
+	// inside names, so the only "--" in a built name are its two separators.
+	const echo = functionName.replace(/--/g, "__")
+	const names = echoIndex.get(echo)
+	if (names) {
+		if (!names.includes(functionName)) {
+			names.push(functionName)
+		}
+	} else {
+		echoIndex.set(echo, [functionName])
 	}
 }
 
@@ -71,8 +93,39 @@ export function isMcpToolNameAmbiguous(functionName: string): boolean {
 }
 
 /**
+ * Return the pair bound to an echoed function name, when exactly one
+ * unconflicted name was recorded under that echo form. A shared echo — two
+ * recorded names behind one echo form — resolves to nothing, like a
+ * conflicted name: the echo cannot tell the scopes apart.
+ */
+export function resolveMcpToolEcho(name: string): McpToolAlias | undefined {
+	const names = echoIndex.get(name.replace(/--/g, "__"))
+	if (!names || names.length !== 1) {
+		return undefined
+	}
+	return resolveMcpToolAlias(names[0])
+}
+
+/**
+ * Whether an echoed name binds to more than one recorded pair, or to one
+ * pair that was itself recorded for two scopes. Such an echo must refuse
+ * instead of falling through to a split of the wire form.
+ */
+export function isMcpToolEchoAmbiguous(name: string): boolean {
+	const names = echoIndex.get(name.replace(/--/g, "__"))
+	if (!names) {
+		return false
+	}
+	if (names.length > 1) {
+		return true
+	}
+	return isMcpToolNameAmbiguous(names[0])
+}
+
+/**
  * Drop every record.
  */
 export function clearMcpToolAliases(): void {
 	ledger.clear()
+	echoIndex.clear()
 }

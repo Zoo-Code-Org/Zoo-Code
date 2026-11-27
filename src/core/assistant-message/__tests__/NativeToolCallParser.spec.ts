@@ -1,5 +1,6 @@
 import { NativeToolCallParser, type ToolCallStreamEvent } from "../NativeToolCallParser"
 import { buildMcpToolName } from "../../../utils/mcp-name"
+import { clearMcpToolAliases } from "../../../utils/mcp-name-ledger"
 import type { ToolName } from "@roo-code/types"
 
 describe("NativeToolCallParser", () => {
@@ -291,6 +292,17 @@ describe("NativeToolCallParser", () => {
 	})
 
 	describe("dynamic MCP tools", () => {
+		// The ledger is process-wide: each test must start from an empty one,
+		// or a conflict recorded by an earlier test would persist and the
+		// ambiguity assertions below would not depend on their own records.
+		beforeEach(() => {
+			clearMcpToolAliases()
+		})
+
+		afterEach(() => {
+			clearMcpToolAliases()
+		})
+
 		it("resolves an echoed name whose server name carries double underscores", () => {
 			// buildMcpToolName("svc__prod", "read.file") records the ledger key
 			// mcp--svc__prod--readfile. A model that rewrites separators echoes

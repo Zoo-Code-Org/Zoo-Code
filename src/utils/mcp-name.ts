@@ -3,7 +3,13 @@
  * API function name requirements across all providers.
  */
 
-import { isMcpToolNameAmbiguous, resolveMcpToolAlias, recordMcpToolAlias } from "./mcp-name-ledger"
+import {
+	isMcpToolNameAmbiguous,
+	resolveMcpToolAlias,
+	recordMcpToolAlias,
+	resolveMcpToolEcho,
+	isMcpToolEchoAmbiguous,
+} from "./mcp-name-ledger"
 
 /**
  * Separator used between MCP prefix, server name, and tool name.
@@ -195,10 +201,16 @@ function ledgerCandidateKeys(mcpToolName: string): string[] {
 export function parseMcpToolName(mcpToolName: string): { serverName: string; toolName: string } | null {
 	// Prefer the exact pair recorded when the name was built: sanitization may
 	// have deleted characters that the split below can never restore (issue
-	// #2338). The raw name and its separator-normalized form are both tried,
-	// because models rewrite "mcp--x--y" as "mcp__x__y".
+	// #2338). The raw name is tried first, then the recorded echo bindings of
+	// the raw and the normalized form. Models rewrite the "--" separators as
+	// "__", and a separator can overlap an underscore the server or tool name
+	// already carries, so no split of the echoed string recovers every
+	// recorded key (CR thread 4713678648): the ledger indexes each record by
+	// its echo form instead. An echo bound to two different pairs resolves to
+	// nothing here; the ambiguity check below refuses the call.
 	const normalizedName = normalizeMcpToolName(mcpToolName)
-	const alias = resolveMcpToolAlias(mcpToolName) ?? resolveMcpToolAlias(normalizedName)
+	const alias =
+		resolveMcpToolAlias(mcpToolName) ?? resolveMcpToolEcho(mcpToolName) ?? resolveMcpToolEcho(normalizedName)
 	if (alias) {
 		return { serverName: alias.serverName, toolName: alias.toolName }
 	}
@@ -209,7 +221,11 @@ export function parseMcpToolName(mcpToolName: string): { serverName: string; too
 	// Every candidate must agree on one pair; two different pairs, or a
 	// candidate the ledger marks ambiguous, leave the call unresolved.
 	let candidate: { serverName: string; toolName: string } | undefined
-	let ambiguous = isMcpToolNameAmbiguous(mcpToolName) || isMcpToolNameAmbiguous(normalizedName)
+	let ambiguous =
+		isMcpToolNameAmbiguous(mcpToolName) ||
+		isMcpToolNameAmbiguous(normalizedName) ||
+		isMcpToolEchoAmbiguous(mcpToolName) ||
+		isMcpToolEchoAmbiguous(normalizedName)
 	for (const key of ledgerCandidateKeys(mcpToolName)) {
 		if (isMcpToolNameAmbiguous(key)) {
 			ambiguous = true
