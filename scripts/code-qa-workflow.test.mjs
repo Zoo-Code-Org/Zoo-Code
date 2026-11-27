@@ -143,7 +143,7 @@ describe("Code QA dependency install", () => {
 	})
 })
 
-// CiChecksCurrent: neither cache layer can reuse a result after imported types change.
+// ExtensionCiChecksCurrent: neither cache layer can reuse a result after imported types change.
 describe("lint cache policy", () => {
 	const manifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"))
 
@@ -158,7 +158,7 @@ describe("lint cache policy", () => {
 		assert.match(command, /--cache-location node_modules\/\.cache\/eslint\/\.eslintcache-staged$/)
 	})
 
-	it("bypasses Turbo and ESLint caches in the unconditional CI lint step", () => {
+	it("runs extension CI lint directly without an ESLint cache", () => {
 		const command = manifest.scripts["lint:ci"]
 		assert.equal(typeof command, "string")
 		const [otherPackages, extension] = command.split(" && ")
@@ -176,4 +176,19 @@ describe("lint cache policy", () => {
 		assert.match(workflowStep("Lint"), /run: pnpm lint:ci\s*$/)
 		assert.doesNotMatch(workflowStep("Lint"), /continue-on-error|if:/)
 	})
+})
+
+// The Code QA workflow must keep both runner tests in its command.
+it("runs the runner contract and strict-environment integration tests in CI", () => {
+	const manifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"))
+	const command = manifest.scripts["test:code-qa-ci"].split(" ")
+	for (const file of [
+		"scripts/code-qa-workflow.test.mjs",
+		"scripts/test-local.test.mjs",
+		"scripts/test-local.integration.test.mjs",
+	]) {
+		assert.ok(command.includes(file), `CI must execute ${file}`)
+	}
+	assert.match(workflowStep("Validate Code QA workflow"), /run: pnpm test:code-qa-ci\s*$/)
+	assert.doesNotMatch(workflowStep("Validate Code QA workflow"), /if:|continue-on-error/)
 })

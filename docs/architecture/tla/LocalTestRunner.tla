@@ -1,41 +1,50 @@
 -------------------------- MODULE LocalTestRunner --------------------------
-(* Source: scripts/test-local.mjs runTurbo. Sinks: bundle and test child processes, plus Vitest maxWorkers readers.
-Failures: tests run before a successful bundle, worker limits are lost, or fixed CI limits change. *)
-(* Expectation: the current runner passes. Each removed gate must fail its matching invariant.
-Number parsing, process results, and reader inputs are oracles. This model does not estimate memory use. *)
-(* Property tests execute the real runner with a child-process double and evaluate the real Vitest configurations.
-The model uses only the source and sinks. Model bounds live in LocalTestRunnerMC. *)
-(* Results: the fixed model passes all four invariants over 16 states. All four sabotage configurations fail as expected.
-Replay: removing the bundle gate, worker argument, task limit, or fixed CI branch makes the real-code tests fail. *)
-(* Validation: all 25 workflow and runner tests pass. Ten config readers cover local, Linux CI, and Windows CI inputs.
-Tests also check bundle failure, child-process failure, invalid limits, argument forwarding, and enabled test isolation. *)
-(* An existing workflow assertion expected the old maxWorkers expression. Actual config-reader tests replace that stale assertion.
-No new runner defect was found. The model cannot establish a memory budget or benchmark elapsed time. *)
-(* Cost: one agent, about six minutes for the initial model and two minutes for helper extraction. No delegates.
-Reader inputs and parsed limits stay oracles. Child-process doubles do not execute bundles or the full workspace suite. *)
-(* Refactor expectation: a shared runTurbo helper preserves the bundle gate, limits, and trailing caller arguments.
-The current invariants cover process ordering and limits. Runtime tests check argument precedence. *)
-(* Refactor result: all 25 tests pass. All four model sabotages and five runtime mutations fail as expected.
-No new runtime defect was found. The helper shares command construction without adding state. *)
+(* Sources: scripts/test-local.mjs runTurbo and turbo.json. Sinks: the actual Vitest config and worker process.
+Failures: tests run before bundling, Turbo drops the worker cap, spawn errors stay silent, or caller arguments are lost. *)
+(* Review ratchet, PR #2757 supplied review without thread URLs: findings 1, 2, 3, 5, and 6 add boundaries or inputs.
+Findings 4, 7, 8, 9, 10, and 11 are gaps checked through scope notes, command tests, or prose. Added 5, covered 0, gap 6. *)
+(* Expectation: strict Turbo drops the cap without passthrough. Vitest applies its own environment override after config resolution.
+A CI config limit applies when the override is absent. Number parsing and process results remain input oracles. *)
+(* Tests must execute installed Turbo and Vitest in a scratch workspace. Spawn doubles alone miss the forwarding failure.
+Windows launcher tests check the argument array and error output. They do not establish native Windows execution. *)
+(* Simplification: derive the received cap from the runner value and Turbo policy. Do not add a second mutable cap.
+The model does not estimate memory use. The previous 16-state model stopped before Turbo's environment filter. *)
+(* Results: the corrected runner model passes seven invariants over 36 states. All eight sabotage configs fail as expected.
+The old strict-mode integration fails both inputs. Passthrough lets installed Vitest resolve worker limits 1 and 3. *)
+(* Replay: all 13 runtime and configuration mutations fail tests. They include the Turbo boundary, Windows launcher,
+spawn diagnostics, one worker, caller separators, numeric validation, CI wiring, and both default log flags. *)
+(* Validation: 33 workflow and runner tests plus 24 extension activation tests pass. Type checking, lint, formatting, and Knip pass.
+All ten Vitest configs now match the pre-PR files. The installed SDK applies the worker environment override itself. *)
+(* Limits: Windows startup uses a platform double. Native Windows and new full-suite memory benchmarks were not run.
+Scope remains in PR #2757 at the author's request. Old full-run figures do not validate an effective worker cap. *)
+(* Cost: one agent, about fifteen minutes including model updates, boundary tests, and mutation replays. No delegates.
+No further runtime defect was found beyond the supplied review. The model checks an abstraction, not the installed SDK. *)
 EXTENDS Naturals
-CONSTANTS WorkerValues, TaskValues, ReaderCases, RequireBundle, PassWorkers, PassConcurrency, RespectCI
-VARIABLES bundle, tests, workers, tasks, emittedWorkers, emittedTasks
-vars == <<bundle, tests, workers, tasks, emittedWorkers, emittedTasks>>
+CONSTANTS WorkerValues, TaskValues, ReaderCases, RequireBundle, PassWorkers, PassConcurrency, RespectCI, ForwardThroughTurbo, ReportSpawnError, PreserveArgs, UseNodeLauncher, Args
+VARIABLES bundle, tests, workers, tasks, emittedWorkers, emittedTasks, emittedArgs, spawnError, reported
+vars == <<bundle, tests, workers, tasks, emittedWorkers, emittedTasks, emittedArgs, spawnError, reported>>
 Init == /\ bundle = "idle" /\ tests = "idle"
         /\ workers \in WorkerValues /\ tasks \in TaskValues
-        /\ emittedWorkers = 0 /\ emittedTasks = 0
-Bundle(result) == /\ bundle = "idle" /\ bundle' = result
-                  /\ UNCHANGED <<tests, workers, tasks, emittedWorkers, emittedTasks>>
+        /\ emittedWorkers = 0 /\ emittedTasks = 0 /\ emittedArgs = <<>>
+        /\ spawnError \in BOOLEAN /\ reported = FALSE
+Bundle(result) == /\ bundle = "idle" /\ (~spawnError \/ result = "failed") /\ bundle' = result
+                  /\ reported' = (result = "failed" /\ spawnError /\ ReportSpawnError)
+                  /\ UNCHANGED <<tests, workers, tasks, emittedWorkers, emittedTasks, emittedArgs, spawnError>>
 StartTests == /\ tests = "idle" /\ (~RequireBundle \/ bundle = "ready")
               /\ tests' = "started"
               /\ emittedWorkers' = IF PassWorkers THEN workers ELSE 0
               /\ emittedTasks' = IF PassConcurrency THEN tasks ELSE 0
-              /\ UNCHANGED <<bundle, workers, tasks>>
+              /\ emittedArgs' = IF PreserveArgs THEN Args ELSE <<>>
+              /\ UNCHANGED <<bundle, workers, tasks, spawnError, reported>>
 Next == Bundle("ready") \/ Bundle("failed") \/ StartTests
 Spec == Init /\ [][Next]_vars
 BundleBeforeTests == tests = "started" => bundle = "ready"
-WorkerLimitReachesTests == tests = "started" => emittedWorkers = workers
+VitestWorkers == IF ForwardThroughTurbo THEN emittedWorkers ELSE 0
+WorkerLimitReachesTests == tests = "started" => VitestWorkers = workers
 ConcurrencyReachesTests == tests = "started" => emittedTasks = tasks
-ReaderBound(c) == IF RespectCI /\ c.fixedCI THEN c.ciBound ELSE c.localBound
+ReaderBound(c) == IF c.envBound > 0 THEN c.envBound ELSE IF RespectCI /\ c.fixedCI THEN c.ciBound ELSE 0
 ReaderLimitsArePreserved == tests = "started" => \A c \in ReaderCases : ReaderBound(c) = c.expected
+SpawnErrorsAreVisible == bundle = "failed" /\ spawnError => reported
+CallerArgumentsSurvive == tests = "started" => emittedArgs = Args
+WindowsUsesExecutable == tests = "started" => UseNodeLauncher
 =============================================================================

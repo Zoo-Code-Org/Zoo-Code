@@ -132,7 +132,8 @@ This installs the shared templates from `contrib/roo/` into `.roomodes` and `.ro
 - Rebase onto the latest `main` branch before you submit.
 
 `pnpm test:local` bundles assets first, then uses four workers per package and two concurrent test tasks.
-For a smaller local worker limit, use:
+Both flags are optional. Invalid values use the defaults and print a warning.
+For smaller limits, use:
 
 ```sh
 pnpm test:local -- --vitest-workers=2 --turbo-concurrency=1
