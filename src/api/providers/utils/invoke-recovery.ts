@@ -159,32 +159,49 @@ function whitespaceRun(line: string, start: number, column: number): { at: numbe
 
 /**
  * Bytes of `line` to strip while reading inside `container`, with the
- * document column the strip point reaches, or null when the line
- * carries no container prefix and so leaves the container. A tab
- * partly consumed by the strip keeps its residual columns in the
- * content region, which the fenced-closer check must count.
+ * document column the strip point reaches and the column the
+ * container's content region starts at, or null when the line carries
+ * no container prefix and so leaves the container. A tab partly
+ * consumed by the strip keeps its residual columns in the content
+ * region, which the fenced-closer check must count.
  */
-function containerStrip(container: FenceContainer, line: string): { strip: number; column: number } | null {
+function containerStrip(
+	container: FenceContainer,
+	line: string,
+): { strip: number; column: number; base: number } | null {
 	switch (container.kind) {
 		case "none":
-			return { strip: 0, column: 0 }
+			return { strip: 0, column: 0, base: 0 }
 		case "quote": {
 			let rest = line
 			let stripped = 0
+			let column = 0
+			let base = 0
 			for (let level = 0; level < container.depth; level++) {
 				const match = QUOTE_LEVEL.exec(rest)
 				if (match === null) {
 					return null
 				}
 				stripped += match[0].length
+				column += match[0].length
+				base = column
 				rest = rest.slice(match[0].length)
+				if (match[0].endsWith(">") && rest.startsWith("\t")) {
+					// CommonMark: the optional space behind the marker may
+					// be one column of a tab; the tab's remaining columns
+					// stay in the content region.
+					stripped += 1
+					base = column + 1
+					column += 4 - (column % 4)
+					rest = rest.slice(1)
+				}
 			}
-			return { strip: stripped, column: stripped }
+			return { strip: stripped, column, base }
 		}
 		case "list": {
 			if (/^\s*$/.test(line)) {
 				// A blank line neither leaves the item nor closes the fence.
-				return { strip: 0, column: 0 }
+				return { strip: 0, column: 0, base: 0 }
 			}
 			// CommonMark expands a tab to the next four-column tab stop, so
 			// a tab-indented line can satisfy the item's content indent:
@@ -192,7 +209,7 @@ function containerStrip(container: FenceContainer, line: string): { strip: numbe
 			// overshooting the indent leaves its residual columns to the
 			// content region.
 			const run = whitespaceRun(line, 0, 0)
-			return run.column >= container.indent ? { strip: run.at, column: run.column } : null
+			return run.column >= container.indent ? { strip: run.at, column: run.column, base: container.indent } : null
 		}
 	}
 }
@@ -500,8 +517,12 @@ export class InvokeRecoveryScanner {
 		// container, measured at tab stops: a tab partly consumed by
 		// the strip keeps its residual columns in the content, so
 		// a tab-space closer line deeper than three columns stays
-		// fence content instead of ending the block.
-		const base = fence.container.kind === "list" ? fence.container.indent : stripped.strip
+		// fence content instead of ending the block. The depth is
+		// measured from the container's content-region column, never
+		// from the prefix byte length: a quote marker whose padding
+		// is one column of a tab starts the content behind that
+		// column, at a different column than the bytes it stripped.
+		const base = stripped.base
 		const run = whitespaceRun(content, 0, stripped.column)
 		const body = content.slice(run.at)
 		let width = 0

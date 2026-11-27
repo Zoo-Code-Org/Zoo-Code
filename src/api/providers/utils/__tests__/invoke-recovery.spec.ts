@@ -48,6 +48,14 @@ describe("InvokeRecoveryScanner", () => {
 		expect(text(events)).toBe("Hmm.  Ok.")
 	})
 
+	it("recovers a bare parameterless invoke block with empty arguments", () => {
+		// No <parameter> pairs parse to an empty arguments object: the
+		// recovered call carries `{}`.
+		const events = scanChunked(`Before <invoke name="get_weather"></invoke> after`, [7, 30, 6])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: "{}" }])
+		expect(text(events)).toBe("Before  after")
+	})
+
 	// Chunk-split invariance (property test): the events for a response
 	// must not depend on where the deltas split the bytes. Compare the
 	// joined text and the calls; text CHUNK shapes may differ with the
@@ -67,6 +75,7 @@ describe("InvokeRecoveryScanner", () => {
 		`2 < 3 <inv partial that never closes`,
 		`~~~\n> ~~~\n${bareWeatherCall("Rome")}\n~~~`,
 		`> ~~~\n> example\n\n${bareWeatherCall("Rome")}`,
+		`> ~~~\n>\t ~~~\n> ~~~\n> ${bareWeatherCall("Rome")}\n> ~~~`,
 		`- ~~~\n  ${bareWeatherCall("Rome")}\n  ~~~\nafter`,
 	]
 	const normalize = (events: RecoveryEvent[]) => ({
@@ -279,6 +288,16 @@ describe("InvokeRecoveryScanner", () => {
 		expect(text(events)).toBe(fixture)
 	})
 
+	it("keeps an invoke inside a nested block-quote fence as text", () => {
+		// CommonMark nests block quotes: a depth-2 fence line carries the
+		// same two quote levels, so the example stays text and recovers
+		// nothing.
+		const fixture = `> > ~~~\n> > ${bareWeatherCall("Rome")}\n> > ~~~\nafter`
+		const events = scanChunked(fixture, [8, 40, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
 	it("keeps a quote-prefixed line inside a top-level fence as fence content", () => {
 		// CommonMark: fenced content is literal text. A top-level
 		// fence does not close on `> ~~~`, so the example stays text.
@@ -353,6 +372,18 @@ describe("InvokeRecoveryScanner", () => {
 		expect(text(events)).toBe(fixture)
 	})
 
+	it("closes a quoted fence on a tab-padding closer line and requotes the example", () => {
+		// CommonMark consumes one column of a tab as the quote marker's
+		// optional padding, so `>\t ~~~` closes the fence three columns
+		// deep inside the quote. Measuring the closer from the prefix
+		// byte length leaves the fence open across the next `> ~~~`,
+		// ends the block early, and recovers the quoted call below.
+		const fixture = `> ~~~\n>\t ~~~\n> ~~~\n> ${bareWeatherCall("Rome")}\n> ~~~`
+		const events = scanChunked(fixture, [6, 30, 30])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
 	it("recovers a live call after a closed tilde fence", () => {
 		// A closed fence stops quoting: the call after it is live.
 		const fixture = `~~~\ncode\n~~~\n\n${bareWeatherCall("Rome")}`
@@ -366,6 +397,27 @@ describe("InvokeRecoveryScanner", () => {
 		const events = scanChunked(fixture, [2, 30, 10])
 		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
 		expect(text(events)).toBe("`x` ")
+	})
+
+	it("keeps an invoke inside a double-backtick span with a single backtick as text", () => {
+		// CommonMark: a `` span closes only on a run of the same width,
+		// so the single backtick inside cannot close it and both invokes
+		// stay quoted. A width-ignoring check would end the span at the
+		// single backtick and recover the second invoke.
+		const quoted = bareWeatherCall("Rome")
+		const fixture = `\`\` ${quoted} \`${quoted}\`\` tail`
+		const events = scanChunked(fixture, [4, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("recovers a call that follows a closed double-backtick span", () => {
+		// The span's closing `` run ends the quote: the call after it is
+		// live again.
+		const fixture = `\`\` code \`\` <invoke name="get_weather"></invoke>`
+		const events = scanChunked(fixture, [4, 20, 10])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: "{}" }])
+		expect(text(events)).toBe("`` code `` ")
 	})
 
 	it("recovers a single-quoted invoke name", () => {

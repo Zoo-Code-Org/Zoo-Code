@@ -80,6 +80,16 @@
 \* rule, pinned by scanner unit tests (tab-space closer lines at 4
 \* and 5 columns stay fenced, 3 columns closes, quoted tab closers
 \* close).
+\* Review round 6 (on f4e5eed4f): the quote-marker padding rule (the
+\* optional space behind > may be one column of a tab; the tab's
+\* residual columns stay in the content region, and closer depth is
+\* measured in columns, not prefix bytes) sits below the token
+\* abstraction like the other container rules - Quoted stays the run
+\* oracle. Covered: the fence run's Quoted oracle already keeps a
+\* quoted example text. Gap: the line-level rule, pinned by scanner
+\* unit tests (a >\t ~~~ closer closes three columns deep, the
+\* re-opened fence requotes the example, and the span-width and
+\* nested-depth negatives stay text).
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
