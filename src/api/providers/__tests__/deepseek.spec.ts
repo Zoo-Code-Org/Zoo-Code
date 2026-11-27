@@ -1313,6 +1313,45 @@ describe("DeepSeekHandler", () => {
 			expect(elapsedMs).toBeLessThan(1000)
 		}, 2500)
 
+		it("compiles a repeated-reference chain in bounded time (review 4719419419)", () => {
+			// 18 definitions chained through if/not predicates that carry
+			// only a $ref: the reference-target checks recompile the shared
+			// target once per predicate, so without the per-document memo
+			// the work doubles at every level (2^18 target compilations on a
+			// schema of 18 small nodes).
+			const defs: Record<string, unknown> = {}
+			for (let level = 0; level < 18; level++) {
+				const next = level === 17 ? { type: "string" } : { $ref: `#/$defs/d${level + 1}` }
+				defs[`d${level}`] = { if: next, then: false, not: next }
+			}
+			const expected = {
+				type: "object",
+				properties: {
+					v: { if: { $ref: "#/$defs/d0" }, then: false, not: { $ref: "#/$defs/d0" } },
+				},
+				required: ["v"],
+				$defs: defs,
+			}
+			const tool = {
+				type: "function",
+				function: {
+					name: "ref_chain",
+					description: "Chain",
+					strict: true,
+					parameters: expected,
+				},
+			} satisfies Record<string, unknown>
+
+			const startedAt = Date.now()
+			const tools = convert([tool])
+			const elapsedMs = Date.now() - startedAt
+
+			// Every target compiles unchanged, so every predicate survives
+			// verbatim, key order included.
+			expect(JSON.stringify(tools[0].function.parameters)).toStrictEqual(JSON.stringify(expected))
+			expect(elapsedMs).toBeLessThan(1000)
+		}, 2500)
+
 		it("passes nodes deeper than the schema depth cap through uncompiled (round-4 pre-merge check)", () => {
 			// 33 properties levels: the leaf sits past MAX_SCHEMA_DEPTH (32),
 			// where compilation stops on purpose to bound pathological or
@@ -1595,6 +1634,87 @@ describe("DeepSeekHandler", () => {
 			// an ordinary restriction and stays untouched.
 			expect(params.unevaluatedProperties).toBe(false)
 			expect(params).not.toHaveProperty("description")
+		})
+
+		it("relaxes unevaluatedItems when contains is removed (review 4719419428)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						required: ["items"],
+						dependentSchemas: {
+							items: {
+								properties: {
+									items: {
+										type: "array",
+										const: ["a"],
+										contains: { type: "string" },
+										unevaluatedItems: false,
+									},
+								},
+							},
+						},
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as {
+				dependentSchemas?: Record<string, Record<string, unknown>>
+			}
+			const dependent = (params.dependentSchemas ?? {}) as Record<string, Record<string, unknown>>
+			const dependentProps = (dependent.items?.properties ?? {}) as Record<string, unknown>
+			const arr = dependentProps.items as Record<string, unknown>
+			// contains was what evaluated the array items; with it removed, a
+			// retained unevaluatedItems: false would forbid every item the
+			// original accepted ({"items":["a"]}) and no argument object
+			// could satisfy the schema.
+			expect(arr.unevaluatedItems).toBe(true)
+			expect(arr).not.toHaveProperty("contains")
+			expect(String(arr.description)).toContain("contains")
+		})
+
+		it("keeps unevaluatedItems when an items evaluator remains beside contains (review 4719419428)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						required: ["items"],
+						dependentSchemas: {
+							items: {
+								properties: {
+									items: {
+										type: "array",
+										items: { type: "string" },
+										contains: { type: "string" },
+										unevaluatedItems: false,
+									},
+								},
+							},
+						},
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as {
+				dependentSchemas?: Record<string, Record<string, unknown>>
+			}
+			const dependent = (params.dependentSchemas ?? {}) as Record<string, Record<string, unknown>>
+			const dependentProps = (dependent.items?.properties ?? {}) as Record<string, unknown>
+			const arr = dependentProps.items as Record<string, unknown>
+			// items still evaluates every position, so the restriction is an
+			// ordinary one and stays; only the removed contains moves into the
+			// hint.
+			expect(arr.unevaluatedItems).toBe(false)
+			expect(arr.items).toStrictEqual({ type: "string" })
+			expect(String(arr.description)).toContain("contains")
 		})
 	})
 })

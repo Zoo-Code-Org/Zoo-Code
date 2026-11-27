@@ -28,13 +28,16 @@
 \*             unevaluatedProperties: false - the removed rules were what
 \*             evaluated those keys, so a required property becomes forbidden
 \*             (review 4716476950).
+\* Failure 12: removing contains strands a retained unevaluatedItems: false -
+\*             contains evaluated the array items it matched, so every item
+\*             the original accepted becomes forbidden (review 4719419428).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
-\*             SatPreserved, SiblingConjunctKept.
+\*             SatPreserved, SiblingConjunctKept, ArraySatKept.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
 \* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate and KeepUnevaluated
 \* Expect: fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. KeepDependent
-\* Expect: fails ForbiddenAbsent.
+\* Expect: fails ForbiddenAbsent. KeepContainsUneval fails ArraySatKept.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -44,7 +47,9 @@
 \* deep-schema test in the same block), the compile work count (a chain of
 \* unchanged conditionals must compile each predicate once per level, review
 \* 4714821172 - work is not expressible in this model's source-to-sink
-\* abstraction, pinned by the linear-work timing test), surrogate sanitization,
+\* abstraction, pinned by the linear-work timing test; the same holds for the
+\* reference-target memoization (review 4719419419, pinned by the
+\* repeated-reference timing test)), surrogate sanitization,
 \* the strict flag plumbing, MCP name checks,
 \* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
 \* regression test for review 4712438384).
@@ -61,13 +66,16 @@
 \* changed conditional, 4713747398 sibling anyOf). Round 5 (reviews
 \* 4716476931, 4716476940, 4716476950): 3 added (dependentSchemas traversal,
 \* reference-target tracking, unevaluatedProperties relaxation), 0 covered,
-\* 0 gap.
+\* 0 gap. Round 6 (reviews 4719419419, 4719419428): 1 added (contains
+\* removal relaxes the stranded unevaluatedItems: false, ArraySatKept),
+\* 1 gap (4719419419 memoization is a work-count property, pinned by the
+\* repeated-reference timing test).
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
                                   \* "KeepClosed", "KeepConditional", "AbsorbAnyOf",
-                                  \* "KeepDependent", "KeepRefPredicate"
-                                  \* or "KeepUnevaluated"
+                                  \* "KeepDependent", "KeepRefPredicate",
+                                  \* "KeepUnevaluated" or "KeepContainsUneval"
 
 VARIABLE in
 
@@ -84,12 +92,16 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* dependentSchemas entry instead of directly on the property (dep2), a
 \* predicate whose child is only a $ref to a kw2-carrying target (ref2),
 \* and the closed-object rule shaped as unevaluatedProperties: false
-\* instead of additionalProperties: false (uneval2).
+\* instead of additionalProperties: false (uneval2), the closed-array rule
+\* carrying contains beside unevaluatedItems: false (containsClosed2) with
+\* and without a second items evaluator that keeps the array evaluated
+\* (arrEvaluator2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
            anyOf2 : BOOLEAN, dep2 : BOOLEAN, ref2 : BOOLEAN,
-           uneval2 : BOOLEAN]
+           uneval2 : BOOLEAN, containsClosed2 : BOOLEAN,
+           arrEvaluator2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -99,9 +111,10 @@ Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 \* a constraint or a referenced target changed, moves a oneOf only when a
 \* branch (or a referenced branch target) changed, relaxes
 \* additionalProperties and unevaluatedProperties only under removed
-\* patternProperties, drops a conditional only when its if predicate (or a
-\* referenced predicate target) changed, and always keeps an anyOf sibling
-\* as its own constraint.
+\* patternProperties, relaxes a retained unevaluatedItems: false only under
+\* a removed contains with no remaining items evaluator, drops a conditional
+\* only when its if predicate (or a referenced predicate target) changed,
+\* and always keeps an anyOf sibling as its own constraint.
 \* ForceRequired is the all-required rewrite the strict path used before.
 \* KeepPattern leaves every keyword in place. DropSilently removes without a
 \* note. NotTighten, KeepOneOf, KeepClosed, KeepConditional and AbsorbAnyOf
@@ -118,7 +131,8 @@ Decisions(i) ==
          apRelaxed |-> i.closed2 /\ ~i.uneval2,
          uepRelaxed |-> i.closed2 /\ i.uneval2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
-         siblingKept |-> TRUE]
+         siblingKept |-> TRUE,
+         uiRelaxed |-> i.containsClosed2 /\ ~i.arrEvaluator2]
     IN CASE Variant = "ForceRequired" ->
         [fixed EXCEPT !["required"] = {1, 2}]
     [] Variant = "KeepPattern" ->
@@ -145,6 +159,8 @@ Decisions(i) ==
                       !["condRelaxed"] = i.cond2 /\ i.ifKw]
     [] Variant = "KeepUnevaluated" ->
         [fixed EXCEPT !["uepRelaxed"] = FALSE]
+    [] Variant = "KeepContainsUneval" ->
+        [fixed EXCEPT !["uiRelaxed"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -157,6 +173,7 @@ TypeOK ==
     /\ Decisions(in).uepRelaxed \in BOOLEAN
     /\ Decisions(in).condRelaxed \in BOOLEAN
     /\ Decisions(in).siblingKept \in BOOLEAN
+    /\ Decisions(in).uiRelaxed \in BOOLEAN
 
 Init == in \in Inputs
 Next == UNCHANGED in
@@ -214,5 +231,12 @@ SatPreserved == NotPart(in) /\ OneOfPart(in) /\ ClosedPart(in) /\ CondPart(in)
 SiblingConjunctKept ==
     IF Decisions(in).overlapSafe /\ in.anyOf2 THEN Decisions(in).siblingKept
     ELSE TRUE
+
+\* Safety (review 4719419428): a removed contains with no remaining items
+\* evaluator relaxes the stranded unevaluatedItems: false, so the array
+\* keeps accepting the items the original accepted. With a remaining
+\* evaluator the restriction is ordinary and stays.
+ArraySatKept ==
+    (in.containsClosed2 /\ ~in.arrEvaluator2) => Decisions(in).uiRelaxed
 
 ====

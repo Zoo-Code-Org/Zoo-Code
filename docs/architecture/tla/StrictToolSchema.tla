@@ -81,13 +81,21 @@
 \* test in strict-tool-schema.spec.ts). The property-less object wrap guard
 \* (6084531532) is already demanded by WrappedInnerStrict ("object" shape
 \* without declared properties): covered, closed by the code fix.
+\* Review round 9 (PR #2653, thread 4719419437): a oneOf reached through a
+\* `not` keeps its position - moved under anyOf, the negated predicate would
+\* match every value and the negation would reject values the original
+\* accepted. This round adds the notOneOf input, the KeepsOneOfPosition
+\* hook, and NotOneOfValueKept. 1 added, 0 covered, 0 gap; replays as a
+\* red-verified unit test in strict-tool-schema.spec.ts. The findings
+\* 4719419445 and 4719419450 are unit-test harness coverage and live
+\* outside this spec.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf
 
 Props == {q}
 Types == {"str", "null"}
@@ -135,6 +143,13 @@ RelaxesChangedOneOf(oneOf) == oneOf
 \* Sabotage: the stripped oneOf keeps exactly-one semantics and accepts
 \* nothing.
 NeverRelaxesOneOf(oneOf) == FALSE
+\* Fixed code: a oneOf reached through a `not` keeps its position - the
+\* negated predicate can only widen, so the values the original accepted
+\* stay accepted (review 4719419437).
+KeepsOneOfPosition(underNot) == TRUE
+\* Sabotage: the changed oneOf still moves under anyOf inside the negation,
+\* the negated predicate matches every value, and the negation rejects "a".
+OneOfMovedUnderNot(underNot) == FALSE
 
 DeclaredType == {"str"} \cup (IF qNullable THEN {"null"} ELSE {})
 
@@ -202,6 +217,7 @@ TypeOK ==
     /\ NestedIsOneOf \in {0, 1}
     /\ wrappedInner \in {"none", "object", "array"}
     /\ patOneOf \in BOOLEAN
+    /\ notOneOf \in BOOLEAN
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
@@ -216,12 +232,13 @@ Init ==
     /\ NestedIsOneOf \in {0, 1}
     /\ wrappedInner \in {"none", "object", "array"}
     /\ patOneOf \in BOOLEAN
+    /\ notOneOf \in BOOLEAN
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -251,5 +268,11 @@ WrappedInnerStrict == (oneOfMultiNull /\ wrappedInner # "none") => EmittedInnerS
 \* after stripping. Under the sabotage the stripped exactly-one rule accepts
 \* nothing.
 OneOfValuesKept == patOneOf => RelaxesChangedOneOf(patOneOf)
+
+\* Review round 9 (4719419437): a oneOf under a `not` keeps its position,
+\* so the values the negated original accepted stay accepted. Under the
+\* sabotage the moved anyOf matches every value and the negation rejects
+\* them all.
+NotOneOfValueKept == notOneOf => KeepsOneOfPosition(notOneOf)
 
 ====

@@ -79,9 +79,13 @@ function isUnsupportedKeyword(key: string, value: unknown): boolean {
  * An unsupported additionalProperties value becomes false, because strict mode
  * requires additionalProperties: false on every object schema. A oneOf whose
  * alternatives lost their distinguishing constraints moves under anyOf, so
- * values that matched exactly one original alternative stay accepted.
+ * values that matched exactly one original alternative stay accepted. A oneOf
+ * reached through a `not` keeps its position: under anyOf the negated
+ * predicate would match every value and the negation would reject values the
+ * original accepted (issue #547 review 4719419437). A nested `not` flips the
+ * context back (negation parity).
  */
-export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
+export function stripUnsupportedStrictKeywords(schema: unknown, insideNot = false): unknown {
 	if (!isRecord(schema)) {
 		return schema
 	}
@@ -106,8 +110,12 @@ export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
 			)
 		} else if (SCHEMA_LIST_KEYWORDS.has(key) && Array.isArray(value)) {
 			const branches: unknown[] = value
-			const stripped = branches.map(stripUnsupportedStrictKeywords)
-			if (key === "oneOf" && stripped.some((branch, index) => !deepEqualJson(branch, branches[index]))) {
+			const stripped = branches.map((branch) => stripUnsupportedStrictKeywords(branch, insideNot))
+			if (
+				key === "oneOf" &&
+				!insideNot &&
+				stripped.some((branch, index) => !deepEqualJson(branch, branches[index]))
+			) {
 				// oneOf accepts exactly one alternative: stripping the
 				// distinguishing constraints makes every value match several
 				// branches and oneOf would accept nothing. The branches relax
@@ -119,9 +127,13 @@ export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
 			}
 			value = stripped
 		} else if (SCHEMA_VALUE_KEYWORDS.has(key)) {
+			// Only `not` is a negative context: its subtree keeps a changed oneOf
+			// in place, and a nested `not` flips the parity back (issue #547
+			// review 4719419437).
+			const childContext = key === "not" ? !insideNot : insideNot
 			value = Array.isArray(value)
-				? value.map(stripUnsupportedStrictKeywords)
-				: stripUnsupportedStrictKeywords(value)
+				? value.map((entry) => stripUnsupportedStrictKeywords(entry, childContext))
+				: stripUnsupportedStrictKeywords(value, childContext)
 		}
 		result[key] = value
 	}

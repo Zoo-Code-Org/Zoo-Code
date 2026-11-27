@@ -20,14 +20,20 @@
  * - compilation never turns a satisfiable schema into an unsatisfiable one:
  *   removing patternProperties relaxes a retained additionalProperties: false
  *   and a retained unevaluatedProperties: false (the removed rules were what
- *   evaluated those keys), a oneOf whose branches - or whose branches'
+ *   evaluated those keys), removing contains relaxes a retained
+ *   unevaluatedItems: false for the same reason, a oneOf whose branches - or
+ *   whose branches'
  *   reference targets - changed moves under anyOf as its own allOf conjunct
  *   (an unchanged sibling anyOf keeps applying on its own), a not whose
  *   predicate changed is dropped, and a conditional whose if predicate changed
  *   loses its then/else branches. A predicate that only references schemas
  *   ($ref) counts as changed when a referenced target itself compiles
  *   differently (each original rule stays in the hint);
- * - compilation is pure: the caller-owned schema object is never mutated.
+ * - compilation is pure: the caller-owned schema object is never mutated;
+ * - finished node compilations are memoized per document, because predicate
+ *   checks recompile shared reference targets and an unmemoized chain of
+ *   $ref-linked definitions costs exponential work on a small schema
+ *   (issue #547 review 4719419419);
  *
  * Unlike stripUnsupportedStrictKeywords (the strict-mode sanitizer applied for
  * strict: true endpoints), this runs regardless of strictness and never
@@ -62,6 +68,16 @@ const DEEPSEEK_REJECTED_SCHEMA_KEYWORDS = new Set([
 // Guards against pathological (deeply nested or cyclic-by-construction)
 // schemas: past this depth the remaining nodes are passed through uncompiled.
 const MAX_SCHEMA_DEPTH = 32
+
+/**
+ * Per-document memo of finished node compilations. The same schema object at
+ * the same depth always compiles to the same output, and the predicate checks
+ * (if, oneOf branches, not) recompile shared reference targets: without the
+ * memo a chain of $ref-linked definitions recompiles every level once per
+ * referencing predicate, which is exponential work on a small acyclic schema
+ * and blocks the synchronous request path (issue #547 review 4719419419).
+ */
+type SchemaCompileMemo = WeakMap<object, Map<number, unknown>>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -129,13 +145,13 @@ function resolveLocalRef(root: unknown, ref: string): { resolved: boolean; targe
  * constraints the original did not have - a tightening (issue #547 review
  * 4716476940).
  */
-function referencesUnchangedTargets(refs: string[], root: unknown, depth: number): boolean {
+function referencesUnchangedTargets(refs: string[], root: unknown, depth: number, memo: SchemaCompileMemo): boolean {
 	for (const ref of refs) {
 		const resolved = resolveLocalRef(root, ref)
 		if (!resolved.resolved) {
 			return false
 		}
-		if (!deepEqualJson(compileSchemaNode(resolved.target, depth + 1, root), resolved.target)) {
+		if (!deepEqualJson(compileSchemaNode(resolved.target, depth + 1, root, memo), resolved.target)) {
 			return false
 		}
 	}
@@ -172,9 +188,17 @@ function describeRemovedConstraints(removed: Record<string, unknown>): string {
  * never mutated. Container positions (properties, items, combinators and the
  * keyword-driven schema values) are compiled depth-first.
  */
-function compileSchemaNode(schema: unknown, depth: number, root: unknown): unknown {
+function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: SchemaCompileMemo): unknown {
 	if (!isRecord(schema) || depth > MAX_SCHEMA_DEPTH) {
 		return schema
+	}
+
+	// Compilation is a pure function of (schema, depth, root): a finished
+	// (node, depth) pair can be reused by every later predicate that walks
+	// the same target at the same depth (issue #547 review 4719419419).
+	const memoized = memo.get(schema)?.get(depth)
+	if (memoized !== undefined) {
+		return memoized
 	}
 
 	const result: Record<string, unknown> = {}
@@ -188,8 +212,9 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 	// order (issue #547 review 4713747391). The predicate compiles exactly
 	// once per level and the key loop reuses this copy, so a chain of
 	// unchanged conditionals costs linear work, not exponential
-	// (issue #547 review 4714821172).
-	const compiledIf = isRecord(schema.if) ? compileSchemaNode(schema.if, depth + 1, root) : undefined
+	// (issue #547 review 4714821172); the memo below also deduplicates the
+	// reference-target compilations (issue #547 review 4719419419).
+	const compiledIf = isRecord(schema.if) ? compileSchemaNode(schema.if, depth + 1, root, memo) : undefined
 	let conditionalRelaxed = compiledIf !== undefined && !deepEqualJson(compiledIf, schema.if)
 	if (!conditionalRelaxed && compiledIf !== undefined) {
 		// The predicate object compiled unchanged, but predicates that only
@@ -198,7 +223,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 		// (issue #547 review 4716476940).
 		const refs: string[] = []
 		collectRefPointers(schema.if, new Set(), refs)
-		if (refs.length > 0 && !referencesUnchangedTargets(refs, root, depth)) {
+		if (refs.length > 0 && !referencesUnchangedTargets(refs, root, depth, memo)) {
 			conditionalRelaxed = true
 		}
 	}
@@ -213,7 +238,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 			if (isRecord(value)) {
 				const compiled: Record<string, unknown> = {}
 				for (const [name, subSchema] of Object.entries(value)) {
-					defineOwnKey(compiled, name, compileSchemaNode(subSchema, depth + 1, root))
+					defineOwnKey(compiled, name, compileSchemaNode(subSchema, depth + 1, root, memo))
 				}
 				defineOwnKey(result, key, compiled)
 				continue
@@ -223,13 +248,13 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 				result,
 				key,
 				Array.isArray(value)
-					? value.map((entry) => compileSchemaNode(entry, depth + 1, root))
-					: compileSchemaNode(value, depth + 1, root),
+					? value.map((entry) => compileSchemaNode(entry, depth + 1, root, memo))
+					: compileSchemaNode(value, depth + 1, root, memo),
 			)
 			continue
 		} else if (key === "anyOf" || key === "oneOf" || key === "allOf" || key === "prefixItems") {
 			if (Array.isArray(value)) {
-				const compiledBranches = value.map((entry) => compileSchemaNode(entry, depth + 1, root))
+				const compiledBranches = value.map((entry) => compileSchemaNode(entry, depth + 1, root, memo))
 				const branchesChanged = compiledBranches.some((branch, index) => !deepEqualJson(branch, value[index]))
 				let relaxed = key === "oneOf" && branchesChanged
 				if (!relaxed && key === "oneOf") {
@@ -239,7 +264,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 					// match several branches (issue #547 review 4716476940).
 					const refs: string[] = []
 					collectRefPointers(value, new Set(), refs)
-					relaxed = refs.length > 0 && !referencesUnchangedTargets(refs, root, depth)
+					relaxed = refs.length > 0 && !referencesUnchangedTargets(refs, root, depth, memo)
 				}
 				if (relaxed) {
 					// oneOf accepts exactly one alternative: compilation that
@@ -255,7 +280,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 			}
 		} else if (key === "not") {
 			if (isRecord(value)) {
-				const compiledChild = compileSchemaNode(value, depth + 1, root)
+				const compiledChild = compileSchemaNode(value, depth + 1, root, memo)
 				const childUnchanged = deepEqualJson(compiledChild, value)
 				let targetsUnchanged = true
 				if (childUnchanged) {
@@ -267,7 +292,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 					const refs: string[] = []
 					collectRefPointers(value, new Set(), refs)
 					if (refs.length > 0) {
-						targetsUnchanged = referencesUnchangedTargets(refs, root, depth)
+						targetsUnchanged = referencesUnchangedTargets(refs, root, depth, memo)
 					}
 				}
 				if (childUnchanged && targetsUnchanged) {
@@ -303,12 +328,12 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 				continue
 			}
 			if (isRecord(value)) {
-				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root))
+				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root, memo))
 				continue
 			}
 		} else if (key === "additionalProperties" || key === "propertyNames") {
 			if (isRecord(value)) {
-				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root))
+				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root, memo))
 				continue
 			}
 		}
@@ -346,6 +371,19 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 		// and stays untouched.
 		defineOwnKey(result, "unevaluatedProperties", true)
 	}
+	// The same annotation dependency on arrays: contains evaluated the items
+	// it matched, so removing it strands a retained unevaluatedItems: false
+	// and forbids every item the original accepted (issue #547 review
+	// 4719419428). A retained items or prefixItems still evaluates the
+	// array, so that restriction stays untouched.
+	if (
+		"contains" in removed &&
+		result.unevaluatedItems === false &&
+		!("items" in result) &&
+		!("prefixItems" in result)
+	) {
+		defineOwnKey(result, "unevaluatedItems", true)
+	}
 
 	if (Object.keys(removed).length > 0) {
 		const hint = describeRemovedConstraints(removed)
@@ -357,6 +395,12 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
 		)
 	}
 
+	let depthResults = memo.get(schema)
+	if (!depthResults) {
+		depthResults = new Map()
+		memo.set(schema, depthResults)
+	}
+	depthResults.set(depth, result)
 	return result
 }
 
@@ -368,5 +412,5 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown): unkno
  * Pure: the input schema is left untouched.
  */
 export function compileToolParametersForDeepSeek(schema: unknown): unknown {
-	return compileSchemaNode(schema, 0, schema)
+	return compileSchemaNode(schema, 0, schema, new WeakMap())
 }

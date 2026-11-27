@@ -197,6 +197,42 @@ describe("stripUnsupportedStrictKeywords", () => {
 		})
 	})
 
+	it("keeps a oneOf under not in place so the negated set keeps accepting (review 4719419437)", () => {
+		const stripped = strip({
+			type: "object",
+			properties: { v: { not: { oneOf: [{ type: "string", minLength: 1 }, { type: "string" }] } } },
+			required: ["v"],
+		})
+		const negated = ((stripped.properties as Schema).v as Schema).not as Schema
+		// The oneOf keeps its position with the hint on the branch that lost
+		// a constraint: moved under anyOf, the negated predicate would match
+		// every string and the negation would reject values the original
+		// accepted ("a" matches both original branches, so the oneOf refuses
+		// it and the not accepts it).
+		expect(negated.oneOf).toStrictEqual([
+			{ type: "string", description: constraintNote({ minLength: 1 }) },
+			{ type: "string" },
+		])
+		expect(negated).not.toHaveProperty("anyOf")
+		// accepts() encodes the combinator semantics, not the stripper's
+		// rules: the kept exactly-one rule still refuses the overlapping
+		// branch pair, so the enclosing not keeps accepting "a".
+		expect(accepts(negated, "a")).toBe(false)
+	})
+
+	it("still moves a stripped oneOf beside a not-toggling double negation (review 4719419437)", () => {
+		// not (not (changed oneOf)) is the oneOf's own position again: the
+		// relaxation applies there, only the directly negated subtree keeps
+		// the oneOf.
+		const stripped = strip({ not: { not: { oneOf: [{ type: "integer", minimum: 0 }, { type: "null" }] } } })
+		const inner = (stripped.not as Schema).not as Schema
+		expect(inner.anyOf).toStrictEqual([
+			{ type: "integer", description: constraintNote({ minimum: 0 }) },
+			{ type: "null" },
+		])
+		expect(inner).not.toHaveProperty("oneOf")
+	})
+
 	it.each([
 		"items",
 		"additionalItems",

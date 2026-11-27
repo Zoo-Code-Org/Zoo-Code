@@ -197,6 +197,7 @@ describe("executeCommandTool", () => {
 			// command never transitions to background after the requested 5
 			// seconds. The salvage converts number-declared arguments before
 			// promotion; this pins the conversion the number feeds.
+			delete process.env.ROO_CLI_RUNTIME
 			expect(executeCommandModule.resolveAgentTimeoutMs(5)).toBe(5000)
 			expect(executeCommandModule.resolveAgentTimeoutMs("5" as unknown as number)).toBe(0)
 			expect(executeCommandModule.resolveAgentTimeoutMs(null)).toBe(0)
