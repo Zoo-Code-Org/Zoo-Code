@@ -18,4 +18,9 @@ ValidAliased(inp) == (inp.pin = "absent") => (~inp.pinExists)
 \* before the Task constructor). WriteFailureRestores must fail.
 ProceedAbort(dec, inp) == (dec.f = Keep) \/ inp.pinWriteOk
 
+\* Sabotage: the no-write path keeps the previous modeled pin instead of the pin
+\* the selected input carried in (the pre-round fallback). NoWritePreservesPin must fail.
+PersistedPinStale(dec, inp, prev) ==
+    IF dec.f # Keep /\ inp.pinWriteOk /\ inp.distinctRecord THEN dec.f ELSE prev
+
 ====

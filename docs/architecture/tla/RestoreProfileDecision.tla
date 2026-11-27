@@ -24,10 +24,12 @@
 \*   pin write rejects (CR thread on ClineProvider.ts:1652).
 \* Run each config on RestoreProfileDecisionMC.tla. The MC module holds the sabotage.
 \* Expected: Spec.cfg passes every invariant; Sabotage.cfg fails FollowActive;
-\* CacheAlias.cfg fails RefreshPersists; WriteAbort.cfg fails WriteFailureRestores.
-\* Result: Spec.cfg checks and holds all six invariants in 132 distinct states.
-\* CacheAlias.cfg violates RefreshPersists (21 states), Sabotage.cfg violates FollowActive (29
-\* states), WriteAbort.cfg violates WriteFailureRestores (15 states); no other
+\* CacheAlias.cfg fails RefreshPersists; WriteAbort.cfg fails WriteFailureRestores;
+\* StalePin.cfg fails NoWritePreservesPin.
+\* Result: Spec.cfg checks and holds all seven invariants in 48 distinct states.
+\* CacheAlias.cfg violates RefreshPersists (21 states), Sabotage.cfg violates
+\* FollowActive (27 states), WriteAbort.cfg violates WriteFailureRestores (15
+\* states), StalePin.cfg violates NoWritePreservesPin (13 states); no other
 \* invariant breaks in any run.
 \* Not modeled: the profile list (pinnedProfileExists is an oracle the caller computes),
 \* the activateProviderProfile side effects, mode restoration, and the CLI runtime
@@ -53,6 +55,10 @@
 \* expressing it would mean modeling the caller's profile.apiProvider activation
 \* guard, which sits outside the decision record like the activation side
 \* effects above; pinned by the strengthened exact-config unit assertion).
+\* Review (PR 2649, round on ea2d69b75): 1 added (NoWritePreservesPin + the sink
+\* fallback it pins: the no-write path now persists the selected input's pin,
+\* factored as PersistedPin so StalePin.cfg sabotages the stale form; CR thread
+\* RestoreProfileDecision.tla:109), 0 covered, 0 gap.
 
 CONSTANT NoActive   \* sentinel: no resolvable active profile at restore time
 
@@ -80,6 +86,12 @@ Decide(inp) ==
 \* A refresh-shaped input is one whose decision carries a new pin.
 Refreshes(inp) == Decide(inp).f # Keep
 
+\* The sink: the pin persisted after one restore. A refresh whose write succeeds on
+\* a record distinct from the store-cached one rewrites the pin; every other path
+\* writes nothing, so the pin the history item carried in stays persisted.
+PersistedPin(dec, inp, prev) ==
+    IF dec.f # Keep /\ inp.pinWriteOk /\ inp.distinctRecord THEN dec.f ELSE inp.pin
+
 \* Caller rules: no existing flag for an absent pin, and a refresh write is built
 \* from a record distinct from the store-cached one (a copy), never the cached
 \* record itself.
@@ -104,9 +116,7 @@ Next ==
         /\ decision' = Decide(inp)
            \* An aliased write (the cached record handed back to the store) makes the
            \* delta compare omit apiConfigName, so the stale pin survives on disk.
-        /\ storedPin' = IF decision'.f # Keep /\ inp.pinWriteOk /\ inp.distinctRecord
-                           THEN decision'.f
-                           ELSE storedPin
+        /\ storedPin' = PersistedPin(decision', inp, storedPin)
         /\ restored' = Proceed(decision', inp)
 
 Spec == Init /\ [][Next]_vars
@@ -130,6 +140,11 @@ LegacyFallback ==
 
 RefreshPersists ==
     (decision.f # Keep /\ input.pinWriteOk) => storedPin = decision.f
+
+\* No write landed (no refresh, a failed refresh write, or an aliased record the
+\* store's delta compare drops): the persisted pin is the one the input carried in.
+NoWritePreservesPin ==
+    (~(decision.f # Keep /\ input.pinWriteOk /\ input.distinctRecord)) => storedPin = input.pin
 
 WriteFailureRestores == restored
 
