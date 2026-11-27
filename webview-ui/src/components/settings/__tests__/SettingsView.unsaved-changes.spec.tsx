@@ -1308,6 +1308,11 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 					<button data-testid="clear-deny-list" onClick={() => setCachedStateField("deniedCommands", [])}>
 						Clear deny list
 					</button>
+					<button
+						data-testid="edit-allow-list"
+						onClick={() => setCachedStateField("allowedCommands", ["echo"])}>
+						Edit allow list
+					</button>
 				</div>
 			),
 		)
@@ -1352,6 +1357,11 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		answerSave(saveId, { success: true })
 
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		// Save is disabled while the answer is outstanding, so only an edit made
+		// after the answer distinguishes a settled form from a still-pending one.
+		fireEvent.click(screen.getByTestId("edit-allow-list"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 	})
 
 	it("settles the save against the refreshed state posted just before the answer", async () => {
@@ -1443,6 +1453,11 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 						onClick={() => setCachedStateField("alwaysAllowReadOnly", true)}>
 						Edit a non-list setting
 					</button>
+					<button
+						data-testid="edit-allow-list"
+						onClick={() => setCachedStateField("allowedCommands", ["echo"])}>
+						Edit allow list
+					</button>
 				</div>
 			),
 		)
@@ -1495,6 +1510,11 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
 		answerSave(formatSaveId, { success: true })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		// Save is disabled while the answer is outstanding, so only an edit made
+		// after the answer distinguishes a settled form from a still-pending one.
+		fireEvent.click(screen.getByTestId("edit-allow-list"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 	})
 
 	it("clears the unsaved flag and releases every list when the refresh shows all writes landed", async () => {

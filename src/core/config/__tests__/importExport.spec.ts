@@ -13,12 +13,15 @@ import { makeExtensionContext } from "../../../test-utils/vscode"
 import {
 	awaitCommandListImportSettled,
 	beginCommandListImport,
+	beginCommandListSave,
+	beginOrderedCommandListSave,
 	importSettings,
 	importSettingsFromFile,
 	importSettingsFromPath,
 	importSettingsWithFeedback,
 	exportSettings,
 	mirrorImportedCommandLists,
+	pendingCommandListMirrors,
 } from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
@@ -259,6 +262,61 @@ describe("importExport", () => {
 			expect(result).toEqual({ success: false, error: "current profile write failed" })
 			expect(mockContextProxy.setProviderSettings).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
+		})
+
+		it("restores the prior command lists when a failure follows the state write", async () => {
+			;(fs.readFile as Mock).mockResolvedValue(
+				JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "test",
+						apiConfigs: {
+							test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+						},
+					},
+					globalSettings: { mode: "code", allowedCommands: ["imported"], deniedCommands: ["imported-deny"] },
+				}),
+			)
+
+			// A double of the two keys the import writes. The failure below lands
+			// after the state write, so only a restore puts these values back.
+			const state: { allowedCommands?: string[]; deniedCommands?: string[] } = {
+				allowedCommands: ["prior"],
+				deniedCommands: ["prior-deny"],
+			}
+			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
+				key === "allowedCommands"
+					? state.allowedCommands
+					: key === "deniedCommands"
+						? state.deniedCommands
+						: undefined,
+			)
+			mockContextProxy.setValues.mockImplementation(async (values) => {
+				if (values.allowedCommands) state.allowedCommands = values.allowedCommands
+				if (values.deniedCommands) state.deniedCommands = values.deniedCommands
+			})
+			mockContextProxy.setValue.mockImplementation(async (key, value) => {
+				if (key === "allowedCommands") state.allowedCommands = value as string[]
+				if (key === "deniedCommands") state.deniedCommands = value as string[]
+			})
+			mockProviderSettingsManager.listConfig.mockRejectedValueOnce(new Error("config store is locked"))
+
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result).toEqual({ success: false, error: "config store is locked" })
+			// The imported lists did reach extension state, so the values asserted
+			// next were written over and had to be put back.
+			expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+				expect.objectContaining({ allowedCommands: ["imported"], deniedCommands: ["imported-deny"] }),
+			)
+			// The settings file was never written, and extension state holds the
+			// lists it held before the import.
+			expect(vscode.workspace.getConfiguration).not.toHaveBeenCalled()
+			expect(state.allowedCommands).toEqual(["prior"])
+			expect(state.deniedCommands).toEqual(["prior-deny"])
 		})
 	})
 
@@ -878,6 +936,66 @@ describe("importExport", () => {
 			showWarningMessageSpy.mockRestore()
 		})
 
+		// The pending store outlives one call, so each case below clears it before and
+		// after. A successful mirror for both keys is the documented clear path.
+		async function clearPendingMirrors() {
+			const config = makeWorkspaceConfiguration()
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+			await mirrorImportedCommandLists({ allowedCommands: [], deniedCommands: [] })
+			vi.mocked(vscode.window.showWarningMessage).mockClear()
+		}
+
+		it("keeps the entries of a failed mirror as pending until a later mirror succeeds", async () => {
+			await clearPendingMirrors()
+
+			const config = makeWorkspaceConfiguration()
+			const update = vi.mocked(config.update)
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+			update.mockRejectedValue(new Error("settings file is locked"))
+
+			await mirrorImportedCommandLists({ allowedCommands: ["git", "aws"], deniedCommands: ["rm -rf"] })
+
+			// The settings file kept the old list, so neither key has a layer holding
+			// these entries. The save path reads them here instead.
+			expect(pendingCommandListMirrors()).toEqual({
+				allowedCommands: ["git", "aws"],
+				deniedCommands: ["rm -rf"],
+			})
+
+			update.mockReset()
+			update.mockResolvedValue(undefined)
+			await mirrorImportedCommandLists({ allowedCommands: ["git", "aws"], deniedCommands: ["rm -rf"] })
+
+			// The configuration now carries both lists, so the mark would only
+			// duplicate a layer the save already reads.
+			expect(pendingCommandListMirrors()).toEqual({ allowedCommands: [], deniedCommands: [] })
+
+			await clearPendingMirrors()
+		})
+
+		it("leaves no pending entry when the import fails before it can mirror", async () => {
+			await clearPendingMirrors()
+
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ allowedCommands: ["git", "aws"] }))
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			// The state write lands, and the failure after it rolls both lists back.
+			mockProviderSettingsManager.listConfig.mockRejectedValue(new Error("config listing failed"))
+			const update = mockCommandListConfig()
+
+			await runFeedback(filePath)
+
+			// A failed import reaches no mirror, so it marks nothing. A mark here would
+			// keep entries the rollback already discarded.
+			expect(update).not.toHaveBeenCalled()
+			expect(pendingCommandListMirrors()).toEqual({ allowedCommands: [], deniedCommands: [] })
+
+			await clearPendingMirrors()
+		})
+
 		it("posts the imported state while the mirror warning is still pending", async () => {
 			const filePath = "/mock/path/settings.json"
 			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ allowedCommands: ["git"] }))
@@ -974,7 +1092,7 @@ describe("importExport", () => {
 			expect(saveObserved).toEqual(["git", "imported"])
 		})
 
-		it("settles the import span when the import throws", async () => {
+		it("releases the import span before a state post that fails after a successful import", async () => {
 			const filePath = "/mock/path/settings.json"
 			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ allowedCommands: ["git"] }))
 			;(fs.access as Mock).mockResolvedValue(undefined)
@@ -983,29 +1101,73 @@ describe("importExport", () => {
 			mockContextProxy.setValue.mockResolvedValue(undefined)
 			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
 
+			const mirrorWrite = createDeferred<void>()
 			const config = makeWorkspaceConfiguration()
-			// `mirrorCommandList` catches a failed write, so the span's own `finally`
-			// is the path under test rather than the retry.
-			vi.mocked(config.update).mockResolvedValue(undefined)
+			vi.mocked(config.update).mockImplementation(() => mirrorWrite.promise)
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
 
+			// The post stays pending until it is rejected below, so the save waiter
+			// below settles on the release alone. A span that covered the post would
+			// leave that waiter pending while the post hangs.
+			let rejectPost!: (error: Error) => void
+			const postGate = new Promise<void>((_, reject) => {
+				rejectPost = reject
+			})
 			const provider = feedbackProvider()
-			provider.postStateToWebview.mockRejectedValue(new Error("state post failed"))
+			provider.postStateToWebview.mockReturnValue(postGate)
 
-			await expect(
-				importSettingsWithFeedback(
-					{
-						providerSettingsManager: mockProviderSettingsManager,
-						contextProxy: mockContextProxy,
-						customModesManager: mockCustomModesManager,
-						provider,
-					},
-					filePath,
-				),
-			).rejects.toThrow("state post failed")
+			const imported = importSettingsWithFeedback(
+				{
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+					provider,
+				},
+				filePath,
+			)
+
+			// The mirror holds the span open, so the post cannot have started yet.
+			await vi.waitFor(() => expect(config.update).toHaveBeenCalled())
+			expect(provider.postStateToWebview).not.toHaveBeenCalled()
+
+			let saveSettled = false
+			const save = awaitCommandListImportSettled().then(() => {
+				saveSettled = true
+			})
+
+			mirrorWrite.resolve()
+			await vi.waitFor(() => expect(provider.postStateToWebview).toHaveBeenCalled())
+			await flushMacrotasks()
+
+			// The post is still pending and the waiter has already settled, so the
+			// span was released before the post rather than by its failure.
+			expect(saveSettled).toBe(true)
+
+			rejectPost(new Error("state post failed"))
+			await expect(imported).rejects.toThrow("state post failed")
+			await save
 
 			// A save that arrives after the failed import must not wait for a span
 			// whose owner is gone.
+			await expect(awaitCommandListImportSettled()).resolves.toBeUndefined()
+		})
+
+		it("settles the import span when the file dialog throws", async () => {
+			stubValidProviderProfiles()
+			// The rejection reaches the import body with no file to read, so the
+			// span is open when it happens and its release is the only way a save
+			// can stop waiting.
+			;(vscode.window.showOpenDialog as Mock).mockRejectedValueOnce(new Error("dialog unavailable"))
+
+			await expect(
+				importSettingsWithFeedback({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+					provider: feedbackProvider(),
+				}),
+			).rejects.toThrow("dialog unavailable")
+
 			await expect(awaitCommandListImportSettled()).resolves.toBeUndefined()
 		})
 
@@ -1033,6 +1195,177 @@ describe("importExport", () => {
 			firstRelease()
 			secondRelease()
 			await expect(awaitCommandListImportSettled()).resolves.toBeUndefined()
+		})
+
+		it("holds an import's configuration writes until a save in flight has landed", async () => {
+			const config = makeWorkspaceConfiguration()
+			const update = vi.mocked(config.update)
+			update.mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			// The save holds its span, so the import has to wait for it. The mirror is
+			// the import's configuration write, and the settings file it fills is the
+			// store a save reads.
+			const releaseSave = beginCommandListSave()
+			let importDone = false
+			const imported = mirrorImportedCommandLists({ allowedCommands: ["imported"], deniedCommands: [] }).then(
+				() => {
+					importDone = true
+				},
+			)
+
+			await flushMacrotasks()
+			// The save still owns the window, so no imported entry may reach the file yet.
+			expect(update).not.toHaveBeenCalled()
+			expect(importDone).toBe(false)
+
+			releaseSave()
+			await imported
+
+			expect(update).toHaveBeenCalledWith("allowedCommands", ["imported"], vscode.ConfigurationTarget.Global)
+		})
+
+		it("opens a save's span only after the import it would overtake has settled", async () => {
+			// The import holds its span from before its configuration read until after
+			// its mirror, and the mirror waits for a save span. A save that took its
+			// span before waiting for the import would therefore wait, while holding,
+			// for an import that waits back: neither side could finish. The save here
+			// waits on a deferred read instead, so the import is inside its span and
+			// parked when the save starts.
+			const filePath = "/mock/path/settings.json"
+			const readFile = createDeferred<string>()
+			;(fs.readFile as Mock).mockReturnValue(readFile.promise)
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+
+			const config = makeWorkspaceConfiguration()
+			const update = vi.mocked(config.update)
+			update.mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			const imported = importSettingsWithFeedback(
+				{
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+					provider: feedbackProvider(),
+				},
+				filePath,
+			)
+
+			// The import has opened its span and is parked inside its body.
+			await flushMacrotasks()
+
+			// The save side opens its span through the ordered helper. The helper
+			// waits for the import span, so the save must not have opened its span.
+			let saveOpened = false
+			const save = beginOrderedCommandListSave().then((release) => {
+				saveOpened = true
+				return release
+			})
+
+			await flushMacrotasks()
+			expect(saveOpened).toBe(false)
+
+			// The import now reaches its mirror, which waits for a save span. The save
+			// span is not open, so the import must not park here. Both finish.
+			readFile.resolve(validProfileFile({ allowedCommands: ["imported"], deniedCommands: [] }))
+			const [, releaseSave] = await Promise.all([imported, save])
+
+			expect(saveOpened).toBe(true)
+			expect(update).toHaveBeenCalledWith("allowedCommands", ["imported"], vscode.ConfigurationTarget.Global)
+
+			releaseSave()
+			// The import's release settled its span, so a later save opens at once. The
+			// handle is released again, because an open span would stall every import
+			// that runs after this case.
+			const laterRelease = await beginOrderedCommandListSave()
+			expect(typeof laterRelease).toBe("function")
+			laterRelease()
+		})
+
+		it("holds an import's state write back when a save span opens while the import acquires", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(
+				validProfileFile({ allowedCommands: ["imported"], deniedCommands: [] }),
+			)
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+
+			const update = mockCommandListConfig()
+			update.mockResolvedValue(undefined)
+
+			let saveReleased = false
+			let saveReleasedAtStateWrite: boolean | undefined
+			vi.mocked(mockContextProxy.setValues).mockImplementation(async () => {
+				saveReleasedAtStateWrite = saveReleased
+			})
+
+			// Both sides suspend only on their own acquisition wait, so the save's
+			// continuation opens its span before the import's continuation runs.
+			const save = beginOrderedCommandListSave()
+			const imported = runFeedback(filePath)
+
+			const releaseSave = await save
+			// The import reaches its state write here only if it opened its span without
+			// observing the save span the line above put in place.
+			await flushMacrotasks()
+
+			saveReleased = true
+			releaseSave()
+			await imported
+
+			// A save reads the state copy back into the settings file, so an import that
+			// writes it inside a save's span leaves the two stores describing different
+			// lists. The write must land after the save released instead.
+			expect(saveReleasedAtStateWrite).toBe(true)
+			expect(mockContextProxy.setValues).toHaveBeenCalledTimes(1)
+			expect(update).toHaveBeenCalledWith("allowedCommands", ["imported"], vscode.ConfigurationTarget.Global)
+		})
+
+		it("holds a save's span back while an import span that opened first is still writing", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(
+				validProfileFile({ allowedCommands: ["imported"], deniedCommands: [] }),
+			)
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+
+			// The mirror write is the import's last write inside its span, so a save span
+			// that opens before it is a save span that opened inside the import.
+			let importMirrored = false
+			const config = makeWorkspaceConfiguration()
+			const update = vi.mocked(config.update)
+			update.mockImplementation(async () => {
+				importMirrored = true
+			})
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			// The import's continuation runs first and opens the import span, so the
+			// save's continuation has a span to observe when it runs.
+			const imported = runFeedback(filePath)
+
+			let saveOpenedBeforeImportRelease: boolean | undefined
+			const save = beginOrderedCommandListSave().then((release) => {
+				saveOpenedBeforeImportRelease = !importMirrored
+				return release
+			})
+
+			const releaseSave = await save
+			releaseSave()
+			await imported
+
+			// A save that opens inside an import's span reads the settings file before
+			// the import mirrored into it, so the save must wait the span out instead.
+			expect(typeof releaseSave).toBe("function")
+			expect(saveOpenedBeforeImportRelease).toBe(false)
+			expect(update).toHaveBeenCalledWith("allowedCommands", ["imported"], vscode.ConfigurationTarget.Global)
 		})
 
 		it("should handle import when reasoning budget fields are missing from config", async () => {

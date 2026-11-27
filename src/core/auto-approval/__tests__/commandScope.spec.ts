@@ -1290,9 +1290,9 @@ it("commandListFolderForResource: drops the folder layer when a registered root'
 	vi.clearAllMocks()
 	const rootPath = path.join(path.sep + "mock", "broken-root")
 	const rootUri = makeUri(rootPath)
-	// A relocated or deleted root has no real path, so nothing confirms that it
-	// holds the cwd. Matching the cwd against the registered path could claim a
-	// directory the root does not own, so the lookup gives no folder layer.
+	// A relocated or deleted root has no real path, so its registered path is all
+	// that is left. That path bounds the cwd, so the root may own it. Nothing
+	// confirms it does, and no other root may decide instead.
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
 	vi.mocked(fs.realpathSync).mockImplementation((target) => {
 		if (String(target) === rootPath) {
@@ -1322,6 +1322,68 @@ it("commandListFolderForResource: an unresolvable root keeps an enclosing root f
 	})
 
 	expect(commandListFolderForResource(path.join(innerRoot, "sub"))).toBeUndefined()
+})
+
+it("checkAutoApproval command: keeps a healthy folder's deny when an unrelated registered root cannot be resolved", async () => {
+	vi.clearAllMocks()
+	// The root that owns the cwd resolves. The other root cannot, and its
+	// registered path cannot bound the cwd either, so it cannot own it. One
+	// failing root therefore says nothing about this cwd, and the folder that
+	// does own it keeps its deny.
+	const healthyRoot = path.join(path.sep + "mock", "healthy-root")
+	const brokenRoot = path.join(path.sep + "mock", "broken-root")
+	const healthyUri = makeUri(healthyRoot)
+	workspaceState.workspaceFolders = [{ uri: healthyUri }, { uri: makeUri(brokenRoot) }]
+	workspaceState.foldersByPath.set(healthyRoot, healthyUri)
+	vi.mocked(fs.realpathSync).mockImplementation((target) => {
+		if (String(target) === brokenRoot) {
+			throw new Error("ENOENT: no such file or directory")
+		}
+		return String(target)
+	})
+	mockFolderConfigurations({ [healthyRoot]: { gate: true, deny: ["echo"] } })
+
+	const result = await checkAutoApproval({
+		// The baked pair would approve exactly what the healthy folder denies.
+		state: taskFolderState(["echo"]),
+		cwd: path.join(healthyRoot, "sub"),
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, healthyUri)
+})
+
+it("checkAutoApproval command: keeps an unresolvable root that may hold the cwd from falling through to an enclosing root's allow", async () => {
+	vi.clearAllMocks()
+	// The inverse of the case above, and the reason an unresolvable root is not
+	// simply skipped. The inner root's registered path bounds the cwd, so it may
+	// own it. The enclosing root resolves and allows the command, but it must not
+	// decide for a directory the inner root may own: that would approve what the
+	// inner folder's deny would block.
+	const outerRoot = path.sep + "mock"
+	const innerRoot = path.join(outerRoot, "inner")
+	const outerUri = makeUri(outerRoot)
+	workspaceState.workspaceFolders = [{ uri: outerUri }, { uri: makeUri(innerRoot) }]
+	workspaceState.foldersByPath.set(outerRoot, outerUri)
+	vi.mocked(fs.realpathSync).mockImplementation((target) => {
+		if (String(target) === innerRoot) {
+			throw new Error("ENOENT: no such file or directory")
+		}
+		return String(target)
+	})
+	mockFolderConfigurations({ [outerRoot]: { gate: true, allow: ["echo"] } })
+
+	const result = await checkAutoApproval({
+		// Empty raw global layers: only a folder layer could approve.
+		state: taskFolderState([]),
+		cwd: path.join(innerRoot, "sub"),
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "ask" })
 })
 
 it("commandListFolderForResource: a path inside no root stays unmatched", () => {
@@ -1568,6 +1630,9 @@ describe("classifyCommandListBaseline", () => {
 		stateGlobal: string[]
 		configGlobal: string[]
 		globalLayerAtSaveStart: string[] | undefined
+		stateCopyIsShippedDefault: boolean
+		/** Entries an import could not mirror yet. Absent means none are pending. */
+		pendingGlobalEntries?: string[]
 		survives: boolean
 	}
 
@@ -1580,6 +1645,7 @@ describe("classifyCommandListBaseline", () => {
 			stateGlobal: [],
 			configGlobal: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
 			survives: true,
 		},
 		{
@@ -1590,6 +1656,7 @@ describe("classifyCommandListBaseline", () => {
 			stateGlobal: [],
 			configGlobal: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
 			survives: true,
 		},
 		{
@@ -1600,17 +1667,30 @@ describe("classifyCommandListBaseline", () => {
 			stateGlobal: [],
 			configGlobal: ["git"],
 			globalLayerAtSaveStart: ["git"],
+			stateCopyIsShippedDefault: false,
 			survives: true,
 		},
 		{
-			name: "a baseline entry only the state copy holds survives when the configuration has no global layer",
+			name: "a baseline entry only the state copy holds survives when that copy is the shipped default",
 			baseline: ["git"],
 			incoming: ["git"],
 			workspace: [],
 			stateGlobal: ["git"],
 			configGlobal: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: true,
 			survives: true,
+		},
+		{
+			name: "a baseline entry only the state copy holds is dropped when the copy is not the shipped default",
+			baseline: ["git"],
+			incoming: ["git"],
+			workspace: [],
+			stateGlobal: ["git"],
+			configGlobal: [],
+			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			survives: false,
 		},
 		{
 			name: "a baseline entry only the state copy holds is dropped when a global layer exists",
@@ -1620,7 +1700,20 @@ describe("classifyCommandListBaseline", () => {
 			stateGlobal: ["git"],
 			configGlobal: [],
 			globalLayerAtSaveStart: [],
+			stateCopyIsShippedDefault: true,
 			survives: false,
+		},
+		{
+			name: "a pending imported entry survives even when the state copy is not the shipped default",
+			baseline: ["aws"],
+			incoming: ["aws"],
+			workspace: [],
+			stateGlobal: ["aws"],
+			configGlobal: [],
+			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: ["aws"],
+			survives: true,
 		},
 	]
 
@@ -1631,6 +1724,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: row.stateGlobal, workspace: row.workspace, merged: [] },
 			configGlobalAtSaveStart: row.configGlobal,
 			globalLayerAtSaveStart: row.globalLayerAtSaveStart,
+			stateCopyIsShippedDefault: row.stateCopyIsShippedDefault,
+			pendingGlobalEntries: row.pendingGlobalEntries ?? [],
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
 		})
@@ -1699,6 +1794,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: row.stateGlobal, workspace: row.workspace, merged: [] },
 			configGlobalAtSaveStart: row.configGlobal,
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
 		})
@@ -1715,6 +1812,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: [], workspace: ["aws"], merged: [] },
 			configGlobalAtSaveStart: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
 		})
@@ -1733,6 +1832,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: [], workspace: ["docker"], merged: [] },
 			configGlobalAtSaveStart: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: ["docker"],
 			gateAtDisplay: undefined,
 		})
@@ -1742,6 +1843,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: [], workspace: ["docker"], merged: [] },
 			configGlobalAtSaveStart: ["docker"],
 			globalLayerAtSaveStart: ["docker"],
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: ["docker"],
 			gateAtDisplay: undefined,
 		})
@@ -1757,6 +1860,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: ["aws"], workspace: ["docker"], merged: [] },
 			configGlobalAtSaveStart: ["aws"],
 			globalLayerAtSaveStart: ["aws"],
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
 		})
@@ -1775,6 +1880,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: [], workspace: ["git"], merged: [] },
 			configGlobalAtSaveStart: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: ["git", "docker"],
 			gateAtDisplay: true,
 		})
@@ -1793,6 +1900,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: [], workspace: ["git"], merged: [] },
 			configGlobalAtSaveStart: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: ["git", "docker"],
 			gateAtDisplay: true,
 		})
@@ -1812,6 +1921,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: [], workspace: ["git"], merged: [] },
 			configGlobalAtSaveStart: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: ["git", "docker"],
 			gateAtDisplay: true,
 		})
@@ -1826,6 +1937,8 @@ describe("classifyCommandListBaseline", () => {
 			currentScopes: { global: [], workspace: ["git"], merged: [] },
 			configGlobalAtSaveStart: [],
 			globalLayerAtSaveStart: undefined,
+			stateCopyIsShippedDefault: false,
+			pendingGlobalEntries: [],
 			hiddenWorkspaceEntries: ["docker"],
 			gateAtDisplay: undefined,
 		})

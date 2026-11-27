@@ -1151,4 +1151,20 @@ Output only the summary of the conversation so far, without any additional comme
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
 		})
 	})
+
+	describe("export", () => {
+		it("leaves the workspace command-list gate out of the exported settings, which still carry the keys it does export", async () => {
+			const proxyWithGate = new ContextProxy(mockContext)
+			await proxyWithGate.initialize()
+			await proxyWithGate.setValue("workspaceCommandListsEnabled", true)
+			await proxyWithGate.setValue("allowedCommands", ["echo"])
+
+			const exported = await proxyWithGate.export()
+
+			// The gate is read from VS Code user settings only, so an exported copy would be read back by nothing.
+			expect(exported).not.toHaveProperty("workspaceCommandListsEnabled")
+			// Negative control: a neighbouring key is exported, so the omission above cannot pass on an empty object.
+			expect(exported).toHaveProperty("allowedCommands", ["echo"])
+		})
+	})
 })

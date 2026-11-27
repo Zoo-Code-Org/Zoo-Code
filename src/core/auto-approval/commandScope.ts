@@ -32,6 +32,11 @@ export interface CommandListInspection {
 	 * what it means.
 	 */
 	workspaceFolderValue?: string[] | null
+	/**
+	 * The key's shipped default, which a save compares against the state copy to
+	 * tell an activation-seeded copy from a key the user deleted.
+	 */
+	defaultValue?: string[]
 }
 
 /**
@@ -57,15 +62,16 @@ export function commandListConfiguration(folderResource?: vscode.Uri): vscode.Wo
  * root claim a symlinked deeper root's directory and skip its deny entries.
  * The deepest match wins, like VS Code's own containment.
  *
- * A root whose real path does not resolve bounds nothing reliable: its real
- * path is unknown, so no candidate can be shown to contain the cwd on its
- * behalf. The lookup then returns `undefined`, and no enclosing root approves
- * a command by standing in for that root. Enforcement reads the global layer
- * only, and the folder layer contributes nothing to the decision.
+ * A root whose real path does not resolve is judged by its registered path.
+ * One that cannot bound the cwd cannot own it either, so the remaining roots
+ * still decide. One that may bound the cwd might own it, so no enclosing root
+ * approves a command by standing in for it: the lookup returns `undefined`,
+ * enforcement reads the global layer only, and the folder layer contributes
+ * nothing to the decision.
  *
  * @param cwd - The task's working directory. Empty, absent, unmatched, or
- * bounded only by an unresolvable root gives `undefined` and keeps the
- * first-folder configuration.
+ * bound by an unresolvable root gives `undefined` and keeps the first-folder
+ * configuration.
  * @returns The containing folder's registry URI. It stays uncanonicalized,
  * because folder-scoped configuration resolves against the registry.
  */
@@ -74,8 +80,8 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 		return undefined
 	}
 
-	// A failed lookup gives `undefined`, like a cwd that names no root. The
-	// caller then falls back to the pre-composed state lists.
+	// No folder decides the cwd. The caller then falls back to the pre-composed
+	// state lists.
 	try {
 		// Longest match wins so an outer root cannot claim a symlinked deeper
 		// root's directory. The separator guard keeps `/root/other` out of `/root`.
@@ -84,9 +90,15 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 		for (const candidate of vscode.workspace.workspaceFolders ?? []) {
 			const rootPath = realPathOrRegistered(candidate.uri.fsPath)
 			if (rootPath === undefined) {
-				// The root's real path is unknown, so this candidate cannot be
-				// compared. Matching the cwd against the other roots would let one
-				// of them decide for a directory this root may own.
+				// The root's real path is unknown, so only its registered path is
+				// left to bound the cwd. One that cannot bound the cwd cannot own
+				// it, and skipping it lets the healthy roots decide. One that may
+				// bound the cwd may own it, so no other root may decide instead:
+				// an enclosing root's allow would otherwise stand in for this
+				// root's deny.
+				if (!registeredRootContains(candidate.uri.fsPath, cwd)) {
+					continue
+				}
 				return undefined
 			}
 			// A filesystem root (`/`, `C:\`) already ends in a separator. A second separator stops child matching.
@@ -103,14 +115,30 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 }
 
 /**
+ * Whether a registered root's own path can bound the cwd, tested without the
+ * real path because this root has none. The cwd arrives canonical, so this
+ * compare can disagree with the real path when a symlink stands between them.
+ * That is why it decides only whether a root can own the cwd at all: a root
+ * that fails this test cannot, and a root that passes may still not.
+ *
+ * @param registeredPath - The root's path as the registry holds it.
+ * @param cwd - The task's working directory.
+ * @returns True when the registered path bounds the cwd.
+ */
+function registeredRootContains(registeredPath: string, cwd: string): boolean {
+	const childPrefix = registeredPath.endsWith(path.sep) ? registeredPath : registeredPath + path.sep
+	return cwd === registeredPath || cwd.startsWith(childPrefix)
+}
+
+/**
  * The path that a workspace root compares by: its real path. The cwd is
  * already canonical, so the two sides agree only when both are. The native
  * resolver reports the on-disk spelling, which is what the cwd arrives as. The
  * JavaScript resolver keeps the caller's spelling on Windows, so a root opened
  * under different casing would never match a canonical cwd.
  *
- * A root that does not resolve gives `undefined`, which drops the folder layer
- * rather than comparing the root by a path the filesystem never confirmed.
+ * A root that does not resolve gives `undefined`. The caller then decides from
+ * the root's registered path whether that root can own the cwd.
  */
 function realPathOrRegistered(fsPath: string): string | undefined {
 	try {
@@ -350,6 +378,12 @@ export interface CommandListBaselineClassification {
  * save start.
  * @param input.globalLayerAtSaveStart - The same layer, kept as absent when the
  * key had no global value.
+ * @param input.stateCopyIsShippedDefault - Whether the state copy for this key
+ * equals the key's shipped default. An absent global layer means a seeded copy
+ * only when this holds, so a key the user deleted is not read as seeded.
+ * @param input.pendingGlobalEntries - Entries an import wrote to the state copy
+ * whose settings-file mirror has not succeeded. No configuration layer holds
+ * them, and they are known global state all the same.
  * @param input.hiddenWorkspaceEntries - Workspace entries the dialog did not
  * display.
  * @param input.gateAtDisplay - The gate as the dialog showed it, if it sent it.
@@ -363,6 +397,8 @@ export function classifyCommandListBaseline(input: {
 	currentScopes: CommandListScopes
 	configGlobalAtSaveStart: string[]
 	globalLayerAtSaveStart: string[] | undefined
+	stateCopyIsShippedDefault: boolean
+	pendingGlobalEntries: string[]
 	hiddenWorkspaceEntries: string[]
 	gateAtDisplay: boolean | undefined
 }): CommandListBaselineClassification {
@@ -372,6 +408,8 @@ export function classifyCommandListBaseline(input: {
 		currentScopes,
 		configGlobalAtSaveStart,
 		globalLayerAtSaveStart,
+		stateCopyIsShippedDefault,
+		pendingGlobalEntries,
 		hiddenWorkspaceEntries,
 		gateAtDisplay,
 	} = input
@@ -399,16 +437,25 @@ export function classifyCommandListBaseline(input: {
 	// the global layer. The baseline separates that case from a user addition.
 	// Submitting a displayed entry signals retention. A retained entry that no
 	// configuration layer holds was removed in the file. The file then wins over
-	// the stale dialog buffer. The state copy still counts where the
-	// configuration has no global layer. An absent layer deleted nothing, and the
-	// activation-seeded defaults would otherwise vanish on the first save.
+	// the stale dialog buffer.
+	// An absent global layer means either that the activation seed wrote the state
+	// copy or that the user deleted the key. Only the state copy that still equals
+	// the shipped default is the seed's, so only that copy counts as known global
+	// state. Trusting every absent-layer copy would write a deleted key's entries
+	// back, and the user would see no warning.
+	const seededStateEntries =
+		globalLayerAtSaveStart === undefined && stateCopyIsShippedDefault ? currentScopes.global : []
+	// A pending entry is a third source of known global state: an import wrote it
+	// to the state copy, and its mirror has not reached the settings file. Without
+	// it, the first save after a failed mirror reads the entry as a file deletion.
+	const knownStateEntries = [...seededStateEntries, ...pendingGlobalEntries]
 	const splitSourceEntries = Array.isArray(baseline)
 		? [...incoming, ...externallyAdded].filter(
 				(entry) =>
 					!baseline.includes(entry) ||
 					currentScopes.workspace.includes(entry) ||
 					configGlobalAtSaveStart.includes(entry) ||
-					(currentScopes.global.includes(entry) && globalLayerAtSaveStart === undefined),
+					knownStateEntries.includes(entry),
 			)
 		: [...incoming, ...externallyAdded]
 	// A hidden entry the baseline shows was displayed, so keeping it stays a
