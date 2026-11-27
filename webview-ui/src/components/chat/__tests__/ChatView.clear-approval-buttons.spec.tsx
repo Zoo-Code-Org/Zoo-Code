@@ -924,6 +924,33 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 		expect(sentTypes()).not.toContain("queueMessage")
 	})
 
+	it("text feedback queues when a newer partial command ask streams over an older cancelled ask (review 6088358220)", async () => {
+		const { getByRole, queryByText } = renderChatView()
+
+		// An older cancelled command ask stays unanswered in persisted
+		// state. A newer partial command ask streams over it: the newest
+		// ask row is not an answerable ask, so the lookup must not match
+		// the older row. The reply queues; answering the older ask would
+		// post an orphan response the host discards, and the message is
+		// lost.
+		await act(async () => {
+			hydrateState([task, commandAsk(2), partialCommandAsk(3)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		// While streaming the footer button is the stop button, so the
+		// textarea's Enter path is the real submit route to handleSendMessage.
+		await act(async () => {
+			fireEvent.input(getByRole("textbox"), { target: { value: "do not run this" } })
+		})
+		await act(async () => {
+			fireEvent.keyDown(getByRole("textbox"), { key: "Enter" })
+		})
+
+		expect(asked("messageResponse")).toBe(false)
+		expect(sentTypes()).toContain("queueMessage")
+	})
+
 	it("a direct text reply keeps a trailing say from restoring Run/Deny before the host stamp (#998 review)", async () => {
 		const { getByRole } = renderChatView()
 

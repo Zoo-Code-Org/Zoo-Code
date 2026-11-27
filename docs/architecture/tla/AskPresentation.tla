@@ -9,8 +9,11 @@
 \* Failure F4: a settled ask keeps the Run button after the host stamps it answered (thread 4658203877).
 \* Failure F5: a locally answered ask restores the Run button when a say streams (thread 4658203868).
 \* Failure F6: the host stamps a partial ask on a text reply. The completed ask then waits with no Run/Deny (thread 4680322903).
-\* Invariants: NoMaskedPendingAsk (F1), NoStaleRunButton (F2), ReqSupersedes (F3), NoSettledKeptOrRestored (F4, F5), NoStampOnPartial (F6).
-\* Expected: Old fails on ask then command_output. Each guard variant fails on its own shape. NoReconcile fails F4. NoPartialGuard fails F6.
+\* Failure F7 (review 6088358220): the send/deny lookup scans past the newest ask-or-api_req_started row and answers an
+\* older cancelled ask while a newer partial ask or api_req_started streams. The host discards the response; the message
+\* is lost instead of queued.
+\* Invariants: NoMaskedPendingAsk (F1), NoStaleRunButton (F2), ReqSupersedes (F3), NoSettledKeptOrRestored (F4, F5), NoStampOnPartial (F6), NoRoutePastNewestRow (F7).
+\* Expected: Old fails on ask then command_output. Each guard variant fails on its own shape. NoReconcile fails F4. NoPartialGuard fails F6. ScanAnywhere fails F7.
 \* CountsLocal fails NoStaleRunButton on [ca, cu] after a local answer.
 \* Kinds: ca ask command, cp partial ask command, ou ask command_output, cu say command_output, tx say text, os other say, rq say api_req_started.
 \* A message is [kind, answered]. Only ca carries answered true. The host stamps it when the ask is settled.
@@ -25,7 +28,7 @@
 EXTENDS Naturals, Sequences
 
 CONSTANTS Inputs, Variant
-\* Inputs: snapshot sequences. Variant: Fixed, Old, NoAnsweredGuard, NoReqGuard, TailOnly, NoReconcile, CountsLocal.
+\* Inputs: snapshot sequences. Variant: Fixed, Old, NoAnsweredGuard, NoReqGuard, TailOnly, NoReconcile, CountsLocal, ScanAnywhere.
 
 VARIABLES in, shown, loc
 
@@ -76,6 +79,25 @@ NewestPartialCaIx(s) ==
 	IN IF C = {} THEN 0 ELSE Max(C)
 
 SupersededByReq(s, i) == \E j \in (i+1)..Len(s) : s[j].kind = "rq"
+
+\* The newest ask or api_req_started row. The presentation scan and the
+\* send/deny routing lookup read this row. 0 when there is none.
+NewestAskOrReq(s) ==
+    LET W == {i \in 1..Len(s) : IsAsk(s[i]) \/ s[i].kind = "rq"}
+    IN IF W = {} THEN 0 ELSE Max(W)
+
+\* The newest ask-or-api_req_started row is the pending command ask.
+NewestRowCa(s, l) ==
+    LET ix == NewestAskOrReq(s)
+    IN ix > 0 /\ s[ix].kind = "ca" /\ s[ix].answered = FALSE /\ ix # l
+
+\* The row that the send and deny lookups treat as the pending command ask.
+\* The fixed code reads the newest ask-or-api_req_started row. ScanAnywhere
+\* models the old lookup: it scans the whole history for the newest pending
+\* command ask, so a newer partial ask or api_req_started no longer hides an
+\* older cancelled ask (review 6088358220).
+RouteMatchCa(s, l) ==
+    IF Variant = "ScanAnywhere" THEN PendingCaIx(s, l) > 0 ELSE NewestRowCa(s, l)
 
 \* The say-tail scan of the code. Each variant flag leaves out one guard.
 \* The locally answered index never counts (thread 4658203868).
@@ -191,11 +213,19 @@ NoSettledKeptOrRestored == Settled(in, loc) => ~shown
 \* waits forever with no Run/Deny. Vitest replays the text-reply trace.
 NoStampOnPartial == \A i \in 1..Len(in) : in[i].kind = "cp" => in[i].answered = FALSE
 
+\* Safety F7 (review 6088358220): the send and deny paths route a text reply
+\* as a command answer only when the newest ask-or-api_req_started row is the
+\* pending command ask. A lookup that scans past the newest row answers an
+\* older cancelled ask while a newer partial ask or an api_req_started
+\* streams; the host discards the response and the message is lost.
+NoRoutePastNewestRow == RouteMatchCa(in, loc) => NewestRowCa(in, loc)
+
 \* Result, MaxLen 3: base passes, 794 states. Old fails NoMaskedPendingAsk on [ca, cu].
 \* Result: NoAnsweredGuard fails NoStaleRunButton on [ca answered, cu].
 \* Result: NoReqGuard fails NoStaleRunButton on [ca, rq, cu]. TailOnly fails NoMaskedPendingAsk on [ca, cu, cu].
 \* Result: NoReconcile fails NoSettledKeptOrRestored on [ca, cu] Present then HostStamp (thread 4658203877).
 \* Result: NoPartialGuard fails NoStampOnPartial on [cp] HostStamp (thread 4680322903). TypeOK also fails there: no legal input holds a stamped cp.
+\* Result: ScanAnywhere fails NoRoutePastNewestRow on <<ca unanswered, ca answered>> -- an older cancelled ask under a newer settled ask (review 6088358220).
 \* Replay: issue 998 comment 5 rendered [ask command, say command_output] and saw no Run button.
 \* Replay: the same shape fails the ChatView unit test before the fix and passes after it.
 \* Replay: thread 4658203877 -- a recovered ask stays up after the dwell timeout stamps it. The warm-state Vitest case pins it.
@@ -213,5 +243,12 @@ NoStampOnPartial == \A i \in 1..Len(in) : in[i].kind = "cp" => in[i].answered = 
 \* Covered: the say-after-local-answer shape -- NoSettledKeptOrRestored already pins the derivation state on [ca, cu] with a recorded local answer.
 \* Added: thread 4716481098 -- the snapshot-arrival transition. ArriveMsg appends a bounded message so LocalRespond then a late say and a visible ask then api_req_started are checked as transitions, not only as Init snapshots.
 \* Added: the CountsLocal sabotage -- a scan that counts the locally answered index fails NoStaleRunButton; it pins the local-answer exclusion.
+\* Review round (review 6088358220): covered 0, added 1, gap 0.
+\* Added: the newest-row rule for the send and deny routing lookups --
+\* RouteMatchCa, NoRoutePastNewestRow (F7), and the ScanAnywhere sabotage.
+\* The r6 recovery case survives: a text say is not api_req_started, so the
+\* newest row stays the recovered ask and the route to messageResponse holds.
+\* The posted-response payload of the routing stays the gap of thread
+\* 4658203883; Vitest pins it.
 
 ====

@@ -785,11 +785,19 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				// approve the command. Queueing stays when no command ask
 				// waits. This mirrors the Deny handler's pending-command
 				// exception.
+				// (review 6088358220) The lookup reads the newest ask or
+				// api_req_started row, like the presentation scan: an older
+				// cancelled ask must not match past a newer partial ask. A
+				// text say is not api_req_started, so the recovered ask keeps
+				// matching.
+				const newestAskOrReq = messagesRef.current.findLast(
+					(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+				)
 				const pendingCommandAsk =
-					clineAskRef.current === "command"
-						? messagesRef.current.findLast((message: ClineMessage) =>
-								isPendingCommandAsk(message, answeredCommandAskTsRef.current),
-							)
+					clineAskRef.current === "command" &&
+					newestAskOrReq !== undefined &&
+					isPendingCommandAsk(newestAskOrReq, answeredCommandAskTsRef.current)
+						? newestAskOrReq
 						: undefined
 
 				// Queue message if:
@@ -1065,11 +1073,17 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// sit behind a partial text say, so isStreaming is true while the
 			// ask still waits: the buttons must answer the command, and Deny
 			// must not take the streaming-cancel branch.
+			// (review 6088358220) The same newest-row rule as the send path: the
+			// lookup reads the newest ask or api_req_started row, so an older
+			// cancelled ask cannot match past a newer partial ask.
+			const newestAskOrReq = messagesRef.current.findLast(
+				(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+			)
 			const pendingCommandAsk =
-				clineAsk === "command"
-					? messagesRef.current.findLast((message: ClineMessage) =>
-							isPendingCommandAsk(message, answeredCommandAskTsRef.current),
-						)
+				clineAsk === "command" &&
+				newestAskOrReq !== undefined &&
+				isPendingCommandAsk(newestAskOrReq, answeredCommandAskTsRef.current)
+					? newestAskOrReq
 					: undefined
 
 			if (isStreaming && !pendingCommandAsk) {
