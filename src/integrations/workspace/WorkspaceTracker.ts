@@ -75,11 +75,14 @@ class WorkspaceTracker {
 
 	private getOpenedTabsInfo() {
 		// Tab paths feed the @-mention values the webview offers; parseMentions
-		// resolves them against the task anchor. Without a workspace root there
-		// is no root to cut against, so anchor to the task cwd instead of an
-		// empty string, which path.relative would join to the extension host's
-		// own process directory (issue #1271).
-		const baseCwd = this.cwd || getTaskCwdPath()
+		// resolves them against the task anchor the task stored at construction
+		// (Task.workspacePath). Without a workspace root there is no root to cut
+		// against, and recomputing getTaskCwdPath() per update would track the
+		// live active editor instead of the stored anchor: after an editor
+		// change the offered values would resolve to different files. Prefer
+		// the current task's stored anchor; fall back to a live anchor only
+		// before a task exists to store one (issue #1271).
+		const baseCwd = this.cwd || this.providerRef?.deref()?.getCurrentTask()?.cwd || getTaskCwdPath()
 		return vscode.window.tabGroups.all.reduce(
 			(acc, group) => {
 				const groupTabs = group.tabs
