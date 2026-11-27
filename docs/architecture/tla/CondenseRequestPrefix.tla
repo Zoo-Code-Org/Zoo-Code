@@ -18,17 +18,24 @@
 \* Invariant PrefixUnchanged: the request messages equal the task-shaped
 \* history plus exactly one appended instruction message.
 \* Invariant InstructionAtEnd: the instruction is the last request message.
+\* Invariant NoEmbeddedReasoning: no request message starts with an embedded
+\* reasoning block. The task history cleaner splits such a block out as a
+\* separate reasoning item, so the condense request must do the same.
 \* Modes: Fixed mirrors the task pipeline. TextConvert is the old tool-block
 \* text conversion. NoMerge skips the merge step. SystemSwap is the old
 \* condense-only system prompt. InstructionFirst puts the instruction before
-\* the history.
+\* the history. ReasoningSkip skips the history cleaner.
 \* Expected: Fixed holds all invariants by construction; the variants give the
 \* invariants their teeth. TextConvert breaks PrefixUnchanged on any history
 \* that carries a tool block. NoMerge breaks PrefixUnchanged on consecutive
 \* user messages. SystemSwap breaks SystemStable everywhere. InstructionFirst
-\* breaks InstructionAtEnd everywhere.
-\* Oracle assumption: any role and block sequence is an admissible history.
-\* The over-approximation is conservative for a failure-hunting spec.
+\* breaks InstructionAtEnd everywhere. ReasoningSkip breaks
+\* NoEmbeddedReasoning on any history whose assistant message starts with an
+\* embedded reasoning block.
+\* Oracle assumption: any role and block sequence is an admissible history,
+\* except that the embedded reasoning block is only admitted where the store
+\* emits it: the first block of an assistant message. The over-approximation
+\* is conservative for a failure-hunting spec.
 \* Not modeled: synthetic tool results (an append-only suffix, so prefix
 \* safe), summary selection and condenseParent tags, token counts, the folded
 \* file context, and provider-side transforms past createMessage.
@@ -36,7 +43,11 @@
 \* condense call site passes roles = ["user"], thread on Merge line 60).
 \* The default-template and frozen-prefix assertions are pinned in
 \* prefix-cache.spec.ts (covered: the PrefixUnchanged oracle tests).
-\* Cost: TLC runs each config in a few seconds.
+\* Findings (PR 2698 round 3): the task history cleaner was missing from the
+\* modeled and real pipeline, so embedded reasoning reached the request
+\* embedded (added: ReasoningClean, NoEmbeddedReasoning, ReasoningSkip).
+\* Cost: TLC runs each config in a few seconds (base 106,079 distinct
+\* states, round 3).
 
 EXTENDS Naturals, Sequences
 
@@ -44,15 +55,22 @@ CONSTANTS Mode, MaxMsgs, MaxBlocks, SysTask, SysCondense, SupportsImages
 
 VARIABLES history, sys, request
 
-Blocks == {"t", "u", "r", "i"}      \* text, tool_use, tool_result, image
+Blocks == {"t", "u", "r", "i", "e"}      \* text, tool_use, tool_result, image, embedded reasoning
 Roles == {"user", "assistant"}
 
 BSeqs == UNION {[1..n -> Blocks] : n \in 0..MaxBlocks}
-Msgs == [role: Roles, blocks: BSeqs]
+\* The store emits an embedded reasoning block only as the first block of an
+\* assistant message, so histories admit "e" only there.
+NoE(b) == \A j \in 1..Len(b) : b[j] # "e"
+EFirst(b) == Len(b) > 0 /\ b[1] = "e" /\ NoE(SubSeq(b, 2, Len(b)))
+Msgs == {m \in [role: Roles, blocks: BSeqs] :
+            \/ m.role = "user" /\ NoE(m.blocks)
+            \/ m.role = "assistant" /\ (NoE(m.blocks) \/ EFirst(m.blocks))}
 Histories == UNION {[1..n -> Msgs] : n \in 1..MaxMsgs}
 
 \* Block tokens outside Blocks: "im" is an image turned into text, "tu" and
-\* "tr" are tool blocks turned into text, "s" is the condense instruction.
+\* "tr" are tool blocks turned into text, "s" is the condense instruction, and
+\* "ri" is a split-out reasoning item.
 Instr == [role |-> "user", blocks |-> <<"s">>]
 
 \* The task request merges consecutive user messages only: the condense call
@@ -74,7 +92,22 @@ ImageClean(h) ==
     IF SupportsImages THEN h
     ELSE [i \in 1..Len(h) |-> [role |-> h[i].role, blocks |-> BlockClean(h[i].blocks)]]
 
-TaskPipeline(h) == ImageClean(Merge(h))
+\* The task history cleaner splits an assistant message that starts with an
+\* embedded reasoning block into a reasoning item plus the assistant message
+\* without it (buildCleanConversationHistory).
+ReasoningSplit(m) ==
+    IF m.role = "assistant" /\ Len(m.blocks) > 0 /\ m.blocks[1] = "e"
+    THEN <<[role |-> "assistant", blocks |-> <<"ri">>],
+           [role |-> "assistant", blocks |-> SubSeq(m.blocks, 2, Len(m.blocks))]>>
+    ELSE <<m>>
+
+RECURSIVE SeqConcat(_)
+SeqConcat(ss) ==
+    IF ss = <<>> THEN <<>> ELSE ss[1] \o SeqConcat(SubSeq(ss, 2, Len(ss)))
+
+ReasoningClean(h) == SeqConcat([i \in 1..Len(h) |-> ReasoningSplit(h[i])])
+
+TaskPipeline(h) == ReasoningClean(ImageClean(Merge(h)))
 
 \* The old condense-only conversion: tool blocks become text blocks.
 BlockConvert(b) ==
@@ -92,13 +125,14 @@ Build(h) ==
     []   Mode = "NoMerge" -> <<SysTask, ImageClean(h) \o <<Instr>>>>
     []   Mode = "SystemSwap" -> <<SysCondense, TaskPipeline(h) \o <<Instr>>>>
     []   Mode = "InstructionFirst" -> <<SysTask, <<Instr>> \o TaskPipeline(h)>>
+    []   Mode = "ReasoningSkip" -> <<SysTask, ImageClean(Merge(h)) \o <<Instr>>>>
 
-BlockTokens == Blocks \union {"im", "tu", "tr", "s"}
+BlockTokens == Blocks \union {"im", "tu", "tr", "s", "ri"}
 
 TypeOK ==
     /\ history \in Histories
     /\ sys \in {SysTask, SysCondense}
-    /\ Len(request) <= MaxMsgs + 1
+    /\ Len(request) <= 2 * MaxMsgs + 1      \* the cleaner can split each message in two
     /\ \A i \in 1..Len(request) :
         /\ request[i].role \in Roles
         /\ \A j \in 1..Len(request[i].blocks) : request[i].blocks[j] \in BlockTokens
@@ -122,5 +156,12 @@ SystemStable == sys = SysTask
 PrefixUnchanged ==
     /\ Len(request) = Len(TaskPipeline(history)) + 1
     /\ SubSeq(request, 1, Len(TaskPipeline(history))) = TaskPipeline(history)
+
+\* Embedded reasoning must ride as its own item: no request message starts
+\* with the embedded reasoning block the cleaner splits out.
+NoEmbeddedReasoning ==
+    \A i \in 1..Len(request) :
+        \/ Len(request[i].blocks) = 0
+        \/ request[i].blocks[1] # "e"
 
 ====

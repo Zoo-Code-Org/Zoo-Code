@@ -4,11 +4,12 @@
 // The provider reuses cached work only when a request starts exactly like the
 // previous request. The previous request is the task request: the task system
 // prompt plus the task-shaped history (merge consecutive user messages, clean
-// images when unsupported, native content blocks). The condense request must
-// therefore send that exact sequence as a prefix and append only suffixes:
-// synthetic tool results for orphan tool calls, then the condense instruction
-// as the last message. The spec lives in docs/architecture/tla/
-// CondenseRequestPrefix.tla.
+// images when unsupported, run the shared history cleaner so embedded
+// reasoning rides as separate reasoning items, send native content blocks).
+// The condense request must therefore send that exact sequence as a prefix and
+// append only suffixes: synthetic tool results for orphan tool calls, then the
+// condense instruction as the last message. The spec lives in
+// docs/architecture/tla/CondenseRequestPrefix.tla.
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import type { ModelInfo } from "@roo-code/types"
@@ -19,6 +20,7 @@ import type { ApiStream } from "../../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../../api/transform/image-cleaning"
 import { BaseProvider } from "../../../api/providers/base-provider"
 import { supportPrompt } from "../../../shared/support-prompt"
+import { buildCleanConversationHistory, type CleanConversationHistoryItem } from "../../task/cleanConversationHistory"
 import { mergeConsecutiveApiMessages } from "../../task/mergeConsecutiveApiMessages"
 import type { ApiMessage } from "../../task-persistence/apiMessages"
 import {
@@ -33,8 +35,12 @@ const taskSystemPrompt = "You are a coding agent operating in a workspace."
 
 type CapturedRequest = {
 	systemPrompt: string
-	messages: Array<{ role: string; content: string | Anthropic.Messages.ContentBlockParam[] }>
+	messages: CleanConversationHistoryItem[]
 	metadata?: ApiHandlerCreateMessageMetadata
+}
+
+function asApiMessage(item: CleanConversationHistoryItem): Anthropic.Messages.MessageParam {
+	return item as Anthropic.Messages.MessageParam
 }
 
 class CapturingApiHandler extends BaseProvider {
@@ -114,12 +120,13 @@ function buildHistory(): ApiMessage[] {
 }
 
 // The request shape the task loop sends on a normal turn: the same selection,
-// the same merge, the same image cleaning, the same role/content projection.
-function expectedTaskShaped(messages: ApiMessage[], handler: CapturingApiHandler) {
+// the same merge, the same image cleaning, the same history cleaner, the same
+// item projection.
+function expectedTaskShaped(messages: ApiMessage[], handler: CapturingApiHandler): CleanConversationHistoryItem[] {
 	const effective = getMessagesSinceLastSummary(getEffectiveApiHistory(messages))
 	const merged = mergeConsecutiveApiMessages(effective, { roles: ["user"] })
 	const cleaned = maybeRemoveImageBlocks(merged, handler)
-	return cleaned.map(({ role, content }) => ({ role, content }))
+	return buildCleanConversationHistory(cleaned, handler.getModel().info)
 }
 
 describe("Condense request prefix cache", () => {
@@ -190,12 +197,54 @@ describe("Condense request prefix cache", () => {
 			taskId,
 		})
 
-		const sent = handler.requests[0].messages
+		const sent = handler.requests[0].messages.map(asApiMessage)
 		const assistant = sent.find((message) => message.role === "assistant")
 		expect(assistant?.content).toStrictEqual([
 			textBlock("Reading the tokenizer"),
 			{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "src/tokenizer.ts" } },
 		])
+	})
+
+	it("extracts embedded encrypted reasoning into a separate reasoning item like the task request", async () => {
+		const handler = new CapturingApiHandler()
+		// OpenAI Native stores encrypted reasoning inside assistant content
+		// blocks; the stored shape is not part of Anthropic's block union.
+		const embeddedReasoning = {
+			type: "reasoning",
+			encrypted_content: "enc_reasoning_1",
+			summary: [{ type: "summary_text", text: "Planning the refactor" }],
+		} as unknown as Anthropic.Messages.ContentBlockParam
+		const messages: ApiMessage[] = [
+			{ role: "user", content: [textBlock("Task: refactor the parser")] },
+			{
+				role: "assistant",
+				content: [embeddedReasoning, textBlock("Refactoring the parser now")],
+			},
+		]
+		// Freeze the expectation before the call: an in-place mutation of the
+		// history must not leak into the observed prefix.
+		const expectedPrefix = structuredClone(expectedTaskShaped(messages, handler))
+
+		await summarizeConversation({
+			messages,
+			apiHandler: handler,
+			systemPrompt: taskSystemPrompt,
+			taskId,
+		})
+
+		const sent = handler.requests[0].messages
+		expect(sent).toHaveLength(expectedPrefix.length + 1)
+		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
+		// The embedded block must ride as its own reasoning item, then the
+		// assistant message without it - exactly the items the task request sent.
+		expect(sent[1]).toStrictEqual({
+			type: "reasoning",
+			summary: [{ type: "summary_text", text: "Planning the refactor" }],
+			encrypted_content: "enc_reasoning_1",
+		})
+		expect(asApiMessage(sent[2])).toStrictEqual({ role: "assistant", content: "Refactoring the parser now" })
+		const last = sent[sent.length - 1]
+		expect(asApiMessage(last).content).toContain("DO NOT call any tools")
 	})
 
 	it("appends the condense instruction as the last message with a no-tools guard", async () => {
@@ -209,7 +258,7 @@ describe("Condense request prefix cache", () => {
 			customCondensingPrompt: "Custom condensing instructions.",
 		})
 
-		const sent = handler.requests[0].messages
+		const sent = handler.requests[0].messages.map(asApiMessage)
 		const last = sent[sent.length - 1]
 		expect(last.role).toBe("user")
 		expect(last.content).toContain("Custom condensing instructions.")
@@ -245,7 +294,7 @@ describe("Condense request prefix cache", () => {
 			taskId,
 		})
 
-		const sent = handler.requests[0].messages
+		const sent = handler.requests[0].messages.map(asApiMessage)
 		expect(sent).toHaveLength(expectedPrefix.length + 2)
 		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
 		const synthetic = sent[expectedPrefix.length]

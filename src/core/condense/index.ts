@@ -10,6 +10,7 @@ import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 import { findLast } from "../../shared/array"
 import { supportPrompt } from "../../shared/support-prompt"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
+import { buildCleanConversationHistory, type CleanConversationHistoryItem } from "../task/cleanConversationHistory"
 import { mergeConsecutiveApiMessages } from "../task/mergeConsecutiveApiMessages"
 import { generateFoldedFileContext } from "./foldedFileContext"
 
@@ -138,13 +139,17 @@ export function buildCondenseInstruction(condensingPrompt: string | undefined): 
  * @param messages - The conversation messages to process
  * @returns The messages with synthetic tool_results appended if needed
  */
-export function injectSyntheticToolResults(messages: ApiMessage[]): ApiMessage[] {
+export function injectSyntheticToolResults(messages: CleanConversationHistoryItem[]): CleanConversationHistoryItem[] {
 	// Find all tool_call IDs in assistant messages
 	const toolCallIds = new Set<string>()
 	// Find all tool_result IDs in user messages
 	const toolResultIds = new Set<string>()
 
 	for (const msg of messages) {
+		// Reasoning items carry no role and no tool blocks; skip them.
+		if (!("role" in msg)) {
+			continue
+		}
 		if (msg.role === "assistant" && Array.isArray(msg.content)) {
 			for (const block of msg.content) {
 				if (block.type === "tool_use") {
@@ -302,6 +307,13 @@ export async function summarizeConversation(options: SummarizeConversationOption
 		return { ...response, error }
 	}
 
+	// Validate that the API handler supports message creation
+	if (!apiHandler || typeof apiHandler.createMessage !== "function") {
+		console.error("API handler is invalid for condensing. Cannot proceed.")
+		const error = t("common:errors.condense_handler_invalid")
+		return { ...response, error }
+	}
+
 	// Shape the request exactly like the task loop shapes a normal request
 	// (merge consecutive user messages, clean images when unsupported, send
 	// native content blocks). KV caches are prefix caches: keeping this
@@ -312,12 +324,18 @@ export async function summarizeConversation(options: SummarizeConversationOption
 		apiHandler,
 	)
 
+	// Apply the same history cleaner the task loop applies before sending:
+	// embedded reasoning blocks ride as separate reasoning items (OpenAI Native
+	// stores them inside assistant content), so the wire items match the
+	// previous task request up to the appended suffixes (issue 2453).
+	const cleanedHistory = buildCleanConversationHistory(shapedForApi, apiHandler.getModel().info)
+
 	// Inject synthetic tool_results for orphan tool_calls to prevent API rejections
 	// (e.g., when user triggers condense after receiving attempt_completion but before responding).
 	// This runs after shaping, so it can only append a suffix message.
-	const messagesWithToolResults = injectSyntheticToolResults(shapedForApi)
+	const messagesWithToolResults = injectSyntheticToolResults(cleanedHistory)
 
-	const requestMessages = messagesWithToolResults.map(({ role, content }) => ({ role, content }))
+	const requestMessages: CleanConversationHistoryItem[] = [...messagesWithToolResults]
 
 	// The condense instruction rides on the LAST message, appended after the
 	// untouched prefix, so the provider caches built on the previous request
@@ -328,18 +346,15 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	}
 	requestMessages.push(finalRequestMessage)
 
-	// Validate that the API handler supports message creation
-	if (!apiHandler || typeof apiHandler.createMessage !== "function") {
-		console.error("API handler is invalid for condensing. Cannot proceed.")
-		const error = t("common:errors.condense_handler_invalid")
-		return { ...response, error }
-	}
-
 	let summary = ""
 	let cost = 0
 
 	try {
-		const stream = apiHandler.createMessage(systemPrompt, requestMessages, metadata)
+		const stream = apiHandler.createMessage(
+			systemPrompt,
+			requestMessages as unknown as Anthropic.Messages.MessageParam[],
+			metadata,
+		)
 
 		for await (const chunk of stream) {
 			if (chunk.type === "text") {

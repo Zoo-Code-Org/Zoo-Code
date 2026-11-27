@@ -142,9 +142,9 @@ describe("injectSyntheticToolResults", () => {
 		const result = injectSyntheticToolResults(messages)
 
 		expect(result.length).toBe(3)
-		expect(result[2].role).toBe("user")
+		expect((result[2] as ApiMessage).role).toBe("user")
 
-		const content = result[2].content as any[]
+		const content = (result[2] as ApiMessage).content as any[]
 		expect(content.length).toBe(1)
 		expect(content[0].type).toBe("tool_result")
 		expect(content[0].tool_use_id).toBe("tool-orphan")
@@ -168,7 +168,7 @@ describe("injectSyntheticToolResults", () => {
 		const result = injectSyntheticToolResults(messages)
 
 		expect(result.length).toBe(3)
-		const content = result[2].content as any[]
+		const content = (result[2] as ApiMessage).content as any[]
 		expect(content.length).toBe(2)
 		expect(content[0].tool_use_id).toBe("tool-1")
 		expect(content[1].tool_use_id).toBe("tool-2")
@@ -196,7 +196,7 @@ describe("injectSyntheticToolResults", () => {
 		const result = injectSyntheticToolResults(messages)
 
 		expect(result.length).toBe(4)
-		const syntheticContent = result[3].content as any[]
+		const syntheticContent = (result[3] as ApiMessage).content as any[]
 		expect(syntheticContent.length).toBe(1)
 		expect(syntheticContent[0].tool_use_id).toBe("orphan-tool")
 	})

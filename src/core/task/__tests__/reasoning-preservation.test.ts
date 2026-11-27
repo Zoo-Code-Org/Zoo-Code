@@ -155,6 +155,7 @@ vi.mock("../../../utils/fs", () => ({
 
 // Import Task AFTER all vi.mock() calls - Vitest hoists mocks so this works
 import { Task } from "../Task"
+import { buildCleanConversationHistory } from "../cleanConversationHistory"
 import { LiteLLMHandler } from "../../../api/providers/lite-llm"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -536,7 +537,7 @@ describe("Task reasoning preservation", () => {
 			{ role: "assistant", content: [{ type: "text", text: "Answer" }] },
 			"Earlier reasoning",
 		)
-		const history = task["buildCleanConversationHistory"](task.apiConversationHistory, snapshot)
+		const history = buildCleanConversationHistory(task.apiConversationHistory, snapshot)
 		expect(history[0]).toMatchObject({
 			role: "assistant",
 			content: preserve
@@ -574,7 +575,7 @@ describe("Task reasoning preservation", () => {
 			"I should read the file first.",
 		)
 
-		const history = task["buildCleanConversationHistory"](task.apiConversationHistory, requestModelInfo)
+		const history = buildCleanConversationHistory(task.apiConversationHistory, requestModelInfo)
 
 		expect(history).toHaveLength(1)
 		expect(history[0]).toMatchObject({
@@ -608,7 +609,7 @@ describe("Task reasoning preservation", () => {
 			"I should read the file first.",
 		)
 
-		const history = task["buildCleanConversationHistory"](task.apiConversationHistory, requestModelInfo)
+		const history = buildCleanConversationHistory(task.apiConversationHistory, requestModelInfo)
 
 		expect(history).toHaveLength(1)
 		expect(history[0]).toMatchObject({

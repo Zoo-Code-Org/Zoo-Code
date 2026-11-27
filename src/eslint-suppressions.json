@@ -666,7 +666,7 @@
 	},
 	"core/task/Task.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 17
+			"count": 9
 		}
 	},
 	"core/task/__tests__/Task.dispose.test.ts": {
@@ -742,6 +742,11 @@
 	"core/task/apiConversationHistory.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 8
+		}
+	},
+	"core/task/cleanConversationHistory.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 7
 		}
 	},
 	"core/tools/BaseTool.ts": {
