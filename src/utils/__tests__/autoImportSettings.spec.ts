@@ -110,11 +110,14 @@ describe("autoImportSettings", () => {
 			listConfig: vi.fn().mockResolvedValue([]),
 		} as unknown as MockedManager<ProviderSettingsManager>
 
-		// Double provides the ContextProxy members used by auto-import.
+		// Double provides the ContextProxy members importSettingsFromPath calls: the
+		// state and provider settings writes, plus the command-list reads it snapshots
+		// before writing. No prior list exists here, so those reads report undefined.
 		mockContextProxy = {
 			setValues: vi.fn().mockResolvedValue(undefined),
 			setValue: vi.fn().mockResolvedValue(undefined),
 			setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			getValue: vi.fn(() => undefined),
 		} as unknown as MockedManager<ContextProxy>
 
 		// Double provides only updateCustomMode, the CustomModesManager member auto-import calls.
