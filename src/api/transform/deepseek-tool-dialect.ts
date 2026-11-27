@@ -18,10 +18,13 @@
  *   dependentSchemas (a constraint inside a dependent schema reaches the
  *   gateway exactly like one on a property);
  * - compilation never turns a satisfiable schema into an unsatisfiable one:
- *   removing patternProperties relaxes a retained additionalProperties: false
- *   and a retained unevaluatedProperties: false (the removed rules were what
- *   evaluated those keys), removing contains relaxes a retained
- *   unevaluatedItems: false for the same reason, a oneOf whose branches - or
+ *   removing patternProperties relaxes a retained additionalProperties rule
+ *   and a retained unevaluatedProperties rule (a false rule becomes true; a
+ *   schema-valued rule re-admits the removed pattern rules as alternatives,
+ *   so the keys they evaluated stay accepted), removing contains relaxes a
+ *   retained unevaluatedItems restriction the same way, and a retained
+ *   prefixItems is no complete evaluator: only a retained items keeps the
+ *   array restriction (issue #547 review 4719935091), a oneOf whose branches - or
  *   whose branches'
  *   reference targets - changed moves under anyOf as its own allOf conjunct
  *   (an unchanged sibling anyOf keeps applying on its own), a not whose
@@ -357,32 +360,52 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 	}
 
 	// Removing patternProperties can strand keys that were legal only through
-	// the pattern rules: a retained additionalProperties: false would leave
-	// the object without any valid instance (issue #547 review 4712438380).
-	// Relax exactly that case; ordinary closed objects keep their rule.
-	if ("patternProperties" in removed && result.additionalProperties === false) {
-		defineOwnKey(result, "additionalProperties", true)
+	// the pattern rules: a retained additionalProperties rule would leave the
+	// object without any valid instance when the rule is false (issue #547
+	// review 4712438380), and a retained unevaluatedProperties: false would
+	// forbid a required property the original accepted (issue #547 review
+	// 4716476950). A schema-valued rule keeps restricting the keys the pattern
+	// rules never matched, and the removed pattern rules re-enter as its
+	// alternatives, so a value the original accepted stays accepted (issue #547
+	// review 4719336022). Ordinary closed objects keep their rule.
+	if ("patternProperties" in removed && isRecord(removed.patternProperties)) {
+		const patternRules = Object.values(removed.patternProperties).map((rule) =>
+			compileSchemaNode(rule, depth + 1, root, memo),
+		)
+		if (result.additionalProperties === false) {
+			defineOwnKey(result, "additionalProperties", true)
+		} else if (isRecord(result.additionalProperties)) {
+			defineOwnKey(result, "additionalProperties", {
+				anyOf: [result.additionalProperties, ...patternRules],
+			})
+		}
+		if (result.unevaluatedProperties === false) {
+			defineOwnKey(result, "unevaluatedProperties", true)
+		} else if (isRecord(result.unevaluatedProperties)) {
+			defineOwnKey(result, "unevaluatedProperties", {
+				anyOf: [result.unevaluatedProperties, ...patternRules],
+			})
+		}
 	}
-	if ("patternProperties" in removed && result.unevaluatedProperties === false) {
-		// patternProperties evaluated the keys it matched; with the rules gone
-		// those keys are unevaluated, so a retained unevaluatedProperties: false
-		// would forbid a required property the original accepted (issue #547
-		// review 4716476950). An object-schema value is an ordinary restriction
-		// and stays untouched.
-		defineOwnKey(result, "unevaluatedProperties", true)
-	}
-	// The same annotation dependency on arrays: contains evaluated the items
-	// it matched, so removing it strands a retained unevaluatedItems: false
+	// The same annotation dependency on arrays: contains evaluated the items it
+	// matched, so removing it strands a retained unevaluatedItems restriction
 	// and forbids every item the original accepted (issue #547 review
-	// 4719419428). A retained items or prefixItems still evaluates the
-	// array, so that restriction stays untouched.
-	if (
-		"contains" in removed &&
-		result.unevaluatedItems === false &&
-		!("items" in result) &&
-		!("prefixItems" in result)
-	) {
-		defineOwnKey(result, "unevaluatedItems", true)
+	// 4719419428). A retained items still evaluates every remaining index, so
+	// the restriction stays untouched in that position; a retained prefixItems
+	// evaluates only its listed positions, so the contains-evaluated trailing
+	// indices stay stranded and the restriction relaxes (issue #547 review
+	// 4719935091).
+	if ("contains" in removed && !("items" in result)) {
+		if (result.unevaluatedItems === false) {
+			defineOwnKey(result, "unevaluatedItems", true)
+		} else if (isRecord(result.unevaluatedItems)) {
+			// The contains rule re-enters as an alternative: the items it
+			// evaluated stay accepted beside the retained restriction. A
+			// boolean contains evaluates positions only, so the alternative
+			// accepts any item.
+			const relaxed = isRecord(removed.contains) ? compileSchemaNode(removed.contains, depth + 1, root, memo) : {}
+			defineOwnKey(result, "unevaluatedItems", { anyOf: [result.unevaluatedItems, relaxed] })
+		}
 	}
 
 	if (Object.keys(removed).length > 0) {

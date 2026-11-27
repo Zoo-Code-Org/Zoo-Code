@@ -54,6 +54,11 @@ function accepts(schema: unknown, value: unknown): boolean {
 	if (Array.isArray(s.allOf)) {
 		return s.allOf.every((branch) => accepts(branch, value))
 	}
+	if (s.not !== undefined) {
+		if (accepts(s.not, value)) {
+			return false
+		}
+	}
 	if (typeof s.type === "string" && !matchesType(s.type, value)) {
 		return false
 	}
@@ -231,6 +236,54 @@ describe("stripUnsupportedStrictKeywords", () => {
 			{ type: "null" },
 		])
 		expect(inner).not.toHaveProperty("oneOf")
+	})
+
+	it("keeps a oneOf under properties inside a not in place (round 7, schema-map context)", () => {
+		// The negation context must survive the schema-map keywords: the
+		// map callback resets it to false otherwise, and a oneOf under
+		// properties inside a `not` would still move under anyOf. Ground
+		// truth on the declared schema: "a" matches both branches, the
+		// oneOf refuses it, the inner schema fails, and the negation
+		// accepts the value.
+		const schema: Schema = {
+			not: {
+				type: "object",
+				properties: { v: { oneOf: [{ type: "string", minLength: 1 }, { type: "string" }] } },
+				required: ["v"],
+			},
+		}
+		expect(accepts(schema, { v: "a" })).toBe(true)
+
+		const compiled = strip(schema)
+		const inner = compiled.not as Schema
+		const v = (inner.properties as Schema).v as Schema
+		expect(v.oneOf).toStrictEqual([
+			{ type: "string", description: constraintNote({ minLength: 1 }) },
+			{ type: "string" },
+		])
+		expect(v).not.toHaveProperty("anyOf")
+		// The emitted negation still accepts the value the original
+		// accepted: the retained exactly-one rule refuses "a", the inner
+		// schema fails, and the not accepts it.
+		expect(accepts(compiled, { v: "a" })).toBe(true)
+	})
+
+	it("still relaxes a stripped oneOf under properties outside a not (map-context control)", () => {
+		// Control for the schema-map context: without the enclosing
+		// negation the relaxation under properties applies exactly as
+		// before.
+		const schema: Schema = {
+			type: "object",
+			properties: { v: { oneOf: [{ type: "string", minLength: 1 }, { type: "string" }] } },
+			required: ["v"],
+		}
+		const compiled = strip(schema)
+		const v = (compiled.properties as Schema).v as Schema
+		expect(v).not.toHaveProperty("oneOf")
+		expect(v.anyOf).toStrictEqual([
+			{ type: "string", description: constraintNote({ minLength: 1 }) },
+			{ type: "string" },
+		])
 	})
 
 	it.each([

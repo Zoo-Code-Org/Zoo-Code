@@ -82,8 +82,11 @@ function isUnsupportedKeyword(key: string, value: unknown): boolean {
  * values that matched exactly one original alternative stay accepted. A oneOf
  * reached through a `not` keeps its position: under anyOf the negated
  * predicate would match every value and the negation would reject values the
- * original accepted (issue #547 review 4719419437). A nested `not` flips the
- * context back (negation parity).
+ * original accepted (issue #547 review 4719419437). The negation context
+ * carries through the schema-map keywords too, so a oneOf under properties,
+ * $defs, definitions, patternProperties or dependentSchemas inside a `not`
+ * keeps its position as well (round 7 outside-diff comment). A nested `not`
+ * flips the context back (negation parity).
  */
 export function stripUnsupportedStrictKeywords(schema: unknown, insideNot = false): unknown {
 	if (!isRecord(schema)) {
@@ -106,7 +109,10 @@ export function stripUnsupportedStrictKeywords(schema: unknown, insideNot = fals
 		let value = originalValue
 		if (SCHEMA_MAP_KEYWORDS.has(key) && isRecord(value)) {
 			value = Object.fromEntries(
-				Object.entries(value).map(([name, subSchema]) => [name, stripUnsupportedStrictKeywords(subSchema)]),
+				Object.entries(value).map(([name, subSchema]) => [
+					name,
+					stripUnsupportedStrictKeywords(subSchema, insideNot),
+				]),
 			)
 		} else if (SCHEMA_LIST_KEYWORDS.has(key) && Array.isArray(value)) {
 			const branches: unknown[] = value

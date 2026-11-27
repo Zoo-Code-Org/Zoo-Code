@@ -1716,6 +1716,121 @@ describe("DeepSeekHandler", () => {
 			expect(arr.items).toStrictEqual({ type: "string" })
 			expect(String(arr.description)).toContain("contains")
 		})
+
+		it("relaxes unevaluatedItems beside a partial prefixItems when contains is removed (review 4719935091)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						required: ["items"],
+						properties: {
+							items: {
+								type: "array",
+								const: ["a", "b"],
+								prefixItems: [{ type: "string" }],
+								contains: { const: "b" },
+								unevaluatedItems: false,
+							},
+						},
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as {
+				properties?: Record<string, Record<string, unknown>>
+			}
+			const arr = (params.properties ?? {}).items as Record<string, unknown>
+			// prefixItems evaluates only the positions it lists: with a single
+			// prefix entry, contains was what evaluated index 1. A retained
+			// unevaluatedItems: false would forbid that index and the retained
+			// const would leave the compiled schema without any valid array.
+			expect(arr.unevaluatedItems).toBe(true)
+			expect(arr.const).toStrictEqual(["a", "b"])
+			expect(arr.prefixItems).toStrictEqual([{ type: "string" }])
+			expect(arr).not.toHaveProperty("contains")
+			expect(String(arr.description)).toContain("contains")
+		})
+
+		it("re-admits the removed pattern rules beside a schema-valued unevaluatedProperties (review 4719336022)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: { "^x": { type: "string" } },
+						required: ["x"],
+						unevaluatedProperties: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The key x was evaluated by the pattern rule, so the original
+			// schema accepts {"x":"a"} while the retained {type:"number"}
+			// restriction rejects it once patternProperties is gone. The rule
+			// keeps restricting the keys the pattern rules never matched and
+			// re-admits the compiled pattern rule as an alternative.
+			expect(params.unevaluatedProperties).toStrictEqual({
+				anyOf: [{ type: "number" }, { type: "string" }],
+			})
+			expect(params.required).toStrictEqual(["x"])
+			expect(String(params.description)).toContain("patternProperties")
+			// Control: with properties evaluating its own keys, the
+			// schema-valued rule is an ordinary restriction and stays verbatim.
+			const plain = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							properties: { x: { type: "string" } },
+							required: ["x"],
+							unevaluatedProperties: { type: "number" },
+						},
+					},
+				} satisfies Record<string, unknown>,
+			])
+			const plainParams = plain[0].function.parameters as unknown as Record<string, unknown>
+			expect(plainParams.unevaluatedProperties).toStrictEqual({ type: "number" })
+			expect(plainParams).not.toHaveProperty("description")
+		})
+
+		it("re-admits the removed pattern rules beside a schema-valued additionalProperties", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: { "^x": { type: "string" } },
+						required: ["x"],
+						additionalProperties: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The same annotation dependency on the additionalProperties rule:
+			// the key x was exempt through the pattern rule, so the retained
+			// {type:"number"} must re-admit the compiled pattern rule instead
+			// of rejecting the value the original accepted.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [{ type: "number" }, { type: "string" }],
+			})
+			expect(params.required).toStrictEqual(["x"])
+		})
 	})
 })
 

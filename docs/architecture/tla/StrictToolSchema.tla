@@ -89,13 +89,21 @@
 \* red-verified unit test in strict-tool-schema.spec.ts. The findings
 \* 4719419445 and 4719419450 are unit-test harness coverage and live
 \* outside this spec.
+\* Review round 10 (PR #2653, round-7 outside-diff comment on the schema-map
+\* callback): the negation context must survive the schema-map keywords -
+\* a callback that resets it to false lets a oneOf under properties inside
+\* a `not` still move under anyOf, and the negation then rejects values the
+\* original accepted. This round adds the notOneOfViaMap input, the
+\* KeepsOneOfPositionViaMap hook, and the via-map conjunct of
+\* NotOneOfValueKept. 1 added, 0 covered, 0 gap; replays as a red-verified
+\* unit test in strict-tool-schema.spec.ts.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap
 
 Props == {q}
 Types == {"str", "null"}
@@ -150,6 +158,13 @@ KeepsOneOfPosition(underNot) == TRUE
 \* Sabotage: the changed oneOf still moves under anyOf inside the negation,
 \* the negated predicate matches every value, and the negation rejects "a".
 OneOfMovedUnderNot(underNot) == FALSE
+\* Fixed code (round 7, schema-map callback): the negation context survives
+\* the schema-map keywords, so a oneOf under properties inside a `not` keeps
+\* its position exactly like a directly negated one.
+KeepsOneOfPositionViaMap(underNot) == TRUE
+\* Sabotage: the map callback resets the negation context, so the nested
+\* oneOf still moves under anyOf and the negation rejects the value.
+OneOfMovedUnderNotViaMap(underNot) == FALSE
 
 DeclaredType == {"str"} \cup (IF qNullable THEN {"null"} ELSE {})
 
@@ -218,6 +233,7 @@ TypeOK ==
     /\ wrappedInner \in {"none", "object", "array"}
     /\ patOneOf \in BOOLEAN
     /\ notOneOf \in BOOLEAN
+    /\ notOneOfViaMap \in BOOLEAN
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
@@ -233,12 +249,13 @@ Init ==
     /\ wrappedInner \in {"none", "object", "array"}
     /\ patOneOf \in BOOLEAN
     /\ notOneOf \in BOOLEAN
+    /\ notOneOfViaMap \in BOOLEAN
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -272,7 +289,11 @@ OneOfValuesKept == patOneOf => RelaxesChangedOneOf(patOneOf)
 \* Review round 9 (4719419437): a oneOf under a `not` keeps its position,
 \* so the values the negated original accepted stay accepted. Under the
 \* sabotage the moved anyOf matches every value and the negation rejects
-\* them all.
-NotOneOfValueKept == notOneOf => KeepsOneOfPosition(notOneOf)
+\* them all. Round 10 extends the invariant to a oneOf reached through a
+\* `not` via a schema-map keyword (properties): the map callback must carry
+\* the negation context through.
+NotOneOfValueKept ==
+    /\ (notOneOf => KeepsOneOfPosition(notOneOf))
+    /\ (notOneOfViaMap => KeepsOneOfPositionViaMap(notOneOfViaMap))
 
 ====

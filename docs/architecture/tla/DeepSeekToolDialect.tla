@@ -31,13 +31,23 @@
 \* Failure 12: removing contains strands a retained unevaluatedItems: false -
 \*             contains evaluated the array items it matched, so every item
 \*             the original accepted becomes forbidden (review 4719419428).
+\* Failure 13: a retained prefixItems is no complete evaluator - it evaluates
+\*             only the positions it lists, so the contains-evaluated trailing
+\*             indices stay stranded behind unevaluatedItems: false
+\*             (review 4719935091).
+\* Failure 14: removing patternProperties strands a retained schema-valued
+\*             additionalProperties or unevaluatedProperties rule - the keys
+\*             the pattern rules evaluated were exempt from it, and the
+\*             retained rule then rejects values the original accepted
+\*             (review 4719336022).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
 \*             SatPreserved, SiblingConjunctKept, ArraySatKept.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
-\* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate and KeepUnevaluated
-\* Expect: fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. KeepDependent
-\* Expect: fails ForbiddenAbsent. KeepContainsUneval fails ArraySatKept.
+\* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate, KeepUnevaluated and
+\* Expect: KeepUepSchema fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept.
+\* Expect: KeepDependent fails ForbiddenAbsent. KeepContainsUneval and
+\* Expect: KeepPrefixEvaluator fail ArraySatKept.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -68,14 +78,18 @@
 \* reference-target tracking, unevaluatedProperties relaxation), 0 covered,
 \* 0 gap. Round 6 (reviews 4719419419, 4719419428): 1 added (contains
 \* removal relaxes the stranded unevaluatedItems: false, ArraySatKept),
-\* 1 gap (4719419419 memoization is a work-count property, pinned by the
-\* repeated-reference timing test).
+\* 1 added, 0 gap (4719419419 memoization is a work-count property, pinned by the
+\* repeated-reference timing test). Round 7 (reviews 4719935091, 4719336022):
+\* 2 added (a partial prefixItems no longer counts as a complete array
+\* evaluator, ArraySatKept; a schema-valued closed rule re-admits the removed
+\* pattern rules as alternatives, SatPreserved), 0 covered, 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
                                   \* "KeepClosed", "KeepConditional", "AbsorbAnyOf",
                                   \* "KeepDependent", "KeepRefPredicate",
-                                  \* "KeepUnevaluated" or "KeepContainsUneval"
+                                  \* "KeepUnevaluated", "KeepContainsUneval",
+                                  \* "KeepPrefixEvaluator" or "KeepUepSchema"
 
 VARIABLE in
 
@@ -95,13 +109,17 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* instead of additionalProperties: false (uneval2), the closed-array rule
 \* carrying contains beside unevaluatedItems: false (containsClosed2) with
 \* and without a second items evaluator that keeps the array evaluated
-\* (arrEvaluator2).
+\* (arrEvaluator2), with a partial prefixItems as the second evaluator
+\* instead (partialPrefix2 - it evaluates only its listed positions), and
+\* the closed-object rule shaped as a schema-valued unevaluatedProperties
+\* restriction that must re-admit the removed pattern rules (uepSchema2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
            anyOf2 : BOOLEAN, dep2 : BOOLEAN, ref2 : BOOLEAN,
            uneval2 : BOOLEAN, containsClosed2 : BOOLEAN,
-           arrEvaluator2 : BOOLEAN]
+           arrEvaluator2 : BOOLEAN, partialPrefix2 : BOOLEAN,
+           uepSchema2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -111,8 +129,11 @@ Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 \* a constraint or a referenced target changed, moves a oneOf only when a
 \* branch (or a referenced branch target) changed, relaxes
 \* additionalProperties and unevaluatedProperties only under removed
-\* patternProperties, relaxes a retained unevaluatedItems: false only under
-\* a removed contains with no remaining items evaluator, drops a conditional
+\* patternProperties (a false rule becomes true; a schema-valued rule
+\* re-admits the removed pattern rules as alternatives), relaxes a retained
+\* unevaluatedItems restriction only under a removed contains with no
+\* remaining complete items evaluator (a partial prefixItems is no complete
+\* evaluator), drops a conditional
 \* only when its if predicate (or a referenced predicate target) changed,
 \* and always keeps an anyOf sibling as its own constraint.
 \* ForceRequired is the all-required rewrite the strict path used before.
@@ -121,18 +142,22 @@ Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 \* each retain exactly one tightened construct. KeepDependent skips the
 \* dependentSchemas traversal. KeepRefPredicate keeps the reference-blind
 \* retention decisions. KeepUnevaluated keeps the stranded
-\* unevaluatedProperties: false rule.
+\* unevaluatedProperties: false rule. KeepContainsUneval keeps the stranded
+\* array restriction. KeepPrefixEvaluator keeps treating a partial prefixItems
+\* as a complete evaluator. KeepUepSchema keeps a schema-valued closed rule
+\* unmerged, so it rejects the keys the pattern rules evaluated.
 Decisions(i) ==
     LET refChanged == i.ref2 /\ i.kw2 # {}
     IN LET fixed ==
         [required |-> Required(i), kept |-> {}, noted |-> i.kw2,
          notDropped |-> i.not2 /\ (i.childKw \/ refChanged),
          overlapSafe |-> i.oneOf2 /\ (i.branchKw \/ refChanged),
-         apRelaxed |-> i.closed2 /\ ~i.uneval2,
-         uepRelaxed |-> i.closed2 /\ i.uneval2,
+         apRelaxed |-> i.closed2 /\ ~i.uneval2 /\ ~i.uepSchema2,
+         uepRelaxed |-> i.closed2 /\ i.uneval2 /\ ~i.uepSchema2,
+         uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
          siblingKept |-> TRUE,
-         uiRelaxed |-> i.containsClosed2 /\ ~i.arrEvaluator2]
+         uiRelaxed |-> i.containsClosed2 /\ (~i.arrEvaluator2 \/ i.partialPrefix2)]
     IN CASE Variant = "ForceRequired" ->
         [fixed EXCEPT !["required"] = {1, 2}]
     [] Variant = "KeepPattern" ->
@@ -146,7 +171,8 @@ Decisions(i) ==
     [] Variant = "KeepOneOf" ->
         [fixed EXCEPT !["overlapSafe"] = FALSE]
     [] Variant = "KeepClosed" ->
-        [fixed EXCEPT !["apRelaxed"] = FALSE, !["uepRelaxed"] = FALSE]
+        [fixed EXCEPT !["apRelaxed"] = FALSE, !["uepRelaxed"] = FALSE,
+                      !["uepSchemaKept"] = FALSE]
     [] Variant = "KeepConditional" ->
         [fixed EXCEPT !["condRelaxed"] = FALSE]
     [] Variant = "AbsorbAnyOf" ->
@@ -161,6 +187,10 @@ Decisions(i) ==
         [fixed EXCEPT !["uepRelaxed"] = FALSE]
     [] Variant = "KeepContainsUneval" ->
         [fixed EXCEPT !["uiRelaxed"] = FALSE]
+    [] Variant = "KeepPrefixEvaluator" ->
+        [fixed EXCEPT !["uiRelaxed"] = i.containsClosed2 /\ ~i.arrEvaluator2]
+    [] Variant = "KeepUepSchema" ->
+        [fixed EXCEPT !["uepSchemaKept"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -171,6 +201,7 @@ TypeOK ==
     /\ Decisions(in).overlapSafe \in BOOLEAN
     /\ Decisions(in).apRelaxed \in BOOLEAN
     /\ Decisions(in).uepRelaxed \in BOOLEAN
+    /\ Decisions(in).uepSchemaKept \in BOOLEAN
     /\ Decisions(in).condRelaxed \in BOOLEAN
     /\ Decisions(in).siblingKept \in BOOLEAN
     /\ Decisions(in).uiRelaxed \in BOOLEAN
@@ -210,6 +241,7 @@ OneOfPart(i) ==
 ClosedPart(i) ==
     IF ~i.closed2 THEN TRUE
     ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.uepSchema2 THEN Decisions(i).uepSchemaKept
     ELSE IF i.uneval2 THEN Decisions(i).uepRelaxed
     ELSE Decisions(i).apRelaxed
 
@@ -235,8 +267,11 @@ SiblingConjunctKept ==
 \* Safety (review 4719419428): a removed contains with no remaining items
 \* evaluator relaxes the stranded unevaluatedItems: false, so the array
 \* keeps accepting the items the original accepted. With a remaining
-\* evaluator the restriction is ordinary and stays.
+\* evaluator the restriction is ordinary and stays - but a partial
+\* prefixItems evaluates only its listed positions, so the contains-evaluated
+\* trailing indices stay unevaluated and the restriction relaxes anyway
+\* (review 4719935091).
 ArraySatKept ==
-    (in.containsClosed2 /\ ~in.arrEvaluator2) => Decisions(in).uiRelaxed
+    (in.containsClosed2 /\ ((~in.arrEvaluator2) \/ in.partialPrefix2)) => Decisions(in).uiRelaxed
 
 ====

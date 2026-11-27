@@ -472,47 +472,56 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			warnSpy.mockRestore()
 		})
 
-		it("rejects unconvertible timeout text in mixed calls and keeps the response text (review 4719419445)", async () => {
-			const task = await createStreamingTask()
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-			const { assistantEntries } = recordApiHistoryEntries(task)
+		it.each([
+			["invalid JSON", "oops"],
+			["a JSON string of the wrong type", '"5"'],
+		])(
+			"rejects %s timeout text in a mixed call and keeps the response text (review 4719419445)",
+			async (_label, timeoutText) => {
+				const task = await createStreamingTask()
+				const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				const { assistantEntries } = recordApiHistoryEntries(task)
 
-			// A valid read_file precedes two execute_command calls whose
-			// timeout cannot become the declared number: "oops" is not JSON
-			// and "5" is a JSON string, the wrong type.
-			const responseText =
-				'<read_file><path>a.ts</path></read_file><execute_command><command>npm run dev</command><cwd>/test/workspace</cwd><timeout>oops</timeout></execute_command><execute_command><command>npm run build</command><cwd>/test/workspace</cwd><timeout>"5"</timeout></execute_command>'
-			// The second response carries a native tool call so the no-tool
-			// re-prompt loop ends after the rejected text turn.
-			vi.spyOn(task, "attemptApiRequest")
-				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: responseText }]))
-				.mockImplementationOnce(() =>
-					asyncStreamFrom<ApiStreamChunk>([
-						{
-							type: "tool_call",
-							id: "toolu_native",
-							name: "write_to_file",
-							arguments: '{"path":"b.ts","content":"hi"}',
-						},
-					]),
-				)
+				// A valid read_file precedes the execute_command whose timeout
+				// cannot become the declared number. Each invalid timeout runs
+				// in its own response: one combined response would reject the
+				// whole batch on the first failure, so a wrong-type acceptance
+				// could hide behind the invalid-JSON rejection.
+				const responseText = `<read_file><path>a.ts</path></read_file><execute_command><command>npm run dev</command><cwd>/test/workspace</cwd><timeout>${timeoutText}</timeout></execute_command>`
+				// The second response carries a native tool call so the no-tool
+				// re-prompt loop ends after the rejected text turn.
+				vi.spyOn(task, "attemptApiRequest")
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: responseText }]),
+					)
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([
+							{
+								type: "tool_call",
+								id: "toolu_native",
+								name: "write_to_file",
+								arguments: '{"path":"b.ts","content":"hi"}',
+							},
+						]),
+					)
 
-			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
 
-			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
-			const toolUses = content.filter((block) => block.type === "tool_use")
-			// The invalid argument rejects the whole salvage batch: neither
-			// the execute_command calls nor the leading read_file is promoted.
-			// The second response's native tool call is the only tool_use.
-			expect(toolUses.map((block) => (block as { id?: string }).id)).toStrictEqual(["toolu_native"])
-			// The complete response text stays in the API history for both
-			// the invalid-JSON and the wrong-type case.
-			expect(assistantEntries.length).toBeGreaterThan(0)
-			const historyBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
-			expect(historyBlocks.some((block) => block.type === "tool_use")).toBe(false)
-			expect(historyBlocks.find((block) => block.type === "text")?.text).toBe(responseText)
-			warnSpy.mockRestore()
-		})
+				const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+				const toolUses = content.filter((block) => block.type === "tool_use")
+				// The invalid argument rejects the whole salvage batch: neither
+				// the execute_command call nor the leading read_file is
+				// promoted. The second response's native tool call is the only
+				// tool_use.
+				expect(toolUses.map((block) => (block as { id?: string }).id)).toStrictEqual(["toolu_native"])
+				// The complete response text stays in the API history.
+				expect(assistantEntries.length).toBeGreaterThan(0)
+				const historyBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+				expect(historyBlocks.some((block) => block.type === "tool_use")).toBe(false)
+				expect(historyBlocks.find((block) => block.type === "text")?.text).toBe(responseText)
+				warnSpy.mockRestore()
+			},
+		)
 
 		it("leaves prose-wrapped XML alone (no false promotion)", async () => {
 			const task = await createStreamingTask()
