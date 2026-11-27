@@ -1522,6 +1522,52 @@ describe("useSelectedModel", () => {
 			expect(selected.info?.contextWindow).toBeLessThan(entry!.contextWindow)
 		})
 
+		it.each([
+			["gemini-4-neon", 897718],
+			["gemini-4-hydrogen", 897719],
+			["gemini-4-carbon", 899900],
+			["gpt-6.2-astra", 271119],
+			["gpt-6.2-sol", 271119],
+		] as const)("shows %s's accepted measured gauge budget until Copilot reports its own", (family, inputLimit) => {
+			reportedModels({ id: "unrelated", family: "unrelated" })
+			const { result, rerender } = renderHook(() =>
+				useSelectedModel({
+					apiProvider: providerIdentifiers.githubCopilot,
+					vsCodeLmModelSelector: { vendor: "copilot", family },
+				}),
+			)
+			expect(result.current.id).toBe(`copilot/${family}`)
+			expect(result.current.info?.contextWindow).toBe(inputLimit)
+			expect(result.current.info?.supportsImages).toBeUndefined()
+			expect(result.current.info?.supportsToolCalling).toBeUndefined()
+			expect(result.current.info?.supportsPromptCache).toBe(false)
+			expect(selectCopilot({ vendor: "copilot", id: family }).info?.contextWindow).toBe(
+				openAiModelInfoSaneDefaults.contextWindow,
+			)
+
+			reportedModels({
+				id: family,
+				family,
+				modelInfo: {
+					contextWindow: inputLimit - 1,
+					supportsImages: false,
+					supportsToolCalling: true,
+					supportsPromptCache: false,
+					inputPrice: 0,
+					outputPrice: 0,
+				},
+			})
+			rerender()
+			expect(result.current.info).toMatchObject({
+				contextWindow: inputLimit - 1,
+				supportsImages: false,
+				supportsToolCalling: true,
+				supportsPromptCache: false,
+				inputPrice: 0,
+				outputPrice: 0,
+			})
+		})
+
 		it("shows the approved Fable 5.2 catalog budget before Copilot reports a live model", () => {
 			const selected = selectCopilot({ vendor: "copilot", family: "claude-fable-5.2" })
 			expect(selected.info?.contextWindow).toBe(871793)
@@ -1727,6 +1773,11 @@ describe("useSelectedModel", () => {
 			["gemini-3.7-flash", 935783],
 			["gemini-3.8-flash", 955113],
 			["gemini-3.6-flash", 935785],
+			["gemini-4-neon", 897718],
+			["gemini-4-hydrogen", 897719],
+			["gemini-4-carbon", 899900],
+			["gpt-6.2-astra", 271119],
+			["gpt-6.2-sol", 271119],
 		] as const)("pins %s to the %s assigned input budget, not its advertised window", (family, expected) => {
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.vscodeLm,
@@ -1742,6 +1793,32 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
 			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
 			expect(result.current.info?.supportsImages).toBeUndefined()
+		})
+
+		describe.each([
+			["gemini-4-neon", 897718],
+			["gemini-4-hydrogen", 897719],
+			["gemini-4-carbon", 899900],
+			["gpt-6.2-astra", 271119],
+			["gpt-6.2-sol", 271119],
+		] as const)("uses %s's measured gauge budget for any or missing vendor", (family, inputLimit) => {
+			it.each(["copilot", "some-other-vendor", undefined])("with vendor %s", (vendor) => {
+				const { result, rerender, unmount } = renderHook(
+					() =>
+						useSelectedModel({
+							apiProvider: providerIdentifiers.vscodeLm,
+							vsCodeLmModelSelector: { id: family, family, vendor },
+						}),
+					{ wrapper: createWrapper() },
+				)
+				expect(result.current.info?.contextWindow).toBe(inputLimit)
+				vi.mocked(useVsCodeLmModels).mockReturnValue({
+					data: [{ id: family, family, vendor, modelInfo: { contextWindow: 2_000_000 } }],
+				} as ReturnType<typeof useVsCodeLmModels>)
+				rerender()
+				expect(result.current.info?.contextWindow).toBe(inputLimit)
+				unmount()
+			})
 		})
 
 		it.each(["copilot", "some-other-vendor"])("uses the same measured budget for vendor %s", (vendor) => {

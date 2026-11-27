@@ -161,6 +161,33 @@ describe("vscodeLlmModels", () => {
 	})
 
 	it.each([
+		["gemini-4-neon", "Gemini 4 Neon", 982833, 897718],
+		["gemini-4-hydrogen", "Gemini 4 Hydrogen", 982830, 897719],
+		["gemini-4-carbon", "Gemini 4 Carbon", 935793, 899900],
+		["gpt-6.2-astra", "GPT-6.2 Astra", 921793, 271119],
+		["gpt-6.2-sol", "GPT-6.2 Sol", 921793, 271119],
+	] as const)(
+		"records %s's measured limits without a safety margin or unmeasured prices",
+		(family, name, contextWindow, maxInputTokens) => {
+			// Exact-row comparison rejects extra fields, including margins and prices.
+			expect(vscodeLlmModels[family]).toEqual({
+				contextWindow,
+				supportsImages: true,
+				supportsPromptCache: false,
+				family,
+				version: family,
+				name,
+				supportsToolCalling: true,
+				maxInputTokens,
+			})
+			expect(vscodeLlmModels[family]).not.toHaveProperty("inputPrice")
+			expect(vscodeLlmModels[family]).not.toHaveProperty("outputPrice")
+			expect(getVscodeLlmModelInfo(family, "copilot")).toBe(vscodeLlmModels[family])
+			expect(getVscodeLlmModelInfo(family, undefined)).toBe(vscodeLlmModels[family])
+		},
+	)
+
+	it.each([
 		["claude-opus-5.5", "claude-opus-5", "claude-opus-4.8"],
 		["gpt-6-astra", "gpt-5.6-luna"],
 		["grok-4.6", "grok-4.5", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"],
