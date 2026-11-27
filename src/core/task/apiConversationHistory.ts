@@ -22,14 +22,6 @@ interface PrepareApiConversationMessageOptions {
 	api: ApiHandler
 	apiConfiguration: ProviderSettings
 	apiConversationHistory: ApiMessage[]
-	/**
-	 * Reuse the identity (messageId + ts) of an already saved user turn instead
-	 * of minting a fresh one. The empty-assistant-response retry restores a
-	 * turn that is still on disk; a fresh identity would make the ordinary
-	 * merge save retain both copies, and the reloaded history would then send
-	 * two tool_result blocks for one tool_use id.
-	 */
-	identity?: { messageId?: string; ts?: number }
 }
 
 export function prepareApiConversationMessage({
@@ -38,13 +30,12 @@ export function prepareApiConversationMessage({
 	api,
 	apiConfiguration,
 	apiConversationHistory,
-	identity,
 }: PrepareApiConversationMessageOptions): ApiMessage {
 	if (message.role === "assistant") {
 		return prepareAssistantMessage(message, reasoning, api as ApiHistoryHandler, apiConfiguration)
 	}
 
-	return prepareUserMessage(message, apiConversationHistory, identity)
+	return prepareUserMessage(message, apiConversationHistory)
 }
 
 function prepareAssistantMessage(
@@ -127,11 +118,7 @@ function prepareAssistantMessage(
 	return messageWithTs
 }
 
-function prepareUserMessage(
-	message: Anthropic.MessageParam,
-	apiConversationHistory: ApiMessage[],
-	identity?: { messageId?: string; ts?: number },
-): ApiMessage {
+function prepareUserMessage(message: Anthropic.MessageParam, apiConversationHistory: ApiMessage[]): ApiMessage {
 	const effectiveHistoryForValidation = getEffectiveApiHistory(apiConversationHistory)
 	const lastEffective = effectiveHistoryForValidation[effectiveHistoryForValidation.length - 1]
 	const historyForValidation = lastEffective?.role === "assistant" ? effectiveHistoryForValidation : []
@@ -154,8 +141,8 @@ function prepareUserMessage(
 	const validatedMessage = validateAndFixToolResultIds(messageToAdd, historyForValidation)
 	return {
 		...validatedMessage,
-		messageId: identity?.messageId ?? crypto.randomUUID(),
-		ts: identity?.ts ?? Date.now(),
+		messageId: crypto.randomUUID(),
+		ts: Date.now(),
 	}
 }
 

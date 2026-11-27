@@ -1,55 +1,46 @@
 ---- MODULE ToolResultRetry ----
-\* Models the empty-assistant-response retry in recursivelyMakeClineRequests
-\* (src/core/task/Task.ts) and the merge save in saveApiMessages and
-\* mergeApiMessageSnapshots (src/core/task-persistence/mergeMessageSnapshots.ts).
-\* Source: the retry pops the saved user tool-result turn from memory and re-adds
-\* it. Decline restores it too. Sink: a reload turns every saved user-result
-\* record into one outgoing tool_result block (mergeConsecutiveApiMessages then
-\* convertToOpenAiMessages). The conversion is one-to-one on records, so the
-\* model counts records.
-\* Failure: the retry mints a fresh message identity, so the merge save keeps the
-\* disk-only record. The reloaded history then sends two tool_result blocks for
-\* one tool_use id and the provider returns HTTP 400 (issue 2691).
-\* Invariant OneResultPerCall: no tool call has two saved result records.
-\* Invariant ResultNeverLost: when the turn ends, every issued call still has its
-\* saved result outside a summary, so the fix cannot repair the duplicate by losing the result.
-\* Modes: Fresh mints a new identity on every retry and decline (the code before
-\* the fix). Stable restores the popped record with its identity (the fix).
-\* Expected before the run: Fresh fails OneResultPerCall at the retry save. The
-\* trace is AddAssistant, AddUserResult, EmptyResponse, RetryReAdd. Stable holds every
-\* invariant.
-\* Configs: ToolResultRetry.cfg (Stable) must pass. ToolResultRetry.Current.cfg
-\* (Fresh) must fail. ToolResultRetry.Summary.cfg removes the summary guard and must fail.
-\* Not modeled: message content, timestamp order, truncation tags, and stream retries
-\* that do not recreate the turn, and the two flush defects of issue 2691. Those need a
-\* different fix and stay in the issue.
-\* Review ratchet for PR #2701, supplied review summary (no thread URL supplied).
-\* Expected: removing the identity guard can replace a summary with a plain turn.
-\* Condense maps overwriteApiConversationHistory to a summary save before pop or during backoff.
-\* Added: SummarySurvives models findings 1 and 3. Findings 8 and 9 are covered.
-\* Gap: 2 is a separate output-limit retry. 4 to 7 and 10 to 14 concern tests or text.
-\* Finding 15 needs no change. Counts: 3 covered, 2 added, 10 gap.
-\* The first invariants predate this review. The new invariant follows the review.
-\* Cost: each run takes under 5 seconds. This review pass took about 8 agent minutes.
-\* Result: the fixed config holds with 20 distinct states.
-\* Fresh fails OneResultPerCall with 8 distinct states and a 5-state trace.
-\* Summary sabotage fails SummarySurvives with 11 distinct states and a 6-state trace.
-\* Its last actions are Condense, EmptyResponse, RetryReAdd.
-\* Replay: the before-pop summary test fails on the old guard and passes on the fix.
-\* The backoff summary test passes in both versions. This is a null result.
-\* No new code defect was found beyond the supplied review findings.
-\* The phase table test checks summary preservation on the real persistence path.
-\* Initial findings before review: 0 covered, 1 added, 0 gap.
-
-\* Runtime simplification: derive the removed flag from popped, as this model does.
-\* Both retry decisions use RetryReAdd. Keep one queue step in recursivelyMakeClineRequests.
-\* Failure to prevent: a retry adds a second saved result or replaces a summary.
-\* Expected: the same invariants and sabotage checks hold with no model transition change.
-\* Result: 20 fixed states pass. Fresh and summary sabotage fail with 8 and 11 distinct states.
-\* No new defect was found. The existing phase-table tests pass on the runtime refactor.
-\* Cost: this simplification pass took about 3 agent minutes.
-\* The model does not check the prompt or backoff order. Runtime tests check those paths.
-
+\* Source: recursivelyMakeClineRequests in Task.ts retains a saved turn across retries.
+\* Sink: saveApiMessages and mergeApiMessageSnapshots retain disk-only identities.
+\* Reload and provider conversion send one result block per saved result record.
+\* Failure: a retry duplicates or loses a result, or replaces a saved summary.
+\* Invariants: OneResultPerCall limits duplicates. ResultNeverLost retains each
+\* issued result until Condense replaces it. SummarySurvives retains summary metadata.
+\* Retain leaves the saved turn in place. Stable models the earlier identity restore.
+\* Fresh mints identity. PopSummary removes the earlier pop guard.
+\* LosePending deletes the disk result at pop. LoseRetry and LoseDecline replace
+\* the restored result with a plain record at their respective save boundaries.
+\* Expected: Retain passes all invariants. Stable passes the disk invariants.
+\* Stable fails ResultInMemory. All sabotage modes fail.
+\* Condense abstracts overwriteApiConversationHistory before retry or during backoff.
+\* Not modeled: payload parsing, timestamps, message counters, ask delivery, prompt
+\* order, save failures, cancellation, rewind, deletion, output-limit retries, or concurrency.
+\* Initial invariants predate this review. This pass extends them from the findings.
+\* PR #2701 review ratchet (supplied summary, no thread URL): 1 covered, 2 added,
+\* 4 gap. Covered: identity guard. Added: loss checks and summarized type. Gaps:
+\* summary test strength, ask delivery, header prose, and test helper prose.
+\* Earlier checks: Fresh failed duplication. PopSummary failed summary retention.
+\* Policy requires cost and findings here. These are model results, not a code proof.
+\* Earlier result: Stable passed with 38 states. Fresh and PopSummary failed with 8 and 11.
+\* Earlier loss checks failed LosePending, LoseRetry, and LoseDecline with 6, 12, and 13 states.
+\* Replay: disk overwrite at pop and plain-text restore mutations fail real-file tests.
+\* Unconditional restore and missing identity-guard mutations fail the summary tests.
+\* Empty-array restore is repaired by validation. Assistant restore leaves the old
+\* disk record. These are false alarms for result loss, so the loss modes use plain records.
+\* Property test: retry counts 1 to 3 retain one saved result with its identity.
+\* Null result: no new production defect was found beyond the review findings.
+\* Simplification expectation: no pop needs no restore, identity option, or counter adjustment.
+\* Condense covers the retained turn before or during backoff. No plain copy follows it.
+\* Ask polling and input cardinality remain gaps. Real polling and retry-count tests cover them.
+\* Added ResultInMemory: the saved result stays in memory until Condense covers it.
+\* SummarySurvives now checks memory and disk. Both are required by the retained-turn design.
+\* Expected sabotage: Stable fails ResultInMemory at EmptyResponse; the real backoff test must fail.
+\* Result: Retain passes with 44 states. Stable fails ResultInMemory with 6 states.
+\* Fresh fails with 9 states. Summary sabotage fails with 7 states.
+\* Loss sabotage fails pending, retry, and decline with 6, 13, and 14 states.
+\* Replay: adding a pop to the new runtime fails backoff, pending ask, and cancellation tests.
+\* The real ask wait now stays pending across polling until the handler receives a response.
+\* Null result: no new production bug was found. The design removes the transient missing turn.
+\* Cost: about eight agent minutes for this simplification; TLC runs take under five seconds.
 
 EXTENDS Naturals, FiniteSets, Sequences
 
@@ -62,11 +53,11 @@ SRec == [kind |-> "summary", call |-> 0, mid |-> MaxMints]
 NoRec == [kind |-> "none", call |-> 0, mid |-> 0]
 
 RecordSet ==
-    {SRec, PRec} \cup {ARec(m) : m \in 0..MaxMints}
+    {SRec} \cup {[kind |-> "plain", call |-> 0, mid |-> m] : m \in 0..MaxMints} \cup {ARec(m) : m \in 0..MaxMints}
     \cup {URec(c, m) : c \in 1..MaxCalls, m \in 0..MaxMints}
 
-VARIABLES mem, disk, popped, nextMid, empties, done, summarized
-vars == <<mem, disk, popped, nextMid, empties, done, summarized>>
+VARIABLES mem, disk, popped, nextMid, empties, done, summarized, issued
+vars == <<mem, disk, popped, nextMid, empties, done, summarized, issued>>
 
 MemMids(mm) == {mm[i].mid : i \in 1..Len(mm)}
 MemSet(mm) == {mm[i] : i \in 1..Len(mm)}
@@ -83,7 +74,7 @@ AddAssistant ==
     /\ mem' = Append(mem, ARec(nextMid))
     /\ nextMid' = nextMid + 1
     /\ disk' = MergeSave(mem')
-    /\ UNCHANGED <<popped, empties, done, summarized>>
+    /\ UNCHANGED <<popped, empties, done, summarized, issued>>
 
 \* The tool ran. The user turn with its tool result is saved. A fresh turn is
 \* minted only when no removed turn awaits restoration. During a retry the only
@@ -96,19 +87,22 @@ AddUserResult(c) ==
     /\ mem' = Append(mem, URec(c, nextMid))
     /\ nextMid' = nextMid + 1
     /\ disk' = MergeSave(mem')
+    /\ issued' = issued \cup {c}
     /\ UNCHANGED <<popped, empties, done, summarized>>
 
-\* The model sent no assistant content. The saved user turn is popped from
-\* memory. The disk copy stays.
+\* No assistant content arrived. Retain leaves memory unchanged. Legacy modes pop
+\* the saved turn. The popped record also marks a pending retry decision in this model.
 EmptyResponse ==
     /\ ~done
     /\ empties < MaxEmpty
     /\ Len(mem) >= 2
-    /\ (mem[Len(mem)].kind = "u" \/ (PopSummary /\ mem[Len(mem)] = SRec))
+    /\ popped = NoRec
+    /\ (mem[Len(mem)].kind = "u" \/ ((PopSummary \/ Mode = "Retain") /\ mem[Len(mem)] = SRec))
     /\ popped' = mem[Len(mem)]
     /\ empties' = empties + 1
-    /\ mem' = SubSeq(mem, 1, Len(mem) - 1)
-    /\ UNCHANGED <<disk, nextMid, done, summarized>>
+    /\ mem' = IF Mode = "Retain" THEN mem ELSE SubSeq(mem, 1, Len(mem) - 1)
+    /\ disk' = IF Mode = "LosePending" THEN {r \in disk : r.kind # "u"} ELSE disk
+    /\ UNCHANGED <<nextMid, done, summarized, issued>>
 
 \* The retry re-adds the turn and saves. Stable keeps the saved identity, so the
 \* merge save replaces the disk record. Fresh mints a new identity, so the merge
@@ -116,14 +110,15 @@ EmptyResponse ==
 RetryReAdd(c) ==
     /\ ~done
     /\ popped # NoRec
-    /\ LET restored == IF Mode = "Stable" THEN (IF popped = SRec THEN PRec ELSE popped) ELSE URec(c, nextMid)
-           replaced == IF Mode = "Stable" THEN popped.mid ELSE nextMid
-       IN /\ Mode = "Stable" \/ nextMid < MaxMints
-          /\ mem' = Append(mem, restored)
-          /\ nextMid' = IF Mode = "Stable" THEN nextMid ELSE nextMid + 1
+    /\ LET restored == IF Mode = "LoseRetry" THEN [kind |-> "plain", call |-> 0, mid |-> popped.mid]
+                       ELSE IF Mode # "Fresh" THEN (IF popped = SRec THEN PRec ELSE popped) ELSE URec(c, nextMid)
+           replaced == IF Mode # "Fresh" THEN popped.mid ELSE nextMid
+       IN /\ Mode # "Fresh" \/ nextMid < MaxMints
+          /\ mem' = IF Mode = "Retain" THEN mem ELSE Append(mem, restored)
+          /\ nextMid' = IF Mode # "Fresh" THEN nextMid ELSE nextMid + 1
           /\ disk' = {r \in disk : r.mid # replaced} \cup MemSet(mem')
           /\ popped' = NoRec
-          /\ UNCHANGED <<empties, done, summarized>>
+          /\ UNCHANGED <<empties, done, summarized, issued>>
 
 \* The user declines the retry. The popped turn is restored with its identity,
 \* then a synthetic failure turn is saved and the turn ends.
@@ -131,29 +126,31 @@ RetryDeclined(c) ==
     /\ ~done
     /\ popped # NoRec
     /\ nextMid + 1 < MaxMints
-    /\ LET restored == IF Mode = "Stable" THEN (IF popped = SRec THEN PRec ELSE popped) ELSE URec(c, nextMid)
-           nextAfter == IF Mode = "Stable" THEN nextMid ELSE nextMid + 1
-           afterRestore == Append(Append(mem, restored), ARec(nextAfter))
+    /\ LET restored == IF Mode = "LoseDecline" THEN [kind |-> "plain", call |-> 0, mid |-> popped.mid]
+                       ELSE IF Mode # "Fresh" THEN (IF popped = SRec THEN PRec ELSE popped) ELSE URec(c, nextMid)
+           nextAfter == IF Mode # "Fresh" THEN nextMid ELSE nextMid + 1
+           afterRestore == Append(IF Mode = "Retain" THEN mem ELSE Append(mem, restored), ARec(nextAfter))
        IN /\ mem' = afterRestore
           /\ nextMid' = nextAfter + 1
           /\ disk' = {r \in disk : ~r.mid \in MemMids(mem')} \cup MemSet(mem')
           /\ popped' = NoRec
           /\ done' = TRUE
-          /\ UNCHANGED <<empties, summarized>>
+          /\ UNCHANGED <<empties, summarized, issued>>
 
 \* The retry gets a real assistant response. The turn ends.
 CompleteTurn ==
     /\ ~done
     /\ Len(mem) >= 2
-    /\ mem[Len(mem)].kind = "u"
+    /\ popped = NoRec
+    /\ mem[Len(mem)].kind \in {"u", "summary"}
     /\ nextMid < MaxMints
     /\ mem' = Append(mem, ARec(nextMid))
     /\ nextMid' = nextMid + 1
     /\ disk' = MergeSave(mem')
     /\ done' = TRUE
-    /\ UNCHANGED <<popped, empties, summarized>>
+    /\ UNCHANGED <<popped, empties, summarized, issued>>
 
-\* Context management replaces the saved history before the pop or during backoff.
+\* Context management covers the saved history before retry or during backoff.
 Condense ==
     /\ ~done
     /\ SRec \notin disk
@@ -162,10 +159,10 @@ Condense ==
     /\ mem' = Append(mem, SRec)
     /\ disk' = {SRec}
     /\ summarized' = TRUE
-    /\ UNCHANGED <<popped, nextMid, empties, done>>
+    /\ UNCHANGED <<popped, nextMid, empties, done, issued>>
 
 \* Once context management saves a summary, a retry must keep its metadata.
-SummarySurvives == summarized => SRec \in disk
+SummarySurvives == summarized => SRec \in disk /\ SRec \in MemSet(mem)
 
 Init ==
     /\ mem = <<>>
@@ -175,6 +172,7 @@ Init ==
     /\ empties = 0
     /\ done = FALSE
     /\ summarized = FALSE
+    /\ issued = {}
 
 Next ==
     \/ Condense
@@ -197,6 +195,8 @@ TypeOK ==
     /\ empties \in Nat
     /\ empties =< MaxEmpty
     /\ done \in BOOLEAN
+    /\ summarized \in BOOLEAN
+    /\ issued \subseteq 1..MaxCalls
 
 \* The opposite of the failure: the saved history holds at most one result
 \* record per tool call, so a reload sends one tool_result per tool_use id.
@@ -204,11 +204,16 @@ OneResultPerCall ==
     \A c \in 1..MaxCalls :
         Cardinality({r \in disk : r.kind = "u" /\ r.call = c}) <= 1
 
-\* The fix must not lose the result: when the turn ends, every issued call
-\* still has its saved result.
+\* Retain keeps every saved result in memory while a retry or ask is pending.
+\* The earlier Stable protocol violates this property between pop and restore.
+ResultInMemory ==
+    ~summarized =>
+        issued \subseteq {mem[i].call : i \in {j \in 1..Len(mem) : mem[j].kind = "u"}}
+
+\* Once saved, each issued result stays on disk, including during the pop.
+\* Condense deliberately replaces results with a summary and ends this obligation.
 ResultNeverLost ==
-    done /\ SRec \notin disk =>
-        \A c \in 1..MaxCalls :
-            Cardinality({r \in disk : r.kind = "u" /\ r.call = c}) = 1
+    ~summarized =>
+        issued \subseteq {r.call : r \in {d \in disk : d.kind = "u"}}
 
 ====

@@ -1451,11 +1451,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Appends an API turn and records whether an assistant turn reached persistent storage.
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
-	private async addToApiConversationHistory(
-		message: Anthropic.MessageParam,
-		reasoning?: string,
-		options?: { identity?: { messageId?: string; ts?: number } },
-	): Promise<void> {
+	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1470,7 +1466,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				api: this.api,
 				apiConfiguration: this.apiConfiguration,
 				apiConversationHistory: this.apiConversationHistory,
-				identity: options?.identity,
 			}),
 		)
 
@@ -4017,7 +4012,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			pendingContent?: Promise<Anthropic.Messages.ContentBlockParam[]> // Resolved after the request row shows
 			includeFileDetails: boolean
 			retryAttempt?: number
-			removedUserMessage?: ApiMessage // The saved record removed for the empty-response retry, restored with its identity
 		}
 
 		const stack: StackItem[] = [
@@ -4123,20 +4117,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Add environment details as its own text block, separate from tool
 			// results.
 			const finalUserContent = [...contentWithoutEnvDetails, { type: "text" as const, text: environmentDetails }]
-			// See shouldAddUserMessageToHistory for the full add/skip rules (retry/empty/removed).
+			// Retries reuse the saved turn. Empty content can resume a turn already in history.
 			const isEmptyUserContent = currentUserContent.length === 0
 			const shouldAddUserMessage = shouldAddUserMessageToHistory({
 				retryAttempt: currentItem.retryAttempt,
 				isEmptyUserContent,
-				userMessageWasRemoved: currentItem.removedUserMessage !== undefined,
 			})
-			let addedUserMessageId: string | undefined
 			if (shouldAddUserMessage) {
-				// Reuse the saved identity so the merge save replaces the original turn.
-				await this.addToApiConversationHistory({ role: "user", content: finalUserContent }, undefined, {
-					identity: currentItem.removedUserMessage,
-				})
-				addedUserMessageId = this.apiConversationHistory.at(-1)?.messageId
+				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 				this.messageCounts.user++
 			}
 
@@ -5269,22 +5257,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 
 					const state = await this.providerRef.deref()?.getState()
-					// Context management can replace the added turn with a summary.
-					// Remove only the turn that this iteration added.
-					let removedUserMessage: ApiMessage | undefined
-					const lastMessage = this.apiConversationHistory.at(-1)
-					if (
-						addedUserMessageId !== undefined &&
-						lastMessage?.messageId === addedUserMessageId &&
-						lastMessage.role === "user" &&
-						!lastMessage.isSummary
-					) {
-						// The retry must reuse this identity to replace the saved disk record.
-						removedUserMessage = lastMessage
-						this.apiConversationHistory.pop()
-						this.messageCounts.user--
-					}
-
+					// Keep the saved user turn in place for retry, decline, or cancellation.
 					// Wait for the automatic retry or ask the user for a retry decision.
 					if (state?.autoApprovalEnabled) {
 						// Auto-retry with backoff - don't persist failure message when retrying
@@ -5312,19 +5285,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
 						} else {
-							// User declined to retry. Re-add the user message only if this
-							// iteration removed one, so the history and counter stay consistent.
-							if (removedUserMessage) {
-								// Restore the already saved record with its original identity so
-								// the merge save keeps one copy of the turn on disk.
-								await this.addToApiConversationHistory(
-									{ role: "user", content: removedUserMessage.content },
-									undefined,
-									{ identity: removedUserMessage },
-								)
-								this.messageCounts.user++
-							}
-
 							await this.say(
 								"error",
 								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
@@ -5342,12 +5302,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						}
 					}
 
-					// Both retry paths restore the same saved record on the next iteration.
+					// Retry the request without adding the saved user turn again.
 					stack.push({
 						userContent: currentUserContent,
 						includeFileDetails: false,
 						retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-						removedUserMessage,
 					})
 					continue
 				}

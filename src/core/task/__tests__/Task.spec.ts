@@ -7280,8 +7280,6 @@ describe("Cline", () => {
 				expect.objectContaining({
 					content: expect.arrayContaining([{ type: "text", text: "expanded input" }]),
 				}),
-				undefined,
-				{ identity: undefined },
 			)
 		})
 
