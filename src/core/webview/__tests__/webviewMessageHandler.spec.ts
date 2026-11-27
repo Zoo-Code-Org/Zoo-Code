@@ -2292,7 +2292,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		// The ordered helper waits for an in-flight import before it opens the save
 		// span. A handler that opened the bare primitive would take the span first and
 		// reintroduce the wait that an import's mirror performs from inside its own
-		// span, which is the cycle the ordered open removes.
+		// span, which is the circular wait the ordered open removes.
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
 		mockCommandConfiguration({ globalValue: ["git"] })
 

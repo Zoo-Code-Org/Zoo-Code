@@ -684,7 +684,7 @@ async function mirrorCommandList(key: "allowedCommands" | "deniedCommands", impo
  * @param globalSettings - The global settings an import produced, or `undefined`.
  */
 export async function mirrorImportedCommandLists(globalSettings: GlobalSettings | undefined): Promise<void> {
-	// A save writes the state copy and then the configuration, and this write is
+	// A save writes the configuration and then the state copy, and this write is
 	// the import's half of the same pair. Waiting for a save in flight keeps the
 	// imported list from landing on top of a save that read the pre-import state.
 
