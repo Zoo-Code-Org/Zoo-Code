@@ -216,6 +216,34 @@ describe("ApplyDiffTool.execute - per-write checkpoint and change card (B3a, epi
 		expect(mockCheckAutoApproval).not.toHaveBeenCalled()
 	})
 
+	it("skips the checkpoint when the applied content equals what is on disk", async () => {
+		// F3 (PR #1411 review round 2): a diff that resolves to the bytes
+		// already on disk leaves the shadow repository nothing to stage, so the
+		// per-write checkpoint would resolve without a commit and the
+		// write-metadata rejection would report a failure for a change that
+		// succeeded. The guard mirrors WriteToFileTool's contentUnchanged skip:
+		// the write happens, the result is pushed, and no failure is recorded.
+		// The structural stub mirrors the fixture's applyDiff stub shape, which
+		// is why the double assertion is needed here.
+		mockTask.diffStrategy = {
+			applyDiff: vi.fn().mockResolvedValue({ success: true, content: "original file content\n" }),
+		} as unknown as Task["diffStrategy"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockCheckpointSave).not.toHaveBeenCalled()
+		expect(mockCheckAutoApproval).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).toHaveBeenCalledWith("src/thing.ts", "original file content\n", false, true, 1000)
+		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(mockTask.recordToolError).not.toHaveBeenCalled()
+	})
+
 	it("records nothing when the approval is declined", async () => {
 		mockAskApproval.mockResolvedValue(false)
 

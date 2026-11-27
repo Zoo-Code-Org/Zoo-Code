@@ -244,7 +244,14 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			// only ever modifies an existing file (a missing file errors out before
 			// the diff is applied), so the operation is always "update".
 			const perWriteCheckpoints = state?.perWriteCheckpoints
-			if (perWriteCheckpoints !== false) {
+			// A diff that resolves to the bytes already on disk leaves the shadow
+			// repository nothing to stage: the per-write checkpoint would resolve
+			// without a commit and the write-metadata rejection would report a
+			// failure for a change that succeeded. Skip the checkpoint for that
+			// no-op, mirroring WriteToFileTool's contentUnchanged guard; the
+			// write itself and its result are untouched.
+			const contentUnchanged = diffResult.content === originalContent
+			if (perWriteCheckpoints !== false && !contentUnchanged) {
 				const autoApproved =
 					(
 						await checkAutoApproval({
