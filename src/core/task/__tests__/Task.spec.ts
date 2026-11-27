@@ -490,7 +490,7 @@ describe("Cline", () => {
 	}
 
 	describe("empty-response retries", () => {
-		it("restores the user message before a confirmed empty-response retry", async () => {
+		it("keeps the saved user message before a confirmed empty-response retry", async () => {
 			const task = await createTaskWithManualRetries()
 			let retryHistory: ApiMessage[] | undefined
 			let retryUserMessageCount: number | undefined
@@ -526,7 +526,7 @@ describe("Cline", () => {
 			expect(retryUserMessageCount).toBe(1)
 		})
 
-		it("restores the user message and records the failure when retry is declined", async () => {
+		it("keeps the saved user message and records the failure when retry is declined", async () => {
 			const task = await createTaskWithManualRetries()
 
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
@@ -535,9 +535,7 @@ describe("Cline", () => {
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(result).toBe(false)
-			// The decline path restores the exact record that was saved for the failed
-			// attempt (original identity and content, including the environment-details
-			// block) so persistence keeps one copy of the turn (issue #2691).
+			// The decline keeps the saved user turn before the failure record (issue #2691).
 			expect(task.apiConversationHistory).toMatchObject([
 				{
 					role: "user",

@@ -7,7 +7,7 @@ describe("shouldAddUserMessageToHistory", () => {
 		{ retryAttempt: 1, expected: false },
 		{ retryAttempt: 2, expected: false },
 		{ retryAttempt: 3, expected: false },
-	])("adds non-empty content at attempt $retryAttempt: $expected", ({ retryAttempt, expected }) => {
+	])("attempt $retryAttempt adds non-empty content: $expected; skips empty content", ({ retryAttempt, expected }) => {
 		expect(shouldAddUserMessageToHistory({ retryAttempt, isEmptyUserContent: false })).toBe(expected)
 		expect(shouldAddUserMessageToHistory({ retryAttempt, isEmptyUserContent: true })).toBe(false)
 	})

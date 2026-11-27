@@ -28,6 +28,7 @@ import { mergeConsecutiveApiMessages } from "../mergeConsecutiveApiMessages"
 import { convertToOpenAiMessages } from "../../../api/transform/openai-format"
 import { setAbortLatch } from "../../../test-utils/run-state"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
 import * as safeWriteJsonModule from "../../../utils/safeWriteJson"
 
@@ -195,6 +196,7 @@ describe("empty-response history persistence (issue 2691)", () => {
 	})
 
 	beforeEach(async () => {
+		vi.mocked(getEnvironmentDetails).mockResolvedValue("")
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
 		}
@@ -337,7 +339,11 @@ describe("empty-response history persistence (issue 2691)", () => {
 	}
 
 	/** Keep the real ask wait pending across a poll, then deliver the webview response. */
-	async function runWithRetryResponse(task: Task, response: "yesButtonClicked" | "noButtonClicked") {
+	async function runWithRetryResponse(
+		task: Task,
+		response: "yesButtonClicked" | "noButtonClicked" | "messageResponse",
+		text?: string,
+	) {
 		let settled = false
 		const run = task.recursivelyMakeClineRequests(toolResultUserContent()).finally(() => {
 			settled = true
@@ -350,7 +356,7 @@ describe("empty-response history persistence (issue 2691)", () => {
 			expect(countSavedResults(task.apiConversationHistory, TOOL_USE_ID)).toBe(1)
 			expect(task.messageCounts.user).toBe(1)
 		} finally {
-			task.handleWebviewAskResponse(response)
+			task.handleWebviewAskResponse(response, text)
 			await run
 		}
 		return run
@@ -428,7 +434,10 @@ describe("empty-response history persistence (issue 2691)", () => {
 		expect(outgoingToolResultCount(disk, TOOL_USE_ID)).toBe(1)
 	})
 
-	it("keeps one result turn when the retry is declined and records the failure", async () => {
+	it.each([
+		{ response: "noButtonClicked" as const, text: undefined },
+		{ response: "messageResponse" as const, text: "Stop retrying" },
+	])("keeps one result turn on $response decline and records the failure", async ({ response, text }) => {
 		const task = await createTaskWithSavedToolUse({ autoApprovalEnabled: false })
 
 		const firstAttempt = firstAttemptCapturingSavedIdentity(task, [])
@@ -436,7 +445,7 @@ describe("empty-response history persistence (issue 2691)", () => {
 		attemptSpy.mockImplementationOnce(() => firstAttempt.body)
 		attemptSpy.mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([]))
 
-		const result = await runWithRetryResponse(task, "noButtonClicked")
+		const result = await runWithRetryResponse(task, response, text)
 
 		const beforeDecline = firstAttempt.identity()
 		expect(result).toBe(false)
@@ -613,6 +622,7 @@ describe("empty-response history persistence (issue 2691)", () => {
 			content: [{ type: "text", text: "Failure: I did not provide a response." }],
 		})
 		expect(outgoingToolResultCount(disk, TOOL_USE_ID)).toBe(1)
+		expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
 	})
 
 	it.each(["before retry", "during backoff"])("keeps a summary saved %s", async (phase) => {
@@ -673,6 +683,44 @@ describe("empty-response history persistence (issue 2691)", () => {
 		// The summary and the no-tool-use continuation are the only effective user turns.
 		expect(effective.filter((message) => message.role === "user")).toHaveLength(2)
 		expect(task.messageCounts.user).toBe(2)
+	})
+
+	it("keeps the saved result when cancelled during a pending manual retry ask", async () => {
+		const task = await createTaskWithSavedToolUse({ autoApprovalEnabled: false })
+		const firstAttempt = firstAttemptCapturingSavedIdentity(task, [])
+		const attempt = vi.spyOn(task, "attemptApiRequest").mockImplementationOnce(() => firstAttempt.body)
+		const run = task.recursivelyMakeClineRequests(toolResultUserContent())
+		try {
+			await vi.waitFor(() => expect(task.clineMessages.at(-1)?.ask).toBe("api_req_failed"))
+		} finally {
+			setAbortLatch(task, true)
+			await run
+		}
+		expect(attempt).toHaveBeenCalledOnce()
+		for (const history of [task.apiConversationHistory, await readDiskHistory(task)]) {
+			expect(countSavedResults(history, TOOL_USE_ID)).toBe(1)
+			expect(findResultMessage(history, TOOL_USE_ID)).toMatchObject(firstAttempt.identity())
+		}
+		expect(task.messageCounts.user).toBe(1)
+	})
+
+	it("retains the original environment details across a retry", async () => {
+		const task = await createTaskWithSavedToolUse({ autoApprovalEnabled: true })
+		vi.mocked(getEnvironmentDetails)
+			.mockResolvedValueOnce("original environment")
+			.mockResolvedValue("updated environment")
+		const firstAttempt = firstAttemptCapturingSavedIdentity(task, [])
+		let retryContent: ApiMessage["content"] | undefined
+		vi.spyOn(task, "attemptApiRequest")
+			.mockImplementationOnce(() => firstAttempt.body)
+			.mockImplementationOnce(() => {
+				retryContent = findResultMessage(task.apiConversationHistory, TOOL_USE_ID)?.content
+				setAbortLatch(task, true)
+				return asyncStreamFrom<ApiStreamChunk>([])
+			})
+		await task.recursivelyMakeClineRequests(toolResultUserContent())
+		expect(retryContent).toContainEqual({ type: "text", text: "original environment" })
+		expect(retryContent).not.toContainEqual({ type: "text", text: "updated environment" })
 	})
 
 	it("keeps the saved history valid when the task is cancelled during the retry backoff", async () => {

@@ -1,46 +1,29 @@
 ---- MODULE ToolResultRetry ----
-\* Source: recursivelyMakeClineRequests in Task.ts retains a saved turn across retries.
-\* Sink: saveApiMessages and mergeApiMessageSnapshots retain disk-only identities.
-\* Reload and provider conversion send one result block per saved result record.
-\* Failure: a retry duplicates or loses a result, or replaces a saved summary.
-\* Invariants: OneResultPerCall limits duplicates. ResultNeverLost retains each
-\* issued result until Condense replaces it. SummarySurvives retains summary metadata.
-\* Retain leaves the saved turn in place. Stable models the earlier identity restore.
-\* Fresh mints identity. PopSummary removes the earlier pop guard.
-\* LosePending deletes the disk result at pop. LoseRetry and LoseDecline replace
-\* the restored result with a plain record at their respective save boundaries.
-\* Expected: Retain passes all invariants. Stable passes the disk invariants.
-\* Stable fails ResultInMemory. All sabotage modes fail.
-\* Condense abstracts overwriteApiConversationHistory before retry or during backoff.
-\* Not modeled: payload parsing, timestamps, message counters, ask delivery, prompt
-\* order, save failures, cancellation, rewind, deletion, output-limit retries, or concurrency.
-\* Initial invariants predate this review. This pass extends them from the findings.
-\* PR #2701 review ratchet (supplied summary, no thread URL): 1 covered, 2 added,
-\* 4 gap. Covered: identity guard. Added: loss checks and summarized type. Gaps:
-\* summary test strength, ask delivery, header prose, and test helper prose.
-\* Earlier checks: Fresh failed duplication. PopSummary failed summary retention.
-\* Policy requires cost and findings here. These are model results, not a code proof.
-\* Earlier result: Stable passed with 38 states. Fresh and PopSummary failed with 8 and 11.
-\* Earlier loss checks failed LosePending, LoseRetry, and LoseDecline with 6, 12, and 13 states.
-\* Replay: disk overwrite at pop and plain-text restore mutations fail real-file tests.
-\* Unconditional restore and missing identity-guard mutations fail the summary tests.
-\* Empty-array restore is repaired by validation. Assistant restore leaves the old
-\* disk record. These are false alarms for result loss, so the loss modes use plain records.
-\* Property test: retry counts 1 to 3 retain one saved result with its identity.
-\* Null result: no new production defect was found beyond the review findings.
-\* Simplification expectation: no pop needs no restore, identity option, or counter adjustment.
-\* Condense covers the retained turn before or during backoff. No plain copy follows it.
-\* Ask polling and input cardinality remain gaps. Real polling and retry-count tests cover them.
-\* Added ResultInMemory: the saved result stays in memory until Condense covers it.
-\* SummarySurvives now checks memory and disk. Both are required by the retained-turn design.
-\* Expected sabotage: Stable fails ResultInMemory at EmptyResponse; the real backoff test must fail.
-\* Result: Retain passes with 44 states. Stable fails ResultInMemory with 6 states.
-\* Fresh fails with 9 states. Summary sabotage fails with 7 states.
-\* Loss sabotage fails pending, retry, and decline with 6, 13, and 14 states.
-\* Replay: adding a pop to the new runtime fails backoff, pending ask, and cancellation tests.
-\* The real ask wait now stays pending across polling until the handler receives a response.
-\* Null result: no new production bug was found. The design removes the transient missing turn.
-\* Cost: about eight agent minutes for this simplification; TLC runs take under five seconds.
+\* Source: Task.recursivelyMakeClineRequests retains the saved user turn on retry.
+\* Sink: saveApiMessages and mergeApiMessageSnapshots merge records by identity.
+\* Failure: retry duplicates or loses a result, or removes a saved summary.
+\* Invariants: OneResultPerCall prevents duplicates. ResultNeverLost retains disk
+\* results. ResultInMemory retains memory results. SummarySurvives keeps summaries.
+\* Expected: Retain passes. Legacy pop and loss sabotage violate retention.
+\* Config modes: base=Retain, Current=Fresh (pre-fix), Popped=Stable,
+\* Summary=Stable with PopSummary; LosePending/LoseRetry/LoseDecline use named modes.
+\* Results: base passes 44 states; Current fails 9; Popped fails 6; Summary fails 7.
+\* LosePending, LoseRetry, and LoseDecline fail with 6, 13, and 14 states.
+\* Code checks: retry counts 1 to 3, decline responses, and cancellation retain results.
+\* Pop sabotage fails the real-file tests. Plain-record restore loses results;
+\* empty-array restore is repaired by validation and was a false alarm.
+\* Not modeled: payload parsing, timestamps, counters, ask delivery, environment
+\* details, save failures, cancellation signals, rewind, deletion, output-limit
+\* retries, request ordering, or concurrent writes. Cancellation leaves model state unchanged.
+\* PR #2701 prior review: 1 covered, 2 added, 4 gap.
+\* PR #2701 supplied review summary, findings 1-11: 2 covered, 0 added, 9 gap.
+\* Covered: #3 decline, #4 pending retention.
+\* Gaps: #1 PR prose, #2 header, #5 retry bounds/environment, #7 test names,
+\* #6 save failures, #8 counters/overwrite, #9 rewind, #10 consumers, #11 style.
+\* Expect no new model defect from these test and documentation changes.
+\* Null result: no new production defect found. Tests check boundaries outside the model.
+\* Cost: prior simplification about eight agent minutes; this review about ten.
+\* TLC runs take under five seconds. These bounded results do not prove the code.
 
 EXTENDS Naturals, FiniteSets, Sequences
 
