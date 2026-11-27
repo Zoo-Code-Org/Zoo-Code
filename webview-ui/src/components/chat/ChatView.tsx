@@ -581,6 +581,28 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	// above cannot see the stamp. Reconcile from the messages array: clear
 	// the controls when the newest command ask is settled.
 	useEffect(() => {
+		// (#998 review r8) The lastMessage effect above is a
+		// useDeepCompareEffect on the last two rows, so a command ask that
+		// completes behind two unchanged say rows never re-runs it and the
+		// completed ask keeps no usable Run/Deny controls. Present the newest
+		// ask-or-api_req_started row when it is a pending command ask. The
+		// scan keeps the newest-row guard (a newer ask or a streaming
+		// api_req_started suppresses the restore) and the isPendingCommandAsk
+		// guards (answered, partial, locally answered ts).
+		const newestAskRow = findLast(
+			messagesRef.current,
+			(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+		)
+		if (newestAskRow !== undefined && isPendingCommandAsk(newestAskRow, answeredCommandAskTsRef.current)) {
+			// Mirror the ask branch's command presentation. The setters are
+			// idempotent, so re-presenting live controls is a no-op.
+			setSendingDisabled(false)
+			setClineAsk("command")
+			setEnableButtons(true)
+			setPrimaryButtonKey("chat:runCommand.title")
+			setSecondaryButtonKey("chat:reject.title")
+			return
+		}
 		if (clineAskRef.current !== "command") {
 			return
 		}

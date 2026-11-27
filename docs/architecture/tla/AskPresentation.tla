@@ -68,9 +68,16 @@ PendingCaIx(s, l) ==
 	LET C == {i \in 1..Len(s) : IsCa(s[i]) /\ s[i].answered = FALSE /\ i # l}
 	IN IF C = {} THEN 0 ELSE Max(C)
 
-\* The newest command ask record, complete or partial. 0 when there is none.
-NewestAnyCaIx(s, l) ==
-	LET C == {i \in 1..Len(s) : s[i].kind \in {"ca", "cp"} /\ s[i].answered = FALSE /\ i # l}
+\* The ask the host stamps. The host reads no webview state: the local
+\* answer bookkeeping lives in the webview, so the stamp selector ignores
+\* loc and keeps the complete-ask filter (thread 4682318851).
+StampCaIx(s) ==
+	LET C == {i \in 1..Len(s) : IsCa(s[i]) /\ s[i].answered = FALSE}
+	IN IF C = {} THEN 0 ELSE Max(C)
+
+\* The sabotage selector also matches a partial record (thread 4680322903).
+StampAnyCaIx(s) ==
+	LET C == {i \in 1..Len(s) : s[i].kind \in {"ca", "cp"} /\ s[i].answered = FALSE}
 	IN IF C = {} THEN 0 ELSE Max(C)
 
 \* The newest partial command ask. 0 when there is none. The stream completes it.
@@ -158,11 +165,13 @@ LocalRespond == /\ shown
 	/\ shown' = FALSE
 	/\ UNCHANGED in
 
-\* The host stamps the newest pending command ask.
+\* The host stamps the row that owns the armed response token. It reads no
+\* local-answer state, so a locally answered ask is stampable too and the
+\* LocalRespond-then-HostStamp order is reachable (thread 4682318851).
 \* NoReconcile models the code that keeps the button state (thread 4658203877).
 \* NoPartialGuard models the predicate that also matches a partial record (thread 4680322903).
 HostStamp ==
-	LET ix == IF Variant = "NoPartialGuard" THEN NewestAnyCaIx(in, loc) ELSE PendingCaIx(in, loc)
+	LET ix == IF Variant = "NoPartialGuard" THEN StampAnyCaIx(in) ELSE StampCaIx(in)
 	IN /\ ix > 0
 	   /\ in' = [in EXCEPT ![ix] = [in[ix] EXCEPT !.answered = TRUE]]
 	   /\ loc' = loc
@@ -250,5 +259,16 @@ NoRoutePastNewestRow == RouteMatchCa(in, loc) => NewestRowCa(in, loc)
 \* newest row stays the recovered ask and the route to messageResponse holds.
 \* The posted-response payload of the routing stays the gap of thread
 \* 4658203883; Vitest pins it.
+\* Review round (review 6093228862, thread 4682318851 re-raised): covered 1,
+\* added 1, gap 0.
+\* Covered: the derivation the messages reconcile implements is
+\* PresentDerives; the fixed code now re-derives the command presentation
+\* from the whole messages array on every change, so the state rule was
+\* already the spec's. The effect-trigger plumbing stays outside the model,
+\* as with thread 4658203883.
+\* Added: the host stamp selector ignores the webview's local-answer
+\* bookkeeping (StampCaIx drops the loc exclusion, the complete-ask filter
+\* stays), so the LocalRespond-then-HostStamp order is reachable and
+\* checked. Base passes at 1003 states; every sabotage config still fails.
 
 ====

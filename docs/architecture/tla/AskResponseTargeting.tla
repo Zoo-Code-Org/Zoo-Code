@@ -27,8 +27,8 @@
 \* go through this same slot), the auto-approval timeout token, the text and image payload.
 \* Expected before the fix: the NoGate config reproduces failure 1 on the unfixed code.
 \* Result (r3): AskResponseTargeting.cfg holds. Each sabotage config fails:
-\* .NoGate on OnlyOwnResponse (the unfixed consume takes a real orphan arrival in
-\* the entry window, before the arm folds it), .TagByCur on OnlyOwnResponse (a tag
+\* .NoGate on OnlyOwnResponse (the ungated wait-step consume takes an entry-window
+\* orphan the arm preserved; the consume lands after publication), .TagByCur on OnlyOwnResponse (a tag
 \* written from the minted ask instead of the awaiting ask), .ArmEarly on
 \* OnlyOwnPublishedResponse (an arm in the entry window lets a save-window response
 \* satisfy the ask — the r3 completion-path finding), .ArmNoCurrentGuard on
@@ -75,6 +75,17 @@
 \* a superseded, unended k-1 and StaleCleanup(k) ends k late while clearing only
 \* k's own arm, with ArmSlotCurrent as the invariant. Added: the .StaleWipe
 \* sabotage, whose unconditional clearing must fail ArmSlotCurrent.
+\* Review ratchet (review 6093228862, finding on AskResponseTargeting.tla:173):
+\* added 1. The arm no longer folds the orphan discard -- the arm preserves the
+\* slot, as the real wait reads the slot it finds -- and both consume actions
+\* are constrained to the armed wait phase (awaiting = k). The orphan
+\* rejection now lives only in the wait step's gate, matching the real
+\* Task.ask ordering: publish, arm, then reject or accept inside the wait.
+\* The .NoGate sabotage then fails on a reachable schedule: MintAsk, an
+\* entry-window Arrive, Publish, ArmAsk (slot preserved), ConsumeNoGate --
+\* the orphan is consumed after publication. The old trace (consume before
+\* publication or arming) is unreachable now, so the sabotage pins the
+\* realistic defect.
 
 EXTENDS Naturals
 
@@ -159,10 +170,11 @@ BumpTs(k) ==
         consumedPhase, consumedWhile, ended, begun, published, armedAfterBump, curArmed, cur, arrivals>>
 
 \* ask() arms its wait at the ask row's publication boundary, and only while the
-\* ask is still current. An orphan present at the first wait poll is discarded
-\* there; the spec folds that discard into this action. Arming never manufactures
-\* a response: an empty slot stays empty, an orphan-tagged slot clears, an
-\* own-tagged slot stays available.
+\* ask is still current. The arm preserves the slot: the real wait reads the
+\* slot it finds, so whatever the entry window left there stays (review
+\* 6093228862). The wait step does the rejecting -- Consume requires this ask's
+\* own tag, so an orphan present at the first wait poll satisfies nothing.
+\* Arming never manufactures a response: an empty slot stays empty.
 ArmAsk(k) ==
     /\ cur = k
     /\ published[k]
@@ -170,12 +182,8 @@ ArmAsk(k) ==
     /\ armedAfterBump' = FALSE
     /\ awaiting' = k
     /\ curArmed' = TRUE
-    /\ pending' = (pending /\ rtag # Orphan)
-    /\ rtag' = rtag
-    /\ ghostArrival' = ghostArrival
-    /\ ghostPhase' = ghostPhase
-    /\ UNCHANGED <<consumed, consumedPhase, consumedWhile, ended, begun, published,
-        tsBumped, cur, arrivals>>
+    /\ UNCHANGED <<pending, rtag, ghostArrival, ghostPhase, consumed, consumedPhase,
+        consumedWhile, ended, begun, published, tsBumped, cur, arrivals>>
 
 \* A response event arrives at any time. The host tags it with the ask that awaits
 \* now (Orphan when none awaits); the ghost records the same fact plus the ask's
@@ -192,13 +200,15 @@ Arrive ==
     /\ UNCHANGED <<awaiting, consumed, consumedPhase, consumedWhile, ended, begun,
         published, tsBumped, armedAfterBump, curArmed, cur>>
 
-\* The consume step. The ownership gate: only a response tagged with this ask's
-\* token may satisfy it, and only while the ask is still current (a superseded
-\* ask exits as superseded, never by consuming). The ghost stores the arrival
-\* truth for the invariants. Consuming ends the ask: the arm clears with the
-\* active ask, and the next ask may enter.
+\* The consume step, inside the armed wait: the ask reads the slot only while
+\* its own wait is live (awaiting = k). The ownership gate: only a response
+\* tagged with this ask's token may satisfy it, and only while the ask is
+\* still current (a superseded ask exits as superseded, never by consuming).
+\* The ghost stores the arrival truth for the invariants. Consuming ends the
+\* ask: the arm clears with the active ask, and the next ask may enter.
 Consume(k) ==
     /\ cur = k
+    /\ awaiting = k
     /\ ~ended[k]
     /\ ~tsBumped[k]
     /\ pending

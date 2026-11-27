@@ -6,10 +6,14 @@ EXTENDS AskResponseTargeting
 \* unfixed consume: any pending response satisfies the ask that reads it. The
 \* lifecycle (awaiting, cur) and the ts guard mirror the fixed Consume, so the
 \* gate is the only delta (review r4: without the guard this variant fails
-\* NoStaleConsumption instead, masking a broken ownership-gate check).
+\* NoStaleConsumption instead, masking a broken ownership-gate check; review
+\* 6093228862: the consume is bound to the armed wait phase, so the failing
+\* trace publishes and arms first -- an entry-window orphan survives the
+\* preserving arm and the ungated wait consumes it after publication).
 \* OnlyOwnResponse must fail.
 ConsumeNoGate(k) ==
     /\ cur = k
+    /\ awaiting = k
     /\ ~ended[k]
     /\ ~tsBumped[k]
     /\ pending
@@ -51,12 +55,8 @@ ArmEarly(k) ==
     /\ ~tsBumped[k]
     /\ armedAfterBump' = FALSE
     /\ awaiting' = k
-    /\ pending' = (pending /\ rtag # Orphan)
-    /\ rtag' = rtag
-    /\ ghostArrival' = ghostArrival
-    /\ ghostPhase' = ghostPhase
-    /\ UNCHANGED <<consumed, consumedPhase, consumedWhile, ended, begun, published,
-        tsBumped, curArmed, cur, arrivals>>
+    /\ UNCHANGED <<pending, rtag, ghostArrival, ghostPhase, consumed, consumedPhase,
+        consumedWhile, ended, begun, published, tsBumped, curArmed, cur, arrivals>>
 
 \* Sabotage 4 (review r3): the currency guard is dropped — an out-of-date
 \* publication arms its ask even though the ask's ts already moved on and its
@@ -67,12 +67,8 @@ ArmNoCurrentGuard(k) ==
     /\ published[k]
     /\ armedAfterBump' = tsBumped[k]
     /\ awaiting' = k
-    /\ pending' = (pending /\ rtag # Orphan)
-    /\ rtag' = rtag
-    /\ ghostArrival' = ghostArrival
-    /\ ghostPhase' = ghostPhase
-    /\ UNCHANGED <<consumed, consumedPhase, consumedWhile, ended, begun, published,
-        tsBumped, curArmed, cur, arrivals>>
+    /\ UNCHANGED <<pending, rtag, ghostArrival, ghostPhase, consumed, consumedPhase,
+        consumedWhile, ended, begun, published, tsBumped, curArmed, cur, arrivals>>
 
 \* Sabotage 5 (review 6084536709): the superseded ask's cleanup clears the arm
 \* slot unconditionally, so ask k's late unwind wipes a newer ask's armed

@@ -397,6 +397,53 @@ describe("ChatView approval button behavior", () => {
 			expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
 		})
 
+		it("raises Run/Deny when a completed ask sits behind two unchanged say rows (#998 review r8)", async () => {
+			const { queryByText, getByRole, getAllByTestId } = renderChatView()
+
+			// The partial ask hides behind two streaming rows: a partial ask
+			// presents no controls and the say tail masks the ask, so nothing
+			// is up yet.
+			await act(async () => {
+				hydrateState([task, { ...commandAsk(2), partial: true }, say("command_output", 3), say("text", 4)])
+			})
+			await settle(getAllByTestId)
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+
+			// The ask completes in place. The last two rows stay deeply
+			// equal, so the lastMessage effect cannot re-run; the messages
+			// reconcile must raise the ENABLED controls.
+			await act(async () => {
+				hydrateState([task, commandAsk(2), say("command_output", 3), say("text", 4)])
+			})
+
+			await waitFor(
+				() => {
+					expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeEnabled()
+					expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeEnabled()
+				},
+				{ timeout: 5000 },
+			)
+		})
+
+		it("keeps no Run button behind unchanged rows when the newest row is a tool ask (#998 review r8)", async () => {
+			const { queryByText, getAllByTestId } = renderChatView()
+
+			// A completed command ask below a newer unanswered tool ask must
+			// not restore command controls: the newest-row guard wins.
+			await act(async () => {
+				hydrateState([
+					task,
+					commandAsk(2),
+					say("command_output", 3),
+					say("text", 4),
+					{ type: "ask", ask: "tool", ts: 5, text: '{"tool":"readFile","path":"a.ts"}', partial: false },
+				])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
 		it("keeps a newer tool ask's controls when the command ask is answered in the same snapshot (#998 review round 2)", async () => {
 			const { queryByText } = renderChatView()
 
