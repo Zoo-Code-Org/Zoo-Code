@@ -25,8 +25,8 @@
 \* Run each config on RestoreProfileDecisionMC.tla. The MC module holds the sabotage.
 \* Expected: Spec.cfg passes every invariant; Sabotage.cfg fails FollowActive;
 \* CacheAlias.cfg fails RefreshPersists; WriteAbort.cfg fails WriteFailureRestores.
-\* Result: Spec.cfg holds all six invariants in 132 distinct states. CacheAlias.cfg
-\* violates RefreshPersists (21 states), Sabotage.cfg violates FollowActive (29
+\* Result: Spec.cfg checks and holds all six invariants in 132 distinct states.
+\* CacheAlias.cfg violates RefreshPersists (21 states), Sabotage.cfg violates FollowActive (29
 \* states), WriteAbort.cfg violates WriteFailureRestores (15 states); no other
 \* invariant breaks in any run.
 \* Not modeled: the profile list (pinnedProfileExists is an oracle the caller computes),
@@ -39,6 +39,14 @@
 \* CR thread ClineProvider.ts:1652), 1 gap (CR thread
 \* ClineProvider.restore-follows-active-profile.spec.ts:123 - test-harness settings;
 \* the model has no test doubles, the harness assertions pin it directly).
+\* Review (PR 2649, round on bd9eb7d82): 1 covered (RefreshPersists +
+\* WriteFailureRestores were already modeled; the defect was the passing cfg
+\* checking only four of the six invariants - all six are checked now, CR thread
+\* RestoreProfileDecision.cfg:6), 3 gap (mutation-diff survivors on bd9eb7d82:
+\* the re-pin log text and the deleted-profile else-if guard are log/branch-level,
+\* pinned by unit tests in ClineProvider.restore-follows-active-profile.spec.ts;
+\* the defensive profile?.name chain is an equivalent mutant documented beside
+\* the condition in ClineProvider.ts).
 
 CONSTANT NoActive   \* sentinel: no resolvable active profile at restore time
 

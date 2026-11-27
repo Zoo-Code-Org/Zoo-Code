@@ -23,6 +23,8 @@
 //    evicted, so the task cannot be resumed at all.
 // 7. The re-pinned record mutates the store-owned cached item, so the store's
 //    delta compare drops apiConfigName and the stale pin survives on disk.
+// 8. A restore whose pinned profile exists but carries no configured provider
+//    settings logs the deleted-profile warning, so the log misreports the state.
 //
 // Red-verify: tests 1 and 3 fail on pre-fix code because the restore block
 // activates the stale pin unconditionally. Test 6 fails because the rejected
@@ -228,6 +230,11 @@ describe("ClineProvider restore follows the active profile", () => {
 			expect.objectContaining({ id: "task-1", apiConfigName: "provider-2" }),
 		)
 		expect(constructedHistoryItem()?.apiConfigName).toBe("provider-2")
+		// The re-pin decision must be visible in the log with both names: the
+		// active profile that stays in effect and the stale pin it replaces.
+		expect(harness.log).toHaveBeenCalledWith(
+			"Restoring task task-1 with active profile 'provider-2' instead of stale pinned profile 'provider-1'.",
+		)
 		// The restored task must run on the active profile's settings, not the stale
 		// pin's provider/model.
 		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
@@ -381,5 +388,22 @@ describe("ClineProvider restore follows the active profile", () => {
 		} finally {
 			await rm(storageRoot, { recursive: true, force: true })
 		}
+	})
+
+	it("does not warn about a deleted profile when the pinned profile exists without a configured provider", async () => {
+		// The pinned profile exists but carries no apiProvider settings: the
+		// reactivation branch skips activation, and the restore must fall through
+		// without the deleted-profile warning. That warning is reserved for a pin
+		// whose profile is absent from the list.
+		const harness = makeRestoreHarness({
+			profiles: [{ name: "provider-1" }],
+			activeProfileName: undefined,
+		})
+
+		await expect(harness.runRestore(makeHistoryItem("provider-1"))).resolves.toBeDefined()
+
+		expect(harness.activateProviderProfile).not.toHaveBeenCalled()
+		expect(harness.updateTaskHistory).not.toHaveBeenCalled()
+		expect(harness.log).not.toHaveBeenCalledWith(expect.stringContaining("no longer exists"))
 	})
 })

@@ -1623,6 +1623,7 @@ export class ClineProvider
 				pinnedProfileExists: !!profile,
 			})
 
+			// Stryker disable next-line OptionalChaining: profile is always defined here; resolveRestoreProfileActivation returns a reactivation only when pinnedProfileExists holds, and the caller computes that flag as !!profile, so no reachable input distinguishes profile?.name from profile.name
 			if (decision.reactivateProfileName && profile?.name && profile.apiProvider) {
 				try {
 					await this.activateProviderProfile(
