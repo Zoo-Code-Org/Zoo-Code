@@ -355,12 +355,13 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			return { assistantEntries }
 		}
 
-		async function createStreamingTask() {
+		async function createStreamingTask(options: { consecutiveMistakeLimit?: number } = {}) {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
 				task: "test task",
 				startTask: false,
+				consecutiveMistakeLimit: options.consecutiveMistakeLimit,
 			})
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskStreamingAccess(task), "safeEnsureModelFetched").mockResolvedValue({
@@ -681,6 +682,40 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			expect(toolUses).toHaveLength(1)
 			expect(toolUses[0].name).toBe("write_to_file")
 			expect(counter.peak()).toBe(1)
+		})
+
+		it("promotes nothing when an unknown tool name is mixed with a valid call (round-4 pre-merge check)", async () => {
+			// The mistake limit is the loop's stop rail here: neither response
+			// uses a tool, so the loop reaches the limit and asks; the ask stub
+			// turns that into a deterministic stop instead of a real request.
+			const task = await createStreamingTask({ consecutiveMistakeLimit: 1 })
+			const { assistantEntries } = recordApiHistoryEntries(task)
+			const mixedCall =
+				"<not_a_real_tool><path>a.ts</path></not_a_real_tool><read_file><path>a.ts</path></read_file>"
+
+			vi.spyOn(task, "ask").mockRejectedValue(new Error("loop-stop"))
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: mixedCall }]))
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "No tool matches that request." }]),
+				)
+
+			await expect(task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])).rejects.toThrow(
+				"loop-stop",
+			)
+
+			// The unknown-name call fails the production parser, so the whole
+			// salvage is rejected: no tool use is promoted, the response text
+			// is kept verbatim, and the retry promotes no tool call either.
+			expect(assistantEntries.length).toBeGreaterThanOrEqual(2)
+			const firstBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(firstBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(firstBlocks.find((block) => block.type === "text")?.text).toBe(mixedCall)
+			const retryBlocks = assistantEntries[1].content as Array<{ type: string; text?: string }>
+			expect(retryBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			expect(content.filter((block) => block.type === "tool_use")).toHaveLength(0)
 		})
 	})
 })

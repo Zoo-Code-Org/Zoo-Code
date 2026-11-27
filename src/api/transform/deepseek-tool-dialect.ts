@@ -113,8 +113,12 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 	// branches: the compiled predicate selects then/else for values the
 	// original rejected, and a retained then would reject them all. Detect
 	// the change before the key loop so the decision cannot depend on key
-	// order (issue #547 review 4713747391).
-	const conditionalRelaxed = isRecord(schema.if) && !deepEqualJson(compileSchemaNode(schema.if, depth + 1), schema.if)
+	// order (issue #547 review 4713747391). The predicate compiles exactly
+	// once per level and the key loop reuses this copy, so a chain of
+	// unchanged conditionals costs linear work, not exponential
+	// (issue #547 review 4714821172).
+	const compiledIf = isRecord(schema.if) ? compileSchemaNode(schema.if, depth + 1) : undefined
+	const conditionalRelaxed = compiledIf !== undefined && !deepEqualJson(compiledIf, schema.if)
 
 	for (const [key, value] of Object.entries(schema)) {
 		if (DEEPSEEK_REJECTED_SCHEMA_KEYWORDS.has(key)) {
@@ -179,7 +183,9 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 					// fire on values the original schema accepted.
 					defineOwnKey(removed, key, value)
 				} else {
-					defineOwnKey(result, key, compileSchemaNode(value, depth + 1))
+					// value is schema.if and compiled unchanged above; reuse
+					// the already-compiled copy instead of compiling again.
+					defineOwnKey(result, key, compiledIf)
 				}
 				continue
 			}

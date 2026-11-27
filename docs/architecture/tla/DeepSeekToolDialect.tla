@@ -30,7 +30,12 @@
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
 \* limit or offset, and 422 on a pattern keyword. The in-tree sanitizer does not
 \* strip pattern. Not modeled: recursion into nested nodes (the rule is the same
-\* per node), surrogate sanitization, the strict flag plumbing, MCP name checks,
+\* per node; the depth-32 stop and its uncompiled pass-through are pinned by the
+\* deep-schema test in the same block), the compile work count (a chain of
+\* unchanged conditionals must compile each predicate once per level, review
+\* 4714821172 - work is not expressible in this model's source-to-sink
+\* abstraction, pinned by the linear-work timing test), surrogate sanitization,
+\* the strict flag plumbing, MCP name checks,
 \* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
 \* regression test for review 4712438384).
 \* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).

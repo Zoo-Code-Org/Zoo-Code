@@ -1279,6 +1279,72 @@ describe("DeepSeekHandler", () => {
 			expect(name.then).toStrictEqual({ description: "an id" })
 			expect(name).not.toHaveProperty("description")
 		})
+
+		it("compiles a chain of unchanged conditionals in linear work (review 4714821172)", () => {
+			// 24 nested unchanged if predicates: compiling the predicate a
+			// second time in the key loop doubles the work at every level
+			// (2^24 node compiles, seconds of blocked extension host), so the
+			// single-compile rule keeps this run far below one second.
+			let predicate: Record<string, unknown> = { type: "string" }
+			for (let level = 0; level < 24; level++) {
+				predicate = { if: predicate, then: { type: "string" } }
+			}
+			const expected = {
+				type: "object",
+				properties: { name: predicate },
+				required: ["name"],
+			}
+			const tool = {
+				type: "function",
+				function: {
+					name: "conditional_tool",
+					description: "Conditional",
+					strict: true,
+					parameters: expected,
+				},
+			} satisfies Record<string, unknown>
+
+			const startedAt = Date.now()
+			const tools = convert([tool])
+			const elapsedMs = Date.now() - startedAt
+
+			// The unchanged chain must still compile to itself, key order included.
+			expect(JSON.stringify(tools[0].function.parameters)).toStrictEqual(JSON.stringify(expected))
+			expect(elapsedMs).toBeLessThan(1000)
+		}, 2500)
+
+		it("passes nodes deeper than the schema depth cap through uncompiled (round-4 pre-merge check)", () => {
+			// 33 properties levels: the leaf sits past MAX_SCHEMA_DEPTH (32),
+			// where compilation stops on purpose to bound pathological or
+			// cyclic schemas — the forbidden keywords must survive verbatim
+			// and no hint may be added for them.
+			let leaf: Record<string, unknown> = { type: "string", pattern: "^tmp$", minLength: 3 }
+			for (let level = 0; level < 33; level++) {
+				leaf = { type: "object", properties: { a: leaf } }
+			}
+			const tool = {
+				type: "function",
+				function: {
+					name: "deep_tool",
+					description: "Deep",
+					strict: true,
+					parameters: leaf,
+				},
+			} satisfies Record<string, unknown>
+
+			const tools = convert([tool])
+			const compiled = tools[0].function.parameters
+
+			let node = compiled as Record<string, unknown>
+			for (let level = 0; level < 33; level++) {
+				node = (node.properties as Record<string, unknown>).a as Record<string, unknown>
+			}
+			// Past the cap the node is passed through untouched.
+			expect(node).toStrictEqual({ type: "string", pattern: "^tmp$", minLength: 3 })
+			// Nothing above the cap carried a rejected keyword, so no hint
+			// was recorded anywhere in the compiled tree.
+			expect(JSON.stringify(compiled)).not.toContain("DeepSeek compatibility")
+		})
 	})
 })
 
