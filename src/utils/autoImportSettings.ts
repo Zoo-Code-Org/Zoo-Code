@@ -6,7 +6,7 @@ import { Package } from "../shared/package"
 import { fileExistsAtPath } from "./fs"
 import { t } from "../i18n"
 
-import { importSettingsFromPath, ImportOptions } from "../core/config/importExport"
+import { importSettingsFromPath, mirrorImportedCommandLists, ImportOptions } from "../core/config/importExport"
 
 /**
  * Automatically imports RooCode settings from a specified path if it exists.
@@ -44,6 +44,11 @@ export async function autoImportSettings(
 		})
 
 		if (result.success) {
+			// The import stores the command lists in extension state only. Without this
+			// write, a later save reads the user settings file, finds no layer holding an
+			// imported entry, and drops it as removed there.
+			await mirrorImportedCommandLists(result.globalSettings)
+
 			outputChannel.appendLine(`[AutoImport] Successfully imported settings from ${resolvedPath}`)
 
 			if (result.warnings && result.warnings.length > 0) {

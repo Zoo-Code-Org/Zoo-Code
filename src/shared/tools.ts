@@ -34,6 +34,12 @@ export type AutoApprovalContext = {
 	 */
 	dcgDecision?: DcgDecision
 	/**
+	 * The directory that the command actually runs in (`execute_command` only).
+	 * Command lists judge this directory, so a command in another workspace folder
+	 * follows that folder's policy, not the task folder's.
+	 */
+	commandCwd?: string
+	/**
 	 * Every file the tool action will access, one entry per file named in the
 	 * ask message (`tool` asks only). When present, auto-approval decides on
 	 * these targets instead of the message's display paths, and asks the user

@@ -67,6 +67,17 @@ vi.mock("../rulesMessageHandler", () => ({
 	handleOpenRulesDirectory: vi.fn(),
 }))
 
+// The import case needs no real import: the shared import function is a mock,
+// and the save tests script the configuration state directly. The save span is a
+// no-op release by default, so a case only observes it when it scripts one.
+vi.mock("../../config/importExport", () => ({
+	beginCommandListSave: vi.fn().mockReturnValue(() => {}),
+	beginOrderedCommandListSave: vi.fn().mockResolvedValue(() => {}),
+	exportSettings: vi.fn(),
+	importSettingsWithFeedback: vi.fn(),
+	pendingCommandListMirrors: vi.fn().mockReturnValue({ allowedCommands: [], deniedCommands: [] }),
+}))
+
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		hasInstance: vi.fn().mockReturnValue(false),
@@ -77,10 +88,20 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
-import type { ModelRecord } from "@roo-code/types"
+import type { ModelRecord, WebviewMessage } from "@roo-code/types"
 import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
 
+import { Package } from "../../../shared/package"
+import {
+	beginCommandListSave,
+	beginOrderedCommandListSave,
+	importSettingsWithFeedback,
+	pendingCommandListMirrors,
+} from "../../config/importExport"
+import { readCommandListScopes } from "../../auto-approval/commandScope"
+import { makeWorkspaceConfiguration } from "../../../test-utils/vscode"
+import { seedCommandList } from "../../../utils/seedAllowedCommands"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
@@ -775,20 +796,35 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 
 import { changeLanguage, t } from "../../../i18n"
 
+// Mutable so a test can script a multi-root workspace. Every other test sees
+// the single folder the command-list configuration resolves against.
+const mockWorkspaceFolders = vi.hoisted(() => ({
+	folders: [{ uri: { fsPath: "/mock/workspace" } }] as { uri: { fsPath: string } }[],
+}))
+
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
 	const showErrorMessage = vi.fn()
+	const showWarningMessage = vi.fn()
 	const openTextDocument = vi.fn().mockResolvedValue({})
 	const showTextDocument = vi.fn().mockResolvedValue(undefined)
 
 	return {
+		ConfigurationTarget: {
+			Global: 1,
+			Workspace: 2,
+			WorkspaceFolder: 3,
+		},
 		window: {
 			showInformationMessage,
 			showErrorMessage,
+			showWarningMessage,
 			showTextDocument,
 		},
 		workspace: {
-			workspaceFolders: [{ uri: { fsPath: "/mock/workspace" } }],
+			get workspaceFolders() {
+				return mockWorkspaceFolders.folders
+			},
 			openTextDocument,
 			getConfiguration: vi.fn(() => ({ get: vi.fn() })),
 		},
@@ -2118,6 +2154,2745 @@ describe("webviewMessageHandler - allowlists together", () => {
 	})
 })
 
+describe("webviewMessageHandler - command list scope-aware persistence", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockWorkspaceFolders.folders = [{ uri: { fsPath: "/mock/workspace" } }]
+		// Most cases have no import awaiting its mirror. The cases that do script
+		// this reader themselves.
+		vi.mocked(pendingCommandListMirrors).mockReturnValue({ allowedCommands: [], deniedCommands: [] })
+	})
+
+	// The file-level vscode mock opens one workspace folder, so the configuration
+	// for the command lists resolves to that uri.
+	const mockWorkspaceFolderUri = { fsPath: "/mock/workspace" }
+
+	// Mirrors the real configuration API: `inspect()` exposes per-scope values,
+	// and `update()` records its target. Extension state stays unset.
+	// `updateSequence` and `inspectSequence` script successive call outcomes in
+	// call order. An Error element makes that call throw.
+	//
+	// One snapshot per key, plus the pre-write merge re-read.
+	type InspectedCommandList = {
+		globalValue?: string[]
+		workspaceValue?: string[]
+		workspaceFolderValue?: string[]
+		// The package default `inspect()` reports. The save compares it to the state
+		// copy to tell an activation-seeded copy from a key the user deleted.
+		defaultValue?: string[]
+	}
+
+	// `inspected` may be a function of the requested key, so a two-key payload
+	// test can give each list its own layers. `gateEnabled` scripts the
+	// `workspaceCommandListsEnabled` read. Leaving it unset keeps the gate off,
+	// which matches the extension default.
+	function mockCommandConfiguration(
+		inspected: InspectedCommandList | ((key: string) => InspectedCommandList),
+		updateSequence?: unknown[],
+		inspectSequence?: unknown[],
+		gateEnabled?: boolean,
+	) {
+		const update = vi.fn()
+		if (updateSequence) {
+			update.mockImplementation(() => updateSequence.shift())
+		}
+		const inspect = vi.fn()
+		if (inspectSequence) {
+			inspect.mockImplementation(() => {
+				const next = inspectSequence.shift()
+				if (next instanceof Error) {
+					throw next
+				}
+				return next
+			})
+		} else {
+			inspect.mockImplementation((key: string) => (typeof inspected === "function" ? inspected(key) : inspected))
+		}
+		// The shared double keeps the configuration type correct. Each test
+		// installs the scripted members.
+		const config = makeWorkspaceConfiguration(
+			gateEnabled === undefined ? {} : { workspaceCommandListsEnabled: gateEnabled },
+		)
+		config.update = update
+		config.inspect = inspect
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+		return { update, inspect }
+	}
+
+	it("holds the save's first configuration read until an in-flight command-list import settles", async () => {
+		// The import mirrors its lists into the settings file after it writes the state
+		// copy. A save that read the configuration before the mirror landed would
+		// snapshot the pre-import file and write that list back. Opening the save span
+		// waits for the import span first, so the guard has to settle before the save's
+		// first inspect(), not merely be called.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { inspect } = mockCommandConfiguration({ globalValue: ["git"] })
+
+		// A deferred stand-in for the ordered open, so the test decides when the
+		// import span it waits on settles.
+		let settleImport: () => void = () => {}
+		vi.mocked(beginOrderedCommandListSave).mockImplementationOnce(
+			() => new Promise<() => void>((resolve) => (settleImport = () => resolve(() => {}))),
+		)
+
+		const save = webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"] },
+		})
+
+		// The span is still open, so no snapshot may have been taken yet. A save that
+		// skipped the wait reaches inspect() synchronously here and fails this.
+		await Promise.resolve()
+		expect(inspect).not.toHaveBeenCalled()
+
+		settleImport()
+		await save
+
+		// The snapshot the save acts on is the post-import one.
+		expect(inspect).toHaveBeenCalled()
+	})
+
+	it("holds the save span across the configuration writes and the state write", async () => {
+		// The import's wait on the save span is what keeps an import from landing
+		// between this save's two writes. A span released before the state write
+		// would let the import write its configuration half while this save still
+		// holds a pre-import list, so the release has to come after both writes.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ globalValue: ["git"] })
+		update.mockResolvedValue(undefined)
+
+		const release = vi.fn()
+		vi.mocked(beginOrderedCommandListSave).mockResolvedValueOnce(release)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"] },
+		})
+
+		expect(beginOrderedCommandListSave).toHaveBeenCalledTimes(1)
+		expect(release).toHaveBeenCalledTimes(1)
+
+		const setValue = vi.mocked(mockClineProvider.contextProxy.setValue)
+		const stateWrite = setValue.mock.calls.findIndex(([key]) => key === "allowedCommands")
+		expect(stateWrite).toBeGreaterThanOrEqual(0)
+		expect(release.mock.invocationCallOrder[0]).toBeGreaterThan(update.mock.invocationCallOrder[0])
+		expect(release.mock.invocationCallOrder[0]).toBeGreaterThan(setValue.mock.invocationCallOrder[stateWrite])
+
+		// A payload with no command-list key writes neither store this span orders,
+		// so it must not open one and stall an import behind an unrelated save.
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mode: "code" },
+		})
+
+		expect(beginOrderedCommandListSave).toHaveBeenCalledTimes(1)
+	})
+
+	it("opens the save span through the ordered helper rather than the bare primitive", async () => {
+		// The ordered helper waits for an in-flight import before it opens the save
+		// span. A handler that opened the bare primitive would take the span first and
+		// reintroduce the wait that an import's mirror performs from inside its own
+		// span, which is the circular wait the ordered open removes.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		mockCommandConfiguration({ globalValue: ["git"] })
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"] },
+		})
+
+		expect(beginOrderedCommandListSave).toHaveBeenCalledTimes(1)
+		expect(beginCommandListSave).not.toHaveBeenCalled()
+	})
+
+	it("keeps workspace-scoped denied commands out of the global write when saving the merged list", async () => {
+		// Gate on: the workspace entry is visible in the dialog, so keeping it is not
+		// a re-add. With the gate off every submitted workspace entry is a re-add,
+		// and the save promotes it to the global layer.
+		const { update, inspect } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// "docker" stays at the workspace scope instead of leaking into the user's
+		// global settings. The save persists without scope leakage.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// Extension global state holds only the global layer, so the next save cannot
+		// double-home the workspace entry.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+		// One snapshot per command-list key. This key's scope read, write target, and
+		// rollback all derive from the same inspect(). The shadowing check reads the
+		// opposite key through its own guarded snapshot, and the merge before the
+		// workspace write re-reads this key once. The count is three, never more.
+		expect(inspect).toHaveBeenCalledTimes(3)
+	})
+
+	it("writes the workspace-folder value at the folder target in multi-root workspaces", async () => {
+		// Gate on for the same reason as the merged-list split test. The kept folder
+		// entry is visible in the dialog, so it stays at its scope.
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["npm"], workspaceFolderValue: ["docker"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// Read, target resolution, and write all run on the configuration scoped to
+		// the first workspace folder. The folder-target update is legal only on a
+		// resource-scoped configuration.
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, mockWorkspaceFolderUri)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.WorkspaceFolder)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+	})
+
+	it("clears a deleted workspace entry at the workspace scope without adding it to global", async () => {
+		// Gate on: the entry is visible in the dialog, and only visible entries are
+		// deletable there. The preservation rule re-adds a hidden entry instead.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+		})
+
+		// Deleting a project entry must clear it where it lives...
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+		// ...and must not copy it into global settings.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+	})
+
+	it("does not create a workspace layer when none exists", async () => {
+		const { update } = mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"] },
+		})
+
+		// Only the Global write happens, so saving never materializes an empty
+		// workspace-scoped value in settings.json.
+		expect(update).toHaveBeenCalledTimes(1)
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", ["git"])
+	})
+
+	it("writes the global layer before the workspace layer and undoes only its own delta when the workspace write fails", async () => {
+		// Call order: the global write succeeds, the workspace write rejects, and the
+		// undo runs. The undo applies only this save's delta, so the third party's
+		// mid-save addition survives while "aws" is removed and "keep" and "drop" are
+		// restored. The gate is on so each scripted call stays distinguishable, and
+		// call position pins the undo.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["keep", "drop"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[
+				{ globalValue: ["keep", "drop"], workspaceValue: ["npm docker", "docker"] },
+				undefined,
+				undefined,
+				{ globalValue: ["aws", "mid-save"] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// Global first, workspace second. The ordering itself is the pin.
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// The undo removes only "aws", restores "keep" and "drop", and keeps the
+		// mid-save addition. A stale-snapshot rewind would have dropped it.
+		expect(update).toHaveBeenNthCalledWith(
+			3,
+			"deniedCommands",
+			["mid-save", "keep", "drop"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).toHaveBeenCalledTimes(3)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
+	})
+
+	it("computes the undo delta against the configuration layer when the extension-state copy is stale", async () => {
+		// The global write targets the configuration layer, not the extension state
+		// cache, so that layer's save-start value is the compensation's delta
+		// baseline. Here the state copy is stale ("old" where the configuration holds
+		// "manual"). A delta against the cache would restore the stale list over the
+		// value the failed save replaced, and it would drop "manual" permanently. The
+		// undo follows the configuration layer instead.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["old"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[
+				{ globalValue: ["manual"], workspaceValue: ["docker"] },
+				undefined,
+				undefined,
+				{ globalValue: ["aws", "mid-save"] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// The save wrote ["aws"] over the configuration's ["manual"].
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// The undo removes this save's addition, keeps the mid-save addition, and
+		// restores the configuration-layer entry the save dropped. It does not restore
+		// the stale state copy's "old".
+		expect(update).toHaveBeenNthCalledWith(
+			3,
+			"deniedCommands",
+			["mid-save", "manual"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).toHaveBeenCalledTimes(3)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
+	})
+
+	it("rolls the global layer back on a folder-target save and still persists the payload's other keys", async () => {
+		// update() call order. The global write succeeds, the folder-target workspace
+		// write rejects, and the undo restores the global deletions at the Global
+		// target. That is the only layer this save changed. A second key pins that the save
+		// skips only the failed command-list key.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["drop"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("disk on fire")), undefined],
+			[
+				{ globalValue: ["drop"], workspaceValue: ["npm"], workspaceFolderValue: ["pnpm docker", "docker"] },
+				undefined,
+				undefined,
+				{
+					globalValue: [],
+				},
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"], alwaysDenyUnapprovedCommands: true },
+		})
+
+		// The capture, the failed write, and the undo all ran on the configuration
+		// scoped to the first workspace folder.
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, mockWorkspaceFolderUri)
+		expect(update).toHaveBeenNthCalledWith(
+			2,
+			"deniedCommands",
+			["docker"],
+			vscode.ConfigurationTarget.WorkspaceFolder,
+		)
+		// This save removed "drop", and another writer then cleared the layer to `[]`.
+		// That clear outranks this save's removal, so the undo keeps it instead of
+		// re-adding an entry the user just deleted.
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+		// The failed key skips its extension global-state write...
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("deniedCommands", expect.anything())
+		// ...and the other key of the same payload still persists.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: disk on fire")
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("aborts the key without compensation when the global write fails", async () => {
+		// The global layer comes first, so a rejected global write leaves nothing
+		// changed: no workspace write may follow, and the save needs no compensation.
+		// The rejection is a plain string, which pins the non-Error rendering of the
+		// failure message.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, [Promise.reject("global locked")])
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// Only the failed global write happened, so the save never touches the
+		// workspace layer and compensates nothing.
+		expect(update).toHaveBeenCalledTimes(1)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: global locked")
+	})
+
+	it("aborts the key without writing when the configuration inspection has no result", async () => {
+		// The save derives scopes, write target, and rollback from one inspect()
+		// snapshot, so a missing snapshot means the workspace layer is unknown.
+		// Proceeding would classify the retained workspace entry "docker" as new and
+		// copy it back into global settings. The key aborts instead: no configuration
+		// write and no extension global state.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, [undefined])
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).not.toHaveBeenCalled()
+		// Leak pin: the workspace entry must not land in the global layer.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: the configuration value could not be read",
+		)
+		// No exception escaped the handler: the state post still ran.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("aborts the command-list key when the inspection throws, while other keys of the payload still save", async () => {
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, [
+			new Error("configuration unavailable"),
+		])
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// A second key pins that the save skips only the aborted command-list key.
+			updatedSettings: { deniedCommands: ["docker", "aws"], alwaysDenyUnapprovedCommands: true },
+		})
+
+		// The aborted key wrote nothing at any scope...
+		expect(update).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("deniedCommands", expect.anything())
+		// ...while the other key of the same payload still persists.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: configuration unavailable",
+		)
+	})
+
+	it("propagates a configuration lookup failure instead of degrading it to a per-key abort", async () => {
+		// The commandListConfiguration() lookup sits outside the guarded snapshot
+		// read on purpose. A lookup that cannot return a configuration object is a
+		// different failure class than an unreadable value. It therefore aborts the
+		// entire message rather than the one key.
+		vi.mocked(vscode.workspace.getConfiguration).mockImplementation(() => {
+			throw new Error("workspace not ready")
+		})
+
+		await expect(
+			webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				// A second key pins that the whole message aborts, not just the command-list
+				// key. With the guarded per-key failure paths this key would still persist.
+				updatedSettings: { deniedCommands: ["docker", "aws"], alwaysDenyUnapprovedCommands: true },
+			}),
+		).rejects.toThrow("workspace not ready")
+
+		// Nothing persisted for any key, and no per-key error handling ran. The
+		// rejection reached the caller. The webview still gets a state refresh,
+		// because a failed save always re-posts before it re-throws.
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("reports partial failure when the compensating restore also fails", async () => {
+		// update() call order: the global write succeeds, the workspace write rejects,
+		// and the undo write rejects too. The gate is on so the workspace write is the
+		// plain kept list and each scripted call stays distinguishable, and call
+		// position pins the undo. The global layer starts empty here, because a mock
+		// implementation from an earlier test outlives clearAllMocks, so this save
+		// only adds.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[
+				undefined,
+				Promise.reject(new Error("workspace locked")),
+				Promise.reject(new Error("restore also failed")),
+			],
+			[{ workspaceValue: ["docker", "old"] }, undefined, undefined, { globalValue: ["aws"] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// The undo ran at the Global target even though it failed. This save deleted
+		// no global entry and added only "aws", so the undo computes an empty list.
+		// The layer was absent at save start, and the re-read still holds only this
+		// save's own write. The rollback therefore restores absence by clearing the key.
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: workspace locked. The global-scoped restore also failed: Error: restore also failed. Review the command lists in your user and workspace settings.",
+		)
+		// No exception escaped the handler: the state post still ran.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("skips the undo without guessing when the global value cannot be re-read to undo it", async () => {
+		// The compensation re-read is guarded. When even the fresh read fails, writing
+		// the save-start value would clobber whatever the failed read could not show.
+		// Nothing is therefore written, and the code reports the double failure. update()
+		// order: the global write succeeds, the workspace write rejects, and the third
+		// inspect() call, the undo re-read, throws.
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked"))],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, new Error("inspect unavailable")],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// The failed workspace write is the last configuration write: a
+		// stale-snapshot fallback would have written a third value here.
+		expect(update).toHaveBeenCalledTimes(2)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: workspace locked. The global-scoped value could not be re-read to undo this save: Error: inspect unavailable. Review the command lists in your user and workspace settings.",
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("aborts the workspace write and restores the global layer when the workspace re-read fails", async () => {
+		// The re-read exists so this save does not overwrite an entry another writer
+		// added during the global write. A failed re-read cannot rule that out, so the
+		// key aborts instead of writing the precomputed list: the global half is undone
+		// and the workspace layer is never written. Both stores then hold their
+		// save-start values rather than diverging.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["old"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["old"], workspaceValue: ["docker"] },
+			[undefined, undefined],
+			// Save start, the opposite key's snapshot, the merge re-read that throws,
+			// then the undo's re-read.
+			[
+				{ globalValue: ["old"], workspaceValue: ["docker"] },
+				undefined,
+				new Error("workspace unreadable"),
+				{ globalValue: ["old", "aws"] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "old", "aws"] },
+		})
+
+		// The global write landed, and the failed re-read came before any workspace write.
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["old", "aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// The undo removes only this save's addition, so the global layer is back to the
+		// value it held at save start.
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["old"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(2)
+		// Both stores are read here. The configuration's global layer holds its save-start
+		// value again, and the extension-state copy was never written, so neither store
+		// was left ahead of the other.
+		const globalWrites = update.mock.calls
+			.filter((call) => call[2] === vscode.ConfigurationTarget.Global)
+			.map((call) => call[1])
+		expect(globalWrites.at(-1)).toEqual(["old"])
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: the workspace layer could not be re-read: workspace unreadable",
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	// Entries the dialog never displayed cannot be deleted by omission from a
+	// list the user could not see. A save therefore re-adds them to the workspace
+	// layer it rewrites. Such entries are hidden while the gate is off, or shadowed by a
+	// global entry with the gate on.
+	it("re-adds gate-hidden workspace entries to the workspace write instead of deleting them", async () => {
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker", "npm"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The gate is off, so the dialog displayed nothing for this key.
+			updatedSettings: { deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "npm"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+	})
+
+	it("keeps hidden workspace entries out of the global write", async () => {
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker", "npm"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+		})
+
+		// Preservation is workspace-side only, so re-adding hidden entries never
+		// leaks them into the user's global settings.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker", "npm"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+	})
+
+	it("re-adds a workspace deny entry shadowed by a global allow entry when the gate is on", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The global allow "git" shadows "git push", so the dialog displayed nothing
+			// deletable.
+			updatedSettings: { deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+	})
+
+	it("keeps a configuration-global deny addition past the hidden-entry exclusion when the workspace copy is shadowed", async () => {
+		// The global allow "git" shadows the workspace deny "git push", so the
+		// displayed deny list stays empty. While the dialog was open the user added
+		// the same "git push" to the user-level deny list in settings.json. The
+		// hidden-entry exclusion classifies by bare membership, so without a rule for
+		// provenance it excludes the configuration-global addition from the
+		// external-addition re-admit. The split source is then empty, and the Global
+		// write deletes the user's file addition instead of keeping it.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"], globalValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The dialog displayed nothing deletable, because the workspace deny was
+			// shadowed and the global addition arrived after the display.
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: [], workspaceCommandListsEnabled: true },
+		})
+
+		// The user's new global denial survives the save in the layer the user added
+		// it to, instead of being written away as [].
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// The hidden-entry re-add preserves the shadowed workspace copy.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		// The changed-settings warning names the genuine file addition.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("git push"))
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["git push"])
+	})
+
+	it("promotes a gate-hidden workspace entry the dialog re-adds to the global write", async () => {
+		// With the gate off the dialog shows only the global layer. A submitted entry
+		// the workspace layer already holds hidden is therefore one the user just added.
+		// It must reach the enforced global layer instead of counting as known state,
+		// while the re-add below still keeps it in the workspace file.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"])
+	})
+
+	it("keeps a gate-flip-hidden workspace entry the dialog displayed at the workspace scope", async () => {
+		// The dialog opened with the gate on, so it displayed the workspace entry.
+		// The gate flipped off before the save, which hides every workspace entry.
+		// The baseline carries the gate as displayed and shows the entry. Keeping it
+		// therefore stays a workspace decision. It is not a new promotion into the
+		// global layer.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// The save promotes only the genuinely new entry, and "docker" stays out of
+		// the global write.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+	})
+
+	it("keeps a displayed workspace entry out of the global write when the baseline gate matches the current gate", async () => {
+		// The gate is off at display time and still off at save time. The workspace
+		// layer's "docker" is hidden now, but the baseline names it, so the dialog did
+		// show it. Keeping it stays a workspace decision: the baseline alone decides,
+		// whether or not the gate moved. Only the genuinely new "aws" promotes.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: false },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		// The retained workspace entry survives at its own scope. A save that wrote
+		// `[]` here would delete it from the settings file while keeping the global
+		// half, so the workspace write is asserted, not only the global one.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+		// The entry the baseline shows is not re-added as hidden, so the workspace
+		// layer is rewritten without it: its submitted copy is retained as workspace
+		// state, not promoted.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+	})
+
+	it("keeps a displayed workspace entry the global layer shadows in the workspace write without duplicating it into the global write", async () => {
+		// The workspace layer holds "echo" and a global entry shadows it, so the
+		// composed list no longer carries the entry at save time. The dialog
+		// displayed it before, because the baseline names it. Reading the composed
+		// list as the workspace origin set would drop "echo" from the workspace
+		// write, which deletes a workspace decision the user kept. The baseline
+		// keeps it a workspace decision, and the global write keeps the user's own
+		// copy of the entry instead of gaining a second one from the workspace layer.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(["echo"])
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["echo"], workspaceValue: ["echo"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["echo"] },
+			commandListBaseline: { deniedCommands: ["echo"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["echo"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+		// The shadowed entry is a workspace decision. The global layer holds the
+		// user's own copy, so the global write neither loses it nor duplicates it
+		// from the workspace layer.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["echo"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["echo"])
+	})
+
+	it("keeps a displayed workspace entry in the workspace write after the gate flips off before the save", async () => {
+		// The dialog displayed "echo" from the workspace layer with the gate on, and
+		// the gate was off at save time. The entry is hidden at save time and the
+		// baseline names it, so the save keeps it a workspace decision and promotes
+		// nothing into the global layer.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["echo"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["echo"] },
+			commandListBaseline: { deniedCommands: ["echo"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["echo"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["echo"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+	})
+
+	it("keeps a state-only seeded global entry that also sits in the workspace layer", async () => {
+		// A fresh profile seeds the extension global state, not the settings file, so
+		// the configuration has no global layer at save start while the state copy
+		// holds "aws". The same entry also sits in the workspace layer.
+		// `classifyCommandListBaseline` keeps the state-only entry in
+		// `splitSourceEntries` when `globalLayerAtSaveStart` is `undefined`, because
+		// the activation seed wrote it. The split's origin set must agree, or the
+		// split reads "aws"
+		// as new, emits it in neither write, and the state copy loses it. The gate is
+		// off, so the workspace layer enforces nothing and the global layer is the
+		// only home the entry has.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(["aws"])
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["aws", "docker"], defaultValue: ["aws"] },
+			undefined,
+			undefined,
+			false,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws", "docker"] },
+			// The baseline shows both entries, so neither is a re-add. Without it every
+			// workspace entry would count as new and the gate-off re-add would promote
+			// both, which is a different behaviour from the one this case pins.
+			commandListBaseline: { deniedCommands: ["aws", "docker"], workspaceCommandListsEnabled: false },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws", "docker"], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+	})
+
+	it("keeps an imported entry whose mirror failed in the global write of the next save", async () => {
+		// The import wrote "aws" to the state copy and could not write it to the
+		// settings file, so no configuration layer holds it. Without the pending mark
+		// the save reads the entry as a file deletion and drops it. The mark makes it
+		// known global state, so the global write keeps it.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(["aws"])
+		vi.mocked(pendingCommandListMirrors).mockReturnValue({ allowedCommands: [], deniedCommands: ["aws"] })
+		const { update } = mockCommandConfiguration({}, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+			commandListBaseline: { deniedCommands: ["aws"], workspaceCommandListsEnabled: false },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// The entry is a known origin, not a settings-file addition, so no warning
+		// names it.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("drops the entries of a key the user deleted from user settings", async () => {
+		// The user removed the whole key from User Settings, so the snapshot reports
+		// no global layer and no state copy equals the shipped default. The state copy
+		// still holds "aws" and the dialog displayed it. The save must honor the
+		// deletion instead of writing the entry back unwarned.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(["aws"])
+		vi.mocked(pendingCommandListMirrors).mockReturnValue({ allowedCommands: [], deniedCommands: [] })
+		const { update, inspect } = mockCommandConfiguration({}, undefined, undefined, false)
+		// The snapshot reports the shipped default, which the state copy does not hold.
+		vi.mocked(inspect).mockReturnValue({ defaultValue: ["git log"] } as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+			commandListBaseline: { deniedCommands: ["aws"], workspaceCommandListsEnabled: false },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+	})
+
+	it("reports a conflict and compensates the global write when the folder override vanishes mid-save", async () => {
+		// The save targets the folder layer. While the global write runs, another
+		// writer removes that override, leaving only the workspace value. Reading the
+		// fallback would copy the shared entries into the folder layer and recreate
+		// the override the other writer removed. The save reports the conflict and
+		// undoes its own global write instead.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["aws"], workspaceValue: ["npm"], workspaceFolderValue: ["docker"] },
+			[undefined, undefined],
+			// Save start holds the folder override; the second entry answers the
+			// unguarded read for the opposite key; the third is the merge re-read, which
+			// finds only the workspace value because the override is gone; the fourth is
+			// the undo's re-read.
+			[
+				{ globalValue: ["aws"], workspaceValue: ["npm"], workspaceFolderValue: ["docker"] },
+				{ workspaceValue: ["npm"] },
+				{ workspaceValue: ["npm"] },
+				{ globalValue: [] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// No folder-target write at all: recreating the override is the defect.
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.WorkspaceFolder,
+		)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(2)
+		// The failed key skips its state write, and the conflict is reported.
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("deniedCommands", expect.anything())
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("removed during the save"))
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("lands both writes when a folder override appears while a workspace-target save runs", async () => {
+		// The save targets the workspace layer, so that layer is the one it must
+		// still find at the re-read. A folder override appearing mid-save outranks
+		// it in enforcement but does not remove it. Reading the selector's winner
+		// instead would call the workspace layer gone, refuse a valid save, and undo
+		// its global half. The merge must also take the workspace layer's own value:
+		// copying the folder override's entries would leak project entries into the
+		// user's workspace settings.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update, inspect } = mockCommandConfiguration(
+			{ globalValue: ["aws"], workspaceValue: ["docker"] },
+			[undefined, undefined],
+			// Save start holds only the workspace layer. The second entry answers the
+			// unguarded read for the opposite key. The third is the merge re-read, which
+			// finds the folder override another writer added and the workspace value
+			// still in place.
+			[
+				{ globalValue: ["aws"], workspaceValue: ["docker"] },
+				{},
+				{ globalValue: ["aws"], workspaceValue: ["docker"], workspaceFolderValue: ["npm"] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// The global half is not rolled back: no second global write undoes it.
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// The workspace write lands on the layer the save targeted, and it carries the
+		// workspace layer's entry, never the folder override's.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.arrayContaining(["npm"]),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.WorkspaceFolder,
+		)
+		expect(update).toHaveBeenCalledTimes(2)
+		// The save completes, so the state write happens and no error is reported.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		// Exactly the three scripted reads: the snapshot, the opposite key, and the
+		// merge re-read. A fourth would mean the re-read got no inspection object and
+		// the check under test was skipped.
+		expect(inspect).toHaveBeenCalledTimes(3)
+	})
+
+	it("does not write a blank workspace entry back when the layer holds one at the merge re-read", async () => {
+		// The workspace layer holds a blank entry, which the schema admits and a hand
+		// edit or a synced dotfile can produce. The save-start read drops it, so the
+		// start side never contains it. The merge re-read sees the layer itself, and
+		// an entry the start side lacks counts as added by another writer. Unsanitised,
+		// that reading writes the blank entry back and the save can never remove it.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update, inspect } = mockCommandConfiguration(
+			{ globalValue: ["aws"], workspaceValue: ["docker"] },
+			[undefined, undefined],
+			// The second entry answers the unguarded read for the opposite key. The
+			// third is the merge re-read, which finds the layer still holding the blank
+			// entry beside the entry the dialog kept.
+			[
+				{ globalValue: ["aws"], workspaceValue: ["docker"] },
+				{},
+				{ globalValue: ["aws"], workspaceValue: ["docker", ""] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// The workspace write carries only what the save-start side knew about.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.arrayContaining([""]),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).toHaveBeenCalledTimes(2)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		expect(inspect).toHaveBeenCalledTimes(3)
+	})
+
+	it("does not restore a workspace entry another writer removed during the global write", async () => {
+		// The dialog submitted "keep" and "drop", and both sat in the workspace layer
+		// at save start. While the global write runs, another writer removes "drop".
+		// A pure union of the submission and the fresh read writes "drop" back, which
+		// undoes that removal. The save applies the submission to the fresh value
+		// instead: it keeps what both still hold, honors the removal, and preserves
+		// what the other writer added.
+		const update = vi.fn()
+		const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+		let workspaceLayer = ["keep", "drop"]
+		const inspect: vscode.WorkspaceConfiguration["inspect"] = <T>(section: string) => ({
+			key: section,
+			workspaceValue: workspaceLayer as T,
+		})
+		config.inspect = inspect
+		config.update = update
+		update.mockImplementation(async (_key: string, _value: unknown, target?: number) => {
+			if (target === vscode.ConfigurationTarget.Global) {
+				workspaceLayer = ["keep", "concurrent"]
+			}
+			return undefined
+		})
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["keep", "drop"] },
+		})
+
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["keep", "concurrent"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			["keep", "drop", "concurrent"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			["keep", "drop"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+	})
+
+	it("reports a failed re-read and writes nothing when the undo finds no inspection object", async () => {
+		// An inspection that returns no object is not evidence about the layer, so the
+		// rollback must refuse it. Treating the missing value as a deleted layer would
+		// clear the key instead of restoring what this save removed. The key reports
+		// the failure and skips its state write.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked"))],
+			// Save start, merge re-read, then the undo's re-read: the last returns no
+			// inspection object at all, which is the failed read this case pins.
+			[{ globalValue: ["drop"], workspaceValue: ["docker"] }, undefined, undefined],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// The undo writes nothing: no clear, no restore.
+		expect(update).toHaveBeenCalledTimes(2)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["drop"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			expect.stringContaining("could not be re-read to undo this save"),
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("still clears the key when the undo's inspection object reports no global value", async () => {
+		// The other side of the boundary: an inspection object that reports no
+		// global value is a genuine absent layer, so the rollback keeps taking the
+		// absent-layer branch and clears the key. Collapsing this case into the
+		// failed-read path would leave the layer half-applied.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			// Save start, merge re-read, then the undo's re-read, which finds the
+			// inspection object but no global value.
+			[{ globalValue: ["drop"], workspaceValue: ["docker"] }, undefined, undefined, {}],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
+	})
+
+	it("does not promote a baseline entry an external edit removed from the layers", async () => {
+		// The dialog displayed "docker" from the workspace layer. While it was open the
+		// settings file lost it, so the save-start snapshot holds it in neither layer.
+		// The buffered dialog list still submits it, and submitting a
+		// displayed entry signals retention rather than newness. The save must not
+		// classify it as brand-new knowledge or promote it into the global layer.
+		// External removal wins over the stale dialog buffer. The genuinely new
+		// "aws" still promotes.
+		const { update } = mockCommandConfiguration({ workspaceValue: [] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+		// The save does not re-admit the removed entry as an external addition
+		// either: it was displayed, so no preservation warning names it.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("keeps a retained baseline entry the layers still hold while promoting a new entry", async () => {
+		// The reconciliation's accept side: the baseline names "docker" and the
+		// save-start snapshot still finds it in the workspace layer. The user kept it as
+		// known state. It stays at its scope, not promoted, while "aws", absent from the
+		// baseline, promotes normally.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
+	})
+
+	// The save result is the dialog's only answer for a per-key command-list
+	// failure. Those paths report through the flags instead of throwing, so each
+	// one must reach the ack with success false.
+	const deniedSaveResults = () =>
+		vi
+			.mocked(mockClineProvider.postMessageToWebview)
+			.mock.calls.map(([message]) => message)
+			.filter((message) => message.type === "settingsSaveResult")
+
+	it("reports a failed save through the result when the configuration inspection has no result", async () => {
+		// The snapshot-abort leg marks the save failed for the ack, because a dialog
+		// told the save succeeded would discard the user's list edits.
+		mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, [undefined])
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "save-1",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(deniedSaveResults()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+	})
+
+	it("promotes a gate-hidden workspace entry named by a baseline without the gate slot", async () => {
+		// A baseline that predates the gate slot keeps the current result. Without
+		// the gate as displayed, the entry's presence in the baseline does not prove
+		// the dialog showed it. Re-adding it therefore promotes to the global layer
+		// exactly as it does with no baseline.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		// The baseline names the entry, so the hidden-entry re-add treats it as
+		// displayed knowledge whose absence would be a deletion. The promoted global
+		// copy is this entry's only home after the save.
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+	})
+
+	it("promotes only the hidden entries a gate-flipped baseline did not display", async () => {
+		// The gate flipped off while the dialog was open. The baseline lists
+		// "docker" but not "npm". "docker" was displayed, so keeping it stays a
+		// workspace decision. "npm" was never displayed, so a submitted copy counts
+		// as new and lands in the global layer.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker", "npm"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "npm", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["npm", "aws"], vscode.ConfigurationTarget.Global)
+		// The re-add still preserves both hidden entries in the workspace file.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "npm"], vscode.ConfigurationTarget.Workspace)
+	})
+
+	it("keeps a displayed entry the user deleted out of the hidden-entry re-add after a gate flip", async () => {
+		// The dialog displayed "docker" with the gate on, while "curl" was hidden all
+		// along, shadowed by the global allow. The baseline shows that. The user
+		// deleted "docker", and the gate flipped off before the save. That hides every
+		// workspace entry, so the hidden set now holds both. The baseline proves
+		// "docker" was displayed, so its absence from the submission is a deletion the
+		// re-add must honor. The preservation re-add still restores "curl".
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["curl"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker", "curl"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: true },
+		})
+
+		// The deletion sticks: "docker" is gone from the workspace layer...
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// ...and nothing promoted it into the global layer either.
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+	})
+
+	it("keeps an entry the save retained out of the undo's removal set", async () => {
+		// The compensation removes only what this save added. The global layer already
+		// held "keep", and this save kept it. The undo is computed against the fresh
+		// read, so it leaves "keep" in place. It removes only this save's addition
+		// ("aws") and restores its deletion ("drop").
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["keep", "drop"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[
+				{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] },
+				undefined,
+				undefined,
+				{ globalValue: ["keep", "aws", "mid-save"] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["keep", "docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["keep", "aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenNthCalledWith(
+			3,
+			"deniedCommands",
+			["keep", "mid-save", "drop"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).toHaveBeenCalledTimes(3)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
+	})
+
+	it("does not restore a global entry a third party removed while undoing", async () => {
+		// The fresh read during the compensation shows "keep" gone. Someone else
+		// removed it mid-save. The undo must therefore not resurrect an entry this save
+		// never deleted. Only its own deletion ("drop") returns.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["keep", "drop"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[
+				{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] },
+				undefined,
+				undefined,
+				{ globalValue: ["aws", "mid-save"] },
+			],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["keep", "docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(
+			3,
+			"deniedCommands",
+			["mid-save", "drop"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).toHaveBeenCalledTimes(3)
+	})
+
+	it("clears the key instead of restoring its deletion when the re-read reports no global value", async () => {
+		// A cleared key inspects as no value at all. The layer existed at save start, so
+		// an absent re-read means a later writer deleted it during the save. That
+		// decision outranks this save's removed delta: writing "drop" back would
+		// resurrect a layer the other writer removed. The undo clears the key, and it
+		// does not treat the absent value as a failed re-read.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["keep", "drop"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			// The layer is present but holds no global value: an absent layer, not a
+			// failed read. No inspection object at all is the failed read.
+			[{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] }, undefined, undefined, {}],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["keep", "docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["drop"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+		// Only the plain write-failure message: the re-read did not fail.
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
+	})
+
+	it("keeps a workspace entry another writer added during the global write", async () => {
+		// The global write is not instantaneous, and the configuration API offers no
+		// compare-and-set. While it runs, a third party adds "concurrent" to the
+		// workspace layer. The workspace write re-reads that layer and merges the
+		// addition, so the save does not overwrite it. The entry the user deleted
+		// ("drop") is in the save-start workspace layer, so it is not a mid-save
+		// addition and stays deleted.
+		const update = vi.fn()
+		const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+		let workspaceLayer = ["keep", "drop"]
+		// The double reports the two layers the save path reads. The list values are
+		// the string lists the production call asks for.
+		const inspect: vscode.WorkspaceConfiguration["inspect"] = <T>(section: string) => ({
+			key: section,
+			globalValue: ["keep"] as T,
+			workspaceValue: workspaceLayer as T,
+		})
+		config.inspect = inspect
+		config.update = update
+		update.mockImplementation(async (_key: string, _value: unknown, target?: number) => {
+			if (target === vscode.ConfigurationTarget.Global) {
+				workspaceLayer = [...workspaceLayer, "concurrent"]
+			}
+			return undefined
+		})
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["keep"] },
+		})
+
+		// The submitted list drops "drop", so the workspace write keeps "keep" and adds
+		// the entry that arrived mid-save.
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["keep", "concurrent"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["keep"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			["keep", "drop", "concurrent"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+	})
+
+	it("clears the key only when the undo's re-read finds no layer", async () => {
+		// The undo must not leave an empty `[]` layer where the re-read found none.
+		// `[]` is the activation seed's override and would suppress the default
+		// lists. It clears the key instead. Both legs share the scenario: a third party
+		// cleared the layer while the save ran.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			// Both legs find an inspection object that reports no global value, which is
+			// the absent-layer shape. A missing object is a failed read instead.
+			[{ workspaceValue: ["docker"] }, undefined, undefined, {}],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+
+		// The layer existed when the save started, and the re-read during the
+		// compensation reports it gone: someone cleared it mid-save. Nothing present
+		// remains to restore either, so the undo clears the key.
+		const { update: clearedMidSave } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ globalValue: ["aws"], workspaceValue: ["docker"] }, undefined, undefined, {}],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(clearedMidSave).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(clearedMidSave).toHaveBeenNthCalledWith(
+			2,
+			"deniedCommands",
+			["docker"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(clearedMidSave).toHaveBeenNthCalledWith(
+			3,
+			"deniedCommands",
+			undefined,
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(clearedMidSave).toHaveBeenCalledTimes(3)
+	})
+
+	it("clears the key when the undo's re-read finds only this save's own write", async () => {
+		// The re-read finds the layer holding exactly this save's own write over an
+		// absent start. That is the half-applied save itself, not another writer's
+		// decision, so the undo clears the key and restores the absence. Both legs
+		// share that signature. The second save's own global write was empty.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: ["aws"] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		// Writing `[]` here instead would read back after the rolled-back save as the
+		// user's explicit empty override of the default command lists.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+
+		// The second leg: the save's own global write was itself empty, because every
+		// submitted entry stayed workspace-scoped. The re-read finds that same empty
+		// layer, still the save's own write over an absent start, so the undo clears
+		// rather than writing `[]` back.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update: emptyWrite } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: [] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker"] },
+		})
+
+		expect(emptyWrite).toHaveBeenNthCalledWith(1, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(emptyWrite).toHaveBeenNthCalledWith(
+			2,
+			"deniedCommands",
+			["docker"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(emptyWrite).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(emptyWrite).toHaveBeenCalledTimes(3)
+	})
+
+	it("preserves an empty global layer another writer created during the save", async () => {
+		// The global layer was absent when the save started, and by undo time a third
+		// party had created it holding the explicit `[]` list. An explicit empty layer
+		// is as much the other writer's decision as one that predates the save. The
+		// compensation reads the current state, finds that layer, and writes its empty
+		// undo back over it instead of clearing.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: [] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// A clear here would silently suppress the other writer's override
+		// through the activation seed.
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+	})
+
+	it("still writes an empty undo list when the global layer exists but holds nothing to keep", async () => {
+		// The other side of the guard: a layer that exists stays present after the
+		// rollback, even when the undo computes an empty list. Clearing an existing
+		// empty layer would restore the seeded defaults that the user had explicitly
+		// overridden with an empty list.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ globalValue: [], workspaceValue: ["docker"] }, undefined, undefined, { globalValue: ["aws"] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+	})
+
+	it("reports a failed save through the result when the global value cannot be re-read", async () => {
+		// The guarded re-read leg writes nothing, so the ack is the dialog's only
+		// notice that the save did not go through.
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked"))],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, new Error("inspect unavailable")],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "save-1",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenCalledTimes(2)
+		expect(deniedSaveResults()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+	})
+
+	it("reports a failed save through the result when the compensating restore also fails", async () => {
+		// The undo-failure leg reports both failures to the user but throws nothing,
+		// so only its flag can tell the dialog the save was lost. The global layer was
+		// absent at save start, and the re-read finds only this save's own write. The
+		// undo therefore clears the key to restore absence.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[
+				undefined,
+				Promise.reject(new Error("workspace locked")),
+				Promise.reject(new Error("restore also failed")),
+			],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: ["aws"] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "save-1",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(deniedSaveResults()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+	})
+
+	it("promotes a shadowed workspace entry the dialog re-adds to the global write", async () => {
+		// The global allow "git" shadows the workspace deny "git push", so the dialog
+		// never displayed the deny entry. A user who re-adds it submits a list
+		// containing it. The entry must land in the global layer, where the gate makes
+		// it effective. The re-add preserves the workspace copy.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["git push"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Global)
+	})
+
+	it("re-adds a shadowed workspace allow entry alongside the user's visible deletions", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "allowedCommands" ? { workspaceValue: ["git", "docker"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// "docker" stayed visible and kept. The global deny hid "git", and the user
+			// cannot delete a workspace entry the user never saw.
+			updatedSettings: { allowedCommands: ["docker"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["docker", "git"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+	})
+
+	it("does not persist a webview-supplied workspaceCommandListsEnabled value", async () => {
+		mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// A settings payload is not a second source for the gate. The synchronous
+			// user-scope configuration read is.
+			updatedSettings: { workspaceCommandListsEnabled: true, alwaysDenyUnapprovedCommands: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
+			"workspaceCommandListsEnabled",
+			expect.anything(),
+		)
+		// The refusal does not affect the sibling keys of the same payload.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	})
+
+	it("abandons a payload carrying only the gate key without writing configuration", async () => {
+		const { update } = mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		// The state post still runs, so the dialog re-reads the effective value
+		// instead of keeping the refused one.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	// A payload can carry both command-list keys. The hidden-entry check for the
+	// second-processed key must judge shadowing against the state as it was when the
+	// save started. It must not judge against the state the same loop's earlier key
+	// left behind. The double below mirrors ContextProxy. Its setValue publishes the
+	// in-memory copy before it resolves, so a fresh read after the first key's awaited
+	// write would observe it. That read would let the never-displayed entry be deleted.
+	function mockCommandListStateStore(initial: Partial<Record<"allowedCommands" | "deniedCommands", string[]>>) {
+		const store: Partial<Record<"allowedCommands" | "deniedCommands", string[]>> = { ...initial }
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" || key === "deniedCommands" ? store[key] : undefined,
+		)
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key: string, value: unknown) => {
+			if (key === "allowedCommands" || key === "deniedCommands") {
+				store[key] = value as string[] | undefined
+			}
+		})
+		return store
+	}
+
+	it("preserves a workspace deny entry shadowed by a global allow the same save removes", async () => {
+		mockCommandListStateStore({ allowedCommands: ["git"] })
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The handler processes "allowedCommands" first and drops the shadowing global
+			// "git". The dialog hid "git push", so an empty deny list must not delete it.
+			updatedSettings: { allowedCommands: [], deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("preserves a workspace allow entry shadowed by a global deny the same save removes", async () => {
+		mockCommandListStateStore({ deniedCommands: ["git"] })
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "allowedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The mirror order: the handler processes the deny key first, so this pins
+			// that preservation does not depend on which key arrives first.
+			updatedSettings: { deniedCommands: [], allowedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("reports a rejected extension-state write without aborting the save", async () => {
+		// The configuration writes succeeded. Silently dropping the state write would
+		// therefore leave the settings files and the stored list disagreeing, with
+		// nothing shown to the user. The rejection is queued once, so it consumes exactly this
+		// key's write and the sibling key still persists.
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("state store unavailable"))
+		const { update } = mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"], alwaysDenyUnapprovedCommands: true },
+		})
+
+		// The configuration leg did persist...
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// ...so the message names the leg that failed...
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: state store unavailable. The configuration was updated, but the extension's stored copy of the list was not, so the two disagree until a later save succeeds.",
+		)
+		// ...the save continued to the next key...
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+		// ...and the dialog re-reads state instead of keeping an unsaved value.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("reports a failed save through the result when the extension-state write is rejected", async () => {
+		// The same rejection seen by a sender that awaits an answer: the toast names
+		// the failed leg, so the answer must agree with it. An ack of success would let
+		// the dialog discard edits its stored copy never received, while a retry would
+		// converge.
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("state store unavailable"))
+		const { update } = mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "save-1",
+			updatedSettings: { deniedCommands: ["aws"], alwaysDenyUnapprovedCommands: true },
+		})
+
+		expect(deniedSaveResults()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+		// The configuration leg did persist, and the user still hears which leg failed...
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: state store unavailable. The configuration was updated, but the extension's stored copy of the list was not, so the two disagree until a later save succeeds.",
+		)
+		// ...and the save continued to the next key.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	})
+
+	it("still propagates a rejected state write for non-command-list keys", async () => {
+		// The partial-failure report is scoped to the command-list keys, whose
+		// configuration legs succeeded first. Other keys have no half-completed save
+		// to explain, so their failures keep propagating. The rejection is queued
+		// once, so it stays scoped to this test.
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("state store unavailable"))
+
+		await expect(
+			webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { alwaysDenyUnapprovedCommands: true },
+			}),
+		).rejects.toThrow("state store unavailable")
+
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		// The webview still gets a state refresh, because a failed save re-posts
+		// before the rejection propagates.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("keeps a settings-file entry the dialog never displayed and warns that it was preserved", async () => {
+		// An entry the settings file gained while the dialog was open has the same
+		// shape as a user deletion. It is in the file and absent from the submitted
+		// list. The baseline tells them apart, so the new entry stays in the layer the
+		// snapshot found it in. The user hears about it instead of losing it silently.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+			commandListBaseline: { deniedCommands: ["aws"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws", "rm -rf"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("rm -rf"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("1 entry was"))
+	})
+
+	it("applies a user deletion of a displayed entry without warning", async () => {
+		// The counterpart classification: the baseline shows the dialog displayed the
+		// entry and the submitted list omits it, so the user deleted it on purpose.
+		// The save drops it from every layer that held it, and discloses nothing.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+			commandListBaseline: { deniedCommands: ["aws", "rm -rf"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["rm -rf"], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("keeps a file-added entry while applying a displayed deletion in one save, warning once", async () => {
+		// Both divergence classes in one payload: "git" was displayed and the user
+		// deleted it, so the deletion applies. "curl" arrived after the dialog opened,
+		// so the save preserves it. The warning names only the preserved entry.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["git", "curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: ["git"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(expect.stringContaining("git"))
+	})
+
+	it("saves command lists unchanged when the message carries no baseline", async () => {
+		// Senders that omit the baseline keep the old behavior: the omitted entry is
+		// dropped as a deletion, and the save produces no warning.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("routes a preserved entry to the layer the save-start snapshot found it in", async () => {
+		// A preserved entry must land where it lives, not be flattened into the
+		// global layer. "rm -rf" is in the workspace snapshot and "npm" in the
+		// extension's stored global layer, and the dialog displayed neither.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["npm"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["rm -rf"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["npm"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["npm"])
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("2 entries were"))
+	})
+
+	it("treats a malformed command-list baseline exactly like a missing one", async () => {
+		// The save message crosses a JSON boundary, so a baseline whose key holds a
+		// non-array is reachable at runtime even though the declared type forbids it.
+		// The classification guard treats it as no baseline at all. The save writes
+		// the submitted list unclassified. No entry the dialog never displayed counts
+		// as user-deleted.
+		const wireMessage: WebviewMessage = JSON.parse(
+			JSON.stringify({
+				type: "updateSettings",
+				updatedSettings: { deniedCommands: ["aws"] },
+				commandListBaseline: { deniedCommands: "aws" },
+			}),
+		)
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, wireMessage)
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("composes and writes only the first workspace folder's layer in a multi-root save", async () => {
+		// The dialog composes against the first folder, so a save must never read or
+		// write the second folder's per-folder layer. Folder B's entries survive a
+		// folder A save untouched.
+		const secondFolderUri = { fsPath: "/mock/second-folder" }
+		mockWorkspaceFolders.folders = [{ uri: mockWorkspaceFolderUri }, { uri: secondFolderUri }]
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["npm"], workspaceFolderValue: ["docker"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, mockWorkspaceFolderUri)
+		expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith(Package.name, secondFolderUri)
+		// The folder-target write the save does make goes to the first folder's layer.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.WorkspaceFolder)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+	})
+
+	it("aggregates preserved entries from both command-list keys into a single save warning", async () => {
+		// A payload carrying both list keys classifies per key. Two file entries the
+		// dialog never displayed, one per key, must survive in their own layers. The
+		// save discloses them together in exactly one warning.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			(key) =>
+				key === "allowedCommands"
+					? { workspaceValue: ["git", "curl"] }
+					: { workspaceValue: ["rm -rf", "docker"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"], deniedCommands: ["rm -rf"] },
+			commandListBaseline: { allowedCommands: ["git"], deniedCommands: ["rm -rf"] },
+		})
+
+		// "curl" stays in the workspace allow layer, "docker" in the workspace deny layer.
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git", "curl"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["rm -rf", "docker"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// One aggregated warning naming both preserved entries and counting them together.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("2 entries were"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("docker"))
+	})
+
+	// A file-side extra that the hidden-entry re-add already preserves was never
+	// displayed. Naming it in the changed-settings warning would repeat that warning
+	// on every save while the file stays unchanged.
+	it.each([
+		{
+			name: "hidden while the workspace gate is off",
+			gateEnabled: false,
+			hiddenEntry: "docker",
+			prepare: () => {
+				vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+			},
+		},
+		{
+			name: "shadowed by a global allow while the gate is on",
+			gateEnabled: true,
+			hiddenEntry: "git push",
+			prepare: () => {
+				vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+					key === "allowedCommands" ? ["git"] : undefined,
+				)
+			},
+		},
+	])(
+		"re-adds a $name deny entry without warning that the settings file changed",
+		async ({ gateEnabled, hiddenEntry, prepare }) => {
+			prepare()
+			const { update } = mockCommandConfiguration(
+				{ workspaceValue: [hiddenEntry] },
+				undefined,
+				undefined,
+				gateEnabled,
+			)
+
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { deniedCommands: [] },
+				// The dialog displayed the effective deny list, which never
+				// contained the hidden entry, so the baseline omits it.
+				commandListBaseline: { deniedCommands: [] },
+			})
+
+			expect(update).toHaveBeenCalledWith("deniedCommands", [hiddenEntry], vscode.ConfigurationTarget.Workspace)
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		},
+	)
+
+	it("warns only about the genuine file addition when a hidden entry is also present", async () => {
+		// Mixed divergence in one save. The global allow "git" hides "git push", and
+		// the re-add preserves it. "wget" arrived in the visible part of the file
+		// after the dialog opened. The warning must name only the genuine addition.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push", "curl", "wget"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl"] },
+			// The dialog displayed the shadow-filtered deny list. "curl" was visible and
+			// kept, and the dialog never displayed "git push". "wget" arrived in the
+			// settings file after the dialog opened.
+			commandListBaseline: { deniedCommands: ["curl"] },
+		})
+
+		// The hidden-entry re-add keeps "git push", the external-addition re-admit
+		// keeps "wget", and the global layer stays empty.
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["curl", "wget", "git push"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("1 entry was"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("wget"))
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(expect.stringContaining("git push"))
+	})
+
+	it("still warns about a visible workspace addition alongside the hidden-entry exclusion", async () => {
+		// Regression witness for the hidden-entry exclusion: an entry that arrived in
+		// the displayed part of the file is a genuine external addition. The save keeps
+		// it in the layer the snapshot found it in and names it in the warning.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["git", "curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"] },
+			commandListBaseline: { allowedCommands: ["git"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git", "curl"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+	})
+
+	it("preserves a deny entry only the configuration global layer holds", async () => {
+		// The user added "curl" to the user-level deny list directly in settings.json
+		// while the dialog was open. No such edit refreshes the extension-state copy
+		// that the split consults, and neither the dialog baseline nor the submitted
+		// list names the entry. The save-start configuration global layer is therefore
+		// the only source that can classify it as an external addition. Without that
+		// source the save's Global write would delete it from the user's settings file.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ globalValue: ["curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The dialog displayed nothing for this key and saved nothing back.
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: [] },
+		})
+
+		// The Global write re-admits the file-side entry instead of clearing
+		// the layer that holds it.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// The save discloses the preserved entry like the other external additions,
+		// and the state copy keeps the layer the save wrote.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("1 entry was"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl"])
+	})
+
+	it("still promotes a genuinely new entry when the configuration global layer already holds another", async () => {
+		// The accept side of the external-addition union: "curl" lives in the
+		// configuration global layer and the state copy the dialog displayed. It is
+		// therefore known state kept in place. "aws", which no layer held at save start,
+		// keeps the brand-new promotion path into the global write.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["curl"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ globalValue: ["curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl", "aws"] },
+			commandListBaseline: { deniedCommands: ["curl"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl", "aws"], vscode.ConfigurationTarget.Global)
+		// The split also keeps the entry.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// No entry counted as an external addition, so no warning fires.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl", "aws"])
+	})
+
+	it("retains a baseline entry only the configuration global layer still holds", async () => {
+		// The dialog displayed "curl", and the user kept it. No direct settings-file
+		// edit refreshes the extension-state copy that the retained-entry check
+		// consults. Only the save-start configuration global layer still holds the
+		// entry. A check limited to the state copy and the workspace layer treats the
+		// entry as externally removed and drops it. The Global write then deletes it
+		// from the user's settings file.
+		// Global write then deletes it from the user's settings file.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ globalValue: ["curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl"] },
+			commandListBaseline: { deniedCommands: ["curl"], workspaceCommandListsEnabled: true },
+		})
+
+		// The split keeps the retained entry, and the Global write rewrites the layer
+		// that still holds it instead of clearing it.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// A kept entry the dialog displayed is retention, not a file-side
+		// change to disclose.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl"])
+	})
+
+	it("drops a baseline entry the user deleted from the configuration global layer while the state copy still holds it", async () => {
+		// The dialog displayed the global deny "curl", and the submitted list still
+		// holds it. The user deleted it from the user-level deny list in settings.json
+		// while the dialog was open. No direct file edit refreshes the extension-state
+		// copy. Treating that stale copy as proof the entry remains would restore the
+		// deleted entry over the file. Only the configuration layers can disprove a
+		// removal, so `splitSourceEntries` must not consult the state copy.
+		// External removal wins over the stale buffer.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["curl"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ globalValue: [] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl"] },
+			commandListBaseline: { deniedCommands: ["curl"], workspaceCommandListsEnabled: true },
+		})
+
+		// The deletion sticks: the Global write clears the layer the file now shows
+		// empty, instead of re-adding "curl" from the stale state copy.
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// An external removal is not a file-side addition to disclose.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+	})
+
+	it("preserves activation-seeded default entries whose configuration global layer is absent", async () => {
+		// A default install holds nothing in the user-level settings. Activation seeded
+		// the built-in defaults into extension state. No global configuration layer
+		// exists, so the state copy is the only evidence that the displayed entries
+		// have a home. A `splitSourceEntries` clause that ignores the state copy treats
+		// those entries as externally removed. The split drops them, and the Global write
+		// clears the layer to []. The emptied state then stops activation from ever
+		// seeding the defaults again. No configuration layer contradicts the state
+		// copy, so the retention stands and the save writes the defaults back.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log", "git diff", "git show"] : undefined,
+		)
+		// The state copy still equals the shipped default, which is what makes the
+		// absent global layer mean "seeded" rather than "deleted".
+		const { update } = mockCommandConfiguration(
+			{ defaultValue: ["git log", "git diff", "git show"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git log", "git diff", "git show"] },
+			commandListBaseline: {
+				allowedCommands: ["git log", "git diff", "git show"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		// The retained entries survive the split and the Global write
+		// rewrites them, instead of clearing the never-created layer.
+		expect(update).toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff", "git show"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"allowedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// Entries the dialog displayed and the user kept are retention, not a
+		// file-side change to disclose.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [
+			"git log",
+			"git diff",
+			"git show",
+		])
+	})
+
+	it("preserves a settings-imported entry whose only home is the state copy", async () => {
+		// A settings import mirrors each command list into the global layer, pinned in
+		// importExport.spec.ts. This test pins the save side. Without that mirrored
+		// layer the next unrelated Save would classify the displayed entry as
+		// externally removed and delete it. The scripted configuration is stateful:
+		// update() changes what the next inspect() reports, as the real API does.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			// The import's state write: "imported" exists here too.
+			key === "allowedCommands" ? ["git", "imported"] : undefined,
+		)
+		// The import's mirror write holds the full list in the global layer. An
+		// earlier dialog save had already created that layer. The absent-layer
+		// exception therefore cannot carry the case either.
+		const layers: { globalValue?: string[] } = { globalValue: ["git", "imported"] }
+		const update = vi.fn()
+		update.mockImplementation(async (_key: string, value: string[]) => {
+			layers.globalValue = value
+		})
+		const inspect = vi.fn()
+		inspect.mockImplementation((key: string) => (key === "allowedCommands" ? layers : {}))
+		const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+		config.update = update
+		config.inspect = inspect
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+		// The next unrelated Save submits the same list with the baseline the
+		// import re-posted to the dialog.
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git", "imported"] },
+			commandListBaseline: {
+				allowedCommands: ["git", "imported"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		// The mirrored entry survives the save in both homes instead of being dropped
+		// as externally removed.
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git", "imported"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", ["git"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", ["git", "imported"])
+		// Retention, not a file-side change: no disclosure.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("delegates the import case to the shared import function without a configuration write", async () => {
+		// The command-list mirror lives inside importSettingsWithFeedback, pinned in
+		// importExport.spec.ts. The message case must therefore stay a thin delegate.
+		// It adds no configuration write of its own, even with a state copy holding
+		// command lists.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git", "imported"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ globalValue: ["git"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, { type: "importSettings" })
+
+		expect(importSettingsWithFeedback).toHaveBeenCalledWith({
+			providerSettingsManager: mockClineProvider.providerSettingsManager,
+			contextProxy: mockClineProvider.contextProxy,
+			customModesManager: mockClineProvider.customModesManager,
+			provider: mockClineProvider,
+		})
+		expect(update).not.toHaveBeenCalled()
+	})
+
+	it("preserves a configuration-global entry the dialog displayed at the workspace scope", async () => {
+		// The user added "docker" to the user-level list in settings.json while the
+		// dialog was open. The dialog displayed the same entry from the workspace
+		// layer. The split classifies kept entries against the global origin set.
+		// Sourced only from the lagging state copy, that set misses the
+		// configuration's own global layer. "docker" would therefore count as never
+		// routed and be dropped from the Global write. That write deletes it from the
+		// user's settings file. The unioned origin set keeps it in the layer the
+		// save-start snapshot found it in. It also keeps that layer's order, ahead of
+		// the dialog-ordered new entry "aws".
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["docker"], workspaceValue: ["docker"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// The workspace layer holds the entry too, and a kept entry present in
+		// both layers stays in both.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// The file did not add this displayed entry. The user kept it, so no warning fires.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"])
+	})
+
+	// Post-save probe for the activation seed. `seedCommandList` skips only a key
+	// whose global state is set. The saved copy therefore decides whether the
+	// declared package default can ever return to that key.
+	function mockSeededGlobalState(initial: Record<string, unknown>) {
+		const store = new Map<string, unknown>(Object.entries(initial))
+
+		// Structurally complete Memento double with keys, get, and update. The seed
+		// call site therefore needs no type assertion.
+		return {
+			keys: vi.fn((): readonly string[] => [...store.keys()]),
+			get: vi.fn().mockImplementation((key: string) => store.get(key)),
+			update: vi.fn().mockImplementation(async (key: string, value: unknown) => {
+				store.set(key, value)
+			}),
+		}
+	}
+
+	// The fresh-install configuration the seed would act on: the declared default
+	// with no layer value anywhere. That is the shape that re-seeds the defaults
+	// whenever the guard above does not hold.
+	function mockSeedConfiguration(defaultValue: string[]) {
+		const config = makeWorkspaceConfiguration()
+		config.inspect = vi.fn().mockReturnValue({ defaultValue })
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+	}
+
+	it("round-trips a dialog addition through the global write and keeps the activation seed blocked", async () => {
+		// A fresh install holds the defaults only in the extension-state copy. An add
+		// must rewrite the full list plus the addition into the global layer in dialog
+		// order. Those seeded entries have no other home that survives the save.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log", "git diff", "git show"] : undefined,
+		)
+		// The state copy still equals the shipped default, which is what makes the
+		// absent global layer mean "seeded" rather than "deleted".
+		const { update } = mockCommandConfiguration(
+			{ defaultValue: ["git log", "git diff", "git show"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git log", "git diff", "git show", "aws"] },
+			commandListBaseline: {
+				allowedCommands: ["git log", "git diff", "git show"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		// Exact array: the seeded defaults keep their state-copy order and the
+		// brand-new entry lands after them.
+		expect(update).toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff", "git show", "aws"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).not.toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff", "git show"],
+			vscode.ConfigurationTarget.Global,
+		)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"allowedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// A dialog addition is not a settings-file change: no disclosure.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		// The state mirror holds exactly the global layer the save wrote.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [
+			"git log",
+			"git diff",
+			"git show",
+			"aws",
+		])
+		expect(update).toHaveBeenCalledTimes(1)
+
+		// A second activation cannot re-grant the defaults: the saved state copy is
+		// truthy, so the seed guard returns before it reads the configuration.
+		mockSeedConfiguration(["git log", "git diff", "git show"])
+		const globalState = mockSeededGlobalState({
+			allowedCommands: ["git log", "git diff", "git show", "aws"],
+		})
+
+		await seedCommandList(globalState, "allowedCommands")
+
+		expect(globalState.update).not.toHaveBeenCalled()
+		expect(globalState.get("allowedCommands")).toEqual(["git log", "git diff", "git show", "aws"])
+	})
+
+	it("persists an explicitly emptied list and keeps the activation seed blocked for it", async () => {
+		// Clearing every entry must clear the global layer and the state copy. The
+		// emptied `[]` must still count as existing state, so a later activation never
+		// re-seeds the default list the user deleted.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log", "git diff", "git show"] : undefined,
+		)
+		// The state copy still equals the shipped default, which is what makes the
+		// absent global layer mean "seeded" rather than "deleted".
+		const { update } = mockCommandConfiguration(
+			{ defaultValue: ["git log", "git diff", "git show"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: [] },
+			commandListBaseline: {
+				allowedCommands: ["git log", "git diff", "git show"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff", "git show"],
+			vscode.ConfigurationTarget.Global,
+		)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"allowedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [])
+		expect(update).toHaveBeenCalledTimes(1)
+
+		// The `[]` state copy is truthy. The seed guard therefore treats the emptied
+		// list as existing state, even against a configuration that still reports the
+		// declared default.
+		mockSeedConfiguration(["git log", "git diff", "git show"])
+		const globalState = mockSeededGlobalState({ allowedCommands: [] })
+
+		await seedCommandList(globalState, "allowedCommands")
+
+		expect(globalState.update).not.toHaveBeenCalled()
+		expect(globalState.get("allowedCommands")).toEqual([])
+	})
+
+	it("materializes the seeded defaults in the global layer when the user edited only workspace entries", async () => {
+		// For a workspace-only edit the user deletes the workspace entry "npm test"
+		// and touches nothing on the global side. The global write still materializes
+		// the activation-seeded defaults, because with the configuration global layer
+		// absent the state copy is the only home those entries have.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log", "git diff", "git show"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["npm test", "docker"], defaultValue: ["git log", "git diff", "git show"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git log", "git diff", "git show", "docker"] },
+			commandListBaseline: {
+				allowedCommands: ["git log", "git diff", "git show", "npm test", "docker"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		// The save writes the untouched global side back verbatim.
+		expect(update).toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff", "git show"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		// The kept workspace entry stays at the workspace scope, and the deleted entry
+		// clears it there, so nothing leaks into the global layer.
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [
+			"git log",
+			"git diff",
+			"git show",
+		])
+		expect(update).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps a seeded default the workspace layer also holds in the global write with the gate on", async () => {
+		// For a seeded default the workspace layer also holds, and the gate on. The
+		// workspace layer carries "git log" only while the gate is on, so the global
+		// layer is still its home: dropping it there is a loss the user never asked
+		// for, and a later save with the gate off would have no copy left to keep. An
+		// unchanged save therefore writes the seeded list back to the global layer and
+		// clears the workspace duplicate it now holds twice.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log", "git diff", "git show"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["git log"], defaultValue: ["git log", "git diff", "git show"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git log", "git diff", "git show"] },
+			commandListBaseline: {
+				allowedCommands: ["git log", "git diff", "git show"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		expect(update).toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff", "git show"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		// A kept entry stays in every layer that held it, so the workspace copy is
+		// rewritten too and enforcement still finds it there.
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git log"], vscode.ConfigurationTarget.Workspace)
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [
+			"git log",
+			"git diff",
+			"git show",
+		])
+		expect(update).toHaveBeenCalledTimes(2)
+
+		// Enforcement still covers every entry after the save. The merged set the
+		// composed reader returns holds the global list the save wrote.
+		const afterSaveScopes = readCommandListScopes("allowedCommands", ["git log", "git diff", "git show"], {
+			workspaceValue: ["git log"],
+		})
+		expect(afterSaveScopes.merged).toEqual(["git log", "git diff", "git show"])
+	})
+
+	it("keeps a gate-hidden workspace copy the user deleted only from the displayed global list", async () => {
+		// The gate is off, so the dialog displayed only the global layer. "git log"
+		// sits in both layers, and the baseline names it from the global copy. The user
+		// deletes it there. That deletion is a decision about the user-level list, not
+		// about a workspace copy the dialog never showed, so the workspace entry stays
+		// while the global one goes.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["git log"], workspaceValue: ["git log"] },
+			undefined,
+			undefined,
+			false,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: [] },
+			commandListBaseline: { allowedCommands: ["git log"], workspaceCommandListsEnabled: false },
+		})
+
+		// The user-level entry the dialog showed is deleted where it lives...
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		// ...and the workspace copy the dialog could not show survives.
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git log"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Workspace)
+		// The workspace copy is not promoted into the user's settings file.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [])
+	})
+
+	it("keeps a gate-hidden workspace copy the user never saw when the baseline names only the global list", async () => {
+		// The same save with nothing submitted and a baseline that shows only the
+		// global copy. Both entries go unmentioned by the submission, and the baseline
+		// proves the dialog displayed the global one alone. The workspace copy is
+		// preserved, and the global deletion the baseline proves is applied.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["rm -rf"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["rm -rf"], workspaceValue: ["rm -rf", "docker"] },
+			undefined,
+			undefined,
+			false,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: ["rm -rf"], workspaceCommandListsEnabled: false },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// Both hidden workspace entries survive the rewrite, including the one the
+		// global layer also held.
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["rm -rf", "docker"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+	})
+
+	it("applies a displayed deletion to both copies when the gate is on", async () => {
+		// The gate-on counterpart of the case above, with the same fixture. The dialog
+		// displayed the workspace copy, so deleting the entry there is a deletion of
+		// that copy too, and the save clears both layers.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["git log"], workspaceValue: ["git log"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: [] },
+			commandListBaseline: { allowedCommands: ["git log"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [])
+	})
+
+	it("keeps a seeded default in the global write with the gate off while the workspace layer duplicates it", async () => {
+		// The gate-off half of the seeded-default pair. Activation wrote the defaults
+		// into extension state and the configuration's global layer is absent, so the
+		// state copy is their only home. The workspace layer duplicates "git log". The
+		// save keeps the seeded entry in the global write, and the workspace copy stays
+		// where it is because the gate off means the dialog never showed it.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log", "git diff"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["git log"], defaultValue: ["git log", "git diff"] },
+			undefined,
+			undefined,
+			false,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git log", "git diff"] },
+			commandListBaseline: {
+				allowedCommands: ["git log", "git diff"],
+				workspaceCommandListsEnabled: false,
+			},
+		})
+
+		expect(update).toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", ["git diff"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git log"], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", ["git log", "git diff"])
+	})
+})
+
 describe("webviewMessageHandler - terminalProfile", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -2247,7 +5022,15 @@ describe("webviewMessageHandler - requestCommands", () => {
 	})
 
 	it("includes skill slug commands and dedupes duplicate skill names while preserving first skill entry", async () => {
-		mockGetCommands.mockResolvedValue([])
+		mockGetCommands.mockResolvedValue([
+			{
+				name: "deploy",
+				content: "existing command",
+				source: "project",
+				filePath: "/mock/workspace/.roo/commands/deploy.md",
+				description: "Deploy command",
+			},
+		])
 
 		const getTaskMode = vi.fn().mockResolvedValue("code")
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
@@ -2291,24 +5074,29 @@ describe("webviewMessageHandler - requestCommands", () => {
 		expect(commandMessageCall).toBeDefined()
 
 		const commandMessage = commandMessageCall?.[0]
-		expect(commandMessage?.commands).toEqual(
-			expect.arrayContaining([
-				{
-					name: "skill-slug-entry",
-					source: "project",
-					filePath: "/mock/.roo/skills/skill-slug-entry/SKILL.md",
-					description: "Primary skill slug",
-				},
-				{
-					name: "another-skill-slug",
-					source: "global",
-					filePath: "/mock/.roo/skills/another-skill-slug/SKILL.md",
-					description: "Another skill-generated command",
-				},
-			]),
-		)
-
-		expect(commandMessage?.commands?.filter((command) => command.name === "skill-slug-entry")).toHaveLength(1)
+		// The complete array in order: the discovered command first, then the skills in
+		// discovery order. The duplicate skill contributes nothing, and the surviving
+		// copy is the first one seen.
+		expect(commandMessage?.commands).toEqual([
+			{
+				name: "deploy",
+				source: "project",
+				filePath: "/mock/workspace/.roo/commands/deploy.md",
+				description: "Deploy command",
+			},
+			{
+				name: "skill-slug-entry",
+				source: "project",
+				filePath: "/mock/.roo/skills/skill-slug-entry/SKILL.md",
+				description: "Primary skill slug",
+			},
+			{
+				name: "another-skill-slug",
+				source: "global",
+				filePath: "/mock/.roo/skills/another-skill-slug/SKILL.md",
+				description: "Another skill-generated command",
+			},
+		])
 	})
 
 	it("adds skill-backed command entries without overriding existing command names", async () => {
@@ -3289,6 +6077,53 @@ describe("updateSettings with the display settings", () => {
 			expect(mockClineProvider.log).toHaveBeenCalledWith(
 				"[updateSettings] Could not refresh the webview state: webview gone",
 			)
+		})
+
+		it("reports a failed save when a command-list write fails, without throwing", async () => {
+			// A command-list key abandons only its own key on a write failure. The failure
+			// path reports and continues without a throw. The save result must therefore
+			// still say the save was not stored. The dialog keeps the user's list edits
+			// unsaved on this answer.
+			const config = makeWorkspaceConfiguration({})
+			config.inspect = vi.fn().mockReturnValue({})
+			config.update = vi.fn().mockRejectedValue(new Error("disk on fire"))
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			await expect(saveAs({ deniedCommands: ["aws"] })).resolves.toBeUndefined()
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		})
+
+		it("reports a failed save when a command-list write fails and the state refresh fails too", async () => {
+			// The code catches the refresh failure on its own, so it cannot mask the write failure in the ack.
+			const config = makeWorkspaceConfiguration({})
+			config.inspect = vi.fn().mockReturnValue({})
+			config.update = vi.fn().mockRejectedValue(new Error("disk on fire"))
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce(new Error("webview gone"))
+
+			await expect(saveAs({ deniedCommands: ["aws"] })).resolves.toBeUndefined()
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: disk on fire")
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		})
+
+		it("still reports a stored save when a command-list write succeeds", async () => {
+			// The accept-path counterpart: the failure flag must not stick for a save
+			// whose command-list writes all succeeded.
+			const config = makeWorkspaceConfiguration({})
+			config.inspect = vi.fn().mockReturnValue({})
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			await saveAs({ deniedCommands: ["aws"] })
+
+			expect(config.update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
 		})
 	})
 

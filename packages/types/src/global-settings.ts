@@ -58,6 +58,13 @@ export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 export const DEFAULT_TASK_TITLE_GENERATION_ENABLED = true
 
 /**
+ * Opt-in gate for workspace-scoped command lists. While off, those lists are
+ * inert. The manifest scope is "application", so only user settings change
+ * it. Every consumer shares this default.
+ */
+export const DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED = false
+
+/**
  * Whether commands that are not explicitly auto-approved are automatically
  * denied (with a structured reason sent to the model) instead of prompting the
  * user. Opt-in: by default, unapproved commands still ask for confirmation.
@@ -183,6 +190,12 @@ export const globalSettingsSchema = z.object({
 	followupAutoApproveTimeoutMs: z.number().optional(),
 	allowedCommands: z.array(z.string()).optional(),
 	deniedCommands: z.array(z.string()).optional(),
+	/**
+	 * Gate for the workspace command lists. While false, they are inert. When
+	 * true, they apply only where no global entry matches a command.
+	 * @default false
+	 */
+	workspaceCommandListsEnabled: z.boolean().optional(),
 	commandExecutionTimeout: z.number().optional(),
 	commandTimeoutAllowlist: z.array(z.string()).optional(),
 	preventCompletionWithOpenTodos: z.boolean().optional(),

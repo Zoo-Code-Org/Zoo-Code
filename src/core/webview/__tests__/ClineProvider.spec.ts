@@ -21,6 +21,7 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED,
 	DEFAULT_WRITE_DELAY_MS,
 	providerIdentifiers,
 	openAiModelInfoSaneDefaults,
@@ -32,6 +33,7 @@ import { joinSegments } from "../../../shared/mentionSegments"
 import type { MentionSegment } from "@roo-code/types"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
+import { makeUri, makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import { ContextProxy } from "../../config/ContextProxy"
 import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { importSettingsFromPath } from "../../config/importExport"
@@ -4360,6 +4362,271 @@ describe("ClineProvider", () => {
 		const state = await provider.getState()
 
 		expect(state.alwaysDenyUnapprovedCommands).toBe(false)
+	})
+
+	describe("command list scope merging", () => {
+		// clearAllMocks does not remove mockReturnValue defaults, so reset
+		// the configuration here. Overrides must not leak to later tests.
+		afterEach(() => {
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockReturnValue([]),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+			Reflect.deleteProperty(vscode.workspace, "workspaceFolders")
+		})
+
+		// The configuration double makes `get` key-aware, so only the gate key
+		// reports true. The deny-side workspace layer must come from `inspect`.
+		test("getState enforces workspace-scope denied commands even when global state is empty", async () => {
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockImplementation((key: string) => key === "workspaceCommandListsEnabled"),
+				inspect: vi
+					.fn()
+					.mockImplementation((key: string) =>
+						key === "deniedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
+					),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const state = await provider.getState()
+
+			expect(state.deniedCommands).toEqual(["docker"])
+		})
+
+		test("getStateToPostToWebview shows the same effective command lists as getState", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("deniedCommands", ["git"])
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockImplementation((key: string) => key === "workspaceCommandListsEnabled"),
+				inspect: vi
+					.fn()
+					.mockImplementation((key: string) =>
+						key === "deniedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
+					),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const state = await provider.getStateToPostToWebview()
+
+			// No global entry shadows the workspace entry, so display shows the global
+			// layer plus that entry, which is what getState() enforces.
+			expect(state.deniedCommands).toEqual(["git", "docker"])
+			expect(state.allowedCommands).toEqual([])
+		})
+
+		test("getState returns the raw global command lists when the workspace layer differs", async () => {
+			await provider.contextProxy.setValue("allowedCommands", ["git"])
+			await provider.contextProxy.setValue("deniedCommands", ["curl"])
+			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+			const inspect = vi.fn()
+			inspect.mockImplementation((key: string) => ({
+				key,
+				workspaceValue: key === "allowedCommands" ? ["docker"] : ["pnpm"],
+			}))
+			config.inspect = inspect
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			const state = await provider.getState()
+
+			// Per-folder enforcement re-composes from the raw global layers, so they must
+			// differ from the window-composed pair. A dropped or composed field would make
+			// enforcement use the first-folder lists.
+			expect(state.globalAllowedCommands).toEqual(["git"])
+			expect(state.globalDeniedCommands).toEqual(["curl"])
+			expect(state.allowedCommands).toEqual(["git", "docker"])
+			expect(state.deniedCommands).toEqual(["curl", "pnpm"])
+		})
+
+		test("getState reads the raw global command lists after its awaits, so a save during them is kept", async () => {
+			await provider.contextProxy.setValue("allowedCommands", ["git"])
+			await provider.contextProxy.setValue("deniedCommands", ["curl"])
+			mockGateConfiguration(true)
+
+			// Hold the first await of getState, so the save below lands inside it.
+			let releaseCustomModes!: () => void
+			const customModesPending = new Promise<void>((resolve) => {
+				releaseCustomModes = () => resolve()
+			})
+			vi.mocked(provider.customModesManager.getCustomModes).mockImplementationOnce(async () => {
+				await customModesPending
+				return []
+			})
+
+			const pendingState = provider.getState()
+			await provider.contextProxy.setValue("allowedCommands", ["docker"])
+			await provider.contextProxy.setValue("deniedCommands", ["pnpm"])
+			releaseCustomModes()
+
+			const state = await pendingState
+
+			// The lists describe the state at return time, not at call time. A read from
+			// the call-time snapshot would return the pre-save entries instead.
+			expect(state.globalAllowedCommands).toEqual(["docker"])
+			expect(state.globalDeniedCommands).toEqual(["pnpm"])
+			expect(state.allowedCommands).toEqual(["docker"])
+			expect(state.deniedCommands).toEqual(["pnpm"])
+			expect(state.globalAllowedCommands).not.toContain("git")
+			expect(state.globalDeniedCommands).not.toContain("curl")
+		})
+
+		test("getState prefers the workspace-folder value for multi-root workspaces", async () => {
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockImplementation((key: string) => key === "workspaceCommandListsEnabled"),
+				inspect: vi
+					.fn()
+					.mockImplementation((key: string) =>
+						key === "deniedCommands"
+							? { key, workspaceValue: ["docker"], workspaceFolderValue: ["pnpm docker"] }
+							: undefined,
+					),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const state = await provider.getState()
+
+			// The folder value replaces the workspace value. It does not union. The
+			// effective get() value is ignored, so global entries cannot leak in.
+			expect(state.deniedCommands).toEqual(["pnpm docker"])
+		})
+
+		test("getState scopes its command-list lookups to the first workspace folder", async () => {
+			// Each folder gets its own configuration, chosen by the scope resource. An
+			// unscoped lookup reads the second folder, so only a lookup scoped to the
+			// first folder's uri returns its list.
+			const firstFolder = { uri: makeUri("/root/one"), name: "first", index: 0 }
+			const secondFolder = { uri: makeUri("/root/two"), name: "second", index: 1 }
+			// workspaceFolders is readonly-typed in the mock, so set it through
+			// defineProperty. The afterEach removes it again.
+			Reflect.defineProperty(vscode.workspace, "workspaceFolders", {
+				configurable: true,
+				value: [firstFolder, secondFolder],
+			})
+
+			const firstFolderConfig = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+			firstFolderConfig.inspect = vi
+				.fn()
+				.mockImplementation((key: string) =>
+					key === "deniedCommands"
+						? { key, workspaceValue: ["workspace docker"], workspaceFolderValue: ["pnpm docker"] }
+						: undefined,
+				)
+			const secondFolderConfig = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: false })
+			secondFolderConfig.inspect = vi
+				.fn()
+				.mockImplementation((key: string) =>
+					key === "deniedCommands" ? { key, workspaceFolderValue: ["curl"] } : undefined,
+				)
+			vi.mocked(vscode.workspace.getConfiguration).mockImplementation((_section?: string, scope?: unknown) =>
+				scope === firstFolder.uri ? firstFolderConfig : secondFolderConfig,
+			)
+
+			const state = await provider.getState()
+
+			expect(state.deniedCommands).toEqual(["pnpm docker"])
+			expect(state.workspaceCommandListsEnabled).toBe(true)
+		})
+
+		// The gate decides a workspace-only allow entry. Enabled, the entry joins the
+		// effective lists. Disabled, enforcement ignores it.
+		function mockGateConfiguration(enabled: boolean) {
+			// The gate reader reads its value through `get`. The `inspect` override supplies the allow-side workspace layer.
+			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: enabled })
+			const inspect = vi.fn()
+			inspect.mockImplementation((key: string) =>
+				key === "allowedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
+			)
+			config.inspect = inspect
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+		}
+
+		// A profile that never set the gate reports nothing, so the provider must
+		// apply the shared default. The workspace layer is present, so the default
+		// direction (workspace entries stay inert) is visible.
+		function mockUnsetGateConfiguration() {
+			const config = makeWorkspaceConfiguration()
+			const inspect = vi.fn()
+			inspect.mockImplementation((key: string) =>
+				key === "allowedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
+			)
+			config.inspect = inspect
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+		}
+
+		test("a workspace-only allow entry surfaces through getState and getStateToPostToWebview when the gate is on", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			mockGateConfiguration(true)
+
+			const state = await provider.getState()
+			const postedState = await provider.getStateToPostToWebview()
+
+			expect(state.allowedCommands).toEqual(["docker"])
+			expect(postedState.allowedCommands).toEqual(["docker"])
+		})
+
+		test("a workspace-only allow entry is absent from getState and getStateToPostToWebview when the gate is off", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			mockGateConfiguration(false)
+
+			const state = await provider.getState()
+			const postedState = await provider.getStateToPostToWebview()
+
+			expect(state.allowedCommands).toEqual([])
+			expect(postedState.allowedCommands).toEqual([])
+		})
+
+		test("getState returns the saved workspace command-list gate value", async () => {
+			mockGateConfiguration(true)
+
+			const state = await provider.getState()
+
+			expect(state.workspaceCommandListsEnabled).toBe(true)
+		})
+
+		test("getState defaults the workspace command-list gate to the shared constant", async () => {
+			mockGateConfiguration(false)
+
+			const state = await provider.getState()
+
+			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+		})
+
+		test("getStateToPostToWebview returns the saved workspace command-list gate value", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			mockGateConfiguration(true)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.workspaceCommandListsEnabled).toBe(true)
+		})
+
+		test("getStateToPostToWebview defaults the workspace command-list gate to the shared constant", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			mockGateConfiguration(false)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+		})
+
+		test("getState defaults the workspace command-list gate when the configuration is unset", async () => {
+			mockUnsetGateConfiguration()
+
+			const state = await provider.getState()
+
+			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+			// An unset gate keeps the workspace entry out of the effective list.
+			expect(state.allowedCommands).toEqual([])
+		})
+
+		test("getStateToPostToWebview defaults the workspace command-list gate when the configuration is unset", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			mockUnsetGateConfiguration()
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+			expect(state.allowedCommands).toEqual([])
+		})
 	})
 
 	test("getState returns the saved allowed read files", async () => {

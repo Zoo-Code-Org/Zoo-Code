@@ -67,6 +67,8 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// The gate is read from VS Code user settings only, so an exported copy would be read back by nothing.
+	workspaceCommandListsEnabled: true,
 })
 
 export class ContextProxy {

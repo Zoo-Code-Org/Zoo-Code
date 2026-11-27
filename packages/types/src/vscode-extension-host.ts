@@ -336,6 +336,7 @@ export type ExtensionState = Pick<
 	| "followupAutoApproveTimeoutMs"
 	| "allowedCommands"
 	| "deniedCommands"
+	| "workspaceCommandListsEnabled"
 	| "allowedMaxRequests"
 	| "allowedMaxCost"
 	| "ttsEnabled"
@@ -421,6 +422,15 @@ export type ExtensionState = Pick<
 	toolRequirements?: Record<string, boolean> // Map of tool names to their requirements (e.g. {"apply_diff": true})
 
 	cwd?: string // Current working directory
+
+	/**
+	 * User-scope command lists from extension global state, before the workspace
+	 * layers compose. Auto-approval enforces these raw layers plus the task's
+	 * folder. The merged pair follows only the window's first folder. This is
+	 * runtime state, not a user setting: the provider writes it, never the dialog.
+	 */
+	globalAllowedCommands?: string[]
+	globalDeniedCommands?: string[]
 	telemetrySetting: TelemetrySetting
 	telemetryKey?: string
 	// Salted SHA-256 hash of vscode.env.machineId (see hashDistinctId in
@@ -713,9 +723,7 @@ export interface WebviewMessage {
 		| "getDismissedUpsells"
 		| "openMarkdownPreview"
 		| "updateSettings"
-		| "allowedCommands"
 		| "getTaskWithAggregatedCosts"
-		| "deniedCommands"
 		| "openDebugApiHistory"
 		| "openDebugUiHistory"
 		| "downloadErrorDiagnostics"
@@ -773,7 +781,6 @@ export interface WebviewMessage {
 	stepIndex?: number
 	isLaunchAction?: boolean
 	forceShow?: boolean
-	commands?: string[]
 	audioType?: AudioType
 	serverName?: string
 	toolName?: string
@@ -862,6 +869,22 @@ export interface WebviewMessage {
 		codebaseIndexOpenRouterApiKey?: string
 	}
 	updatedSettings?: RooCodeSettings
+	/**
+	 * The lists as the dialog last showed them, sent with the save that rewrites
+	 * them. Without it the save cannot tell a file-side addition from a user
+	 * deletion, because both look like "in the file, absent from the submission".
+	 * A sender that shows no lists omits it.
+	 */
+	commandListBaseline?: {
+		allowedCommands?: string[]
+		deniedCommands?: string[]
+		/**
+		 * The gate as the dialog last showed it. A gate flip between display and save
+		 * hides workspace entries. This value lets the save treat an already-shown
+		 * entry as known state, not a new promotion to global.
+		 */
+		workspaceCommandListsEnabled?: boolean
+	}
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
 	/** Origin of each part of `text`. Absent or not matching `text` means all generated. */

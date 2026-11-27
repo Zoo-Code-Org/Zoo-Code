@@ -42,6 +42,7 @@ import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manag
 import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
+import { seedCommandList } from "./utils/seedAllowedCommands"
 import { autoImportSettings } from "./utils/autoImportSettings"
 import { API } from "./extension/api"
 
@@ -161,9 +162,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize i18n for internationalization support.
 	initializeI18n(context.globalState.get("language") ?? formatLanguage(vscode.env.language))
 
-	// Initialize terminal shell execution handlers.
-	TerminalRegistry.initialize()
-
 	// Initialize OpenAI Codex OAuth manager for ChatGPT subscription-based access.
 	openAiCodexOAuthManager.initialize(context, (message) => outputChannel.appendLine(message))
 	// Kimi Code OAuth tokens live only in VS Code SecretStorage, outside provider profile JSON/cloud sync.
@@ -172,13 +170,42 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize Zoo Code auth service for extension session token management.
 	await initZooCodeAuth(context)
 
-	// Get default commands from configuration.
-	const defaultCommands = vscode.workspace.getConfiguration(Package.name).get<string[]>("allowedCommands") || []
-
-	// Initialize global state if not already set.
-	if (!context.globalState.get("allowedCommands")) {
-		context.globalState.update("allowedCommands", defaultCommands)
+	// Seed before the terminal registry initializes. The host may skip
+	// `deactivate()` after a failed activation, and only the host releases the
+	// registry's listeners.
+	// Each key has its own first-run guard, so a profile seeded by an older
+	// version still gets the deny-list migration.
+	try {
+		await seedCommandList(context.globalState, "allowedCommands")
+		await seedCommandList(context.globalState, "deniedCommands")
+	} catch (error) {
+		// The host may skip `deactivate()`, so this catch tears down before it
+		// rethrows. The order is reverse acquisition: telemetry shutdown, trace-sink
+		// clear, then channel dispose, each step awaited. A teardown failure is logged
+		// or dropped, never rethrown. Telemetry shutdown is bounded, so a stuck client
+		// cannot hang activation here.
+		try {
+			await telemetryService.shutdown()
+		} catch (shutdownError) {
+			outputChannel.appendLine(
+				`Failed to shut down telemetry service: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+			)
+		}
+		// The trace sink logs through the output channel, so clear it first:
+		// undefined restores the default console sink.
+		setPersistenceTraceSink(undefined)
+		// Dispose the channel last: earlier teardown steps log through it.
+		// A failed dispose has no sink left to report to, so it is dropped.
+		try {
+			outputChannel.dispose()
+		} catch {
+			// The extension output sink is itself being torn down.
+		}
+		throw error
 	}
+
+	// Initialize terminal shell execution handlers.
+	TerminalRegistry.initialize()
 
 	const contextProxy = await ContextProxy.getInstance(context)
 	const updateTelemetryState = () => {

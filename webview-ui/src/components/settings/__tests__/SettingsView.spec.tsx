@@ -778,6 +778,164 @@ describe("SettingsView - Allowed Commands", () => {
 		)
 	})
 
+	it("sends the lists displayed at open as the save baseline, unmoved by an in-flight list edit", () => {
+		// The save path tells "user deleted this" from "the file gained this" with the
+		// baseline. The payload therefore carries what the dialog displayed before this
+		// save. It carries neither the submitted list nor the committed value.
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			state: { allowedCommands: ["git"], alwaysAllowExecute: true },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		// An in-flight addition lands in the edit buffer only.
+		const input = within(content).getByTestId("command-input")
+		fireEvent.change(input, { target: { value: "npm test" } })
+		fireEvent.click(within(content).getByTestId("add-command-button"))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				commandListBaseline: { allowedCommands: ["git"], deniedCommands: [] },
+				updatedSettings: expect.objectContaining({ allowedCommands: ["git", "npm test"] }),
+			}),
+		)
+	})
+
+	it("carries the gate displayed as on in the save baseline", () => {
+		// The save path compares this flag against the gate at write time. With it on,
+		// baseline entries are known state, so a gate flip cannot
+		// reclassify a shown entry as a new global promotion.
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: true },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		// A dirty list edit enables the save button.
+		const input = within(content).getByTestId("command-input")
+		fireEvent.change(input, { target: { value: "npm test" } })
+		fireEvent.click(within(content).getByTestId("add-command-button"))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		// The request id marks the save the host must answer, which is the save whose
+		// settle reads the edit tracking. The gate reaches the host through the
+		// baseline's third slot alone.
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				requestId: expect.any(String),
+				commandListBaseline: {
+					allowedCommands: ["git"],
+					deniedCommands: [],
+					workspaceCommandListsEnabled: true,
+				},
+				updatedSettings: expect.not.objectContaining({
+					workspaceCommandListsEnabled: expect.anything(),
+				}),
+			}),
+		)
+	})
+
+	it("keeps the stamped gate paired with held-back lists when the gate flips during a buffered edit", async () => {
+		// An external post flips the gate during a list edit. The lists are held back,
+		// so the baseline must keep the gate they were displayed under. Posting the
+		// flipped gate would reclassify a shown entry as a new global promotion.
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: true },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		const input = within(content).getByTestId("command-input")
+		fireEvent.change(input, { target: { value: "npm test" } })
+		fireEvent.click(within(content).getByTestId("add-command-button"))
+
+		await act(async () => {
+			mockPostMessage({
+				allowedCommands: ["git", "curl"],
+				alwaysAllowExecute: true,
+				workspaceCommandListsEnabled: false,
+			})
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				commandListBaseline: {
+					allowedCommands: ["git"],
+					deniedCommands: [],
+					workspaceCommandListsEnabled: true,
+				},
+			}),
+		)
+	})
+
+	it("sends the merged gate with the merged lists when no list edit is in flight", async () => {
+		// With no in-flight edit the merge adopts the posted lists and the gate, so
+		// the baseline describes the new state.
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: false },
+		})
+
+		await act(async () => {
+			mockPostMessage({
+				allowedCommands: ["git", "curl"],
+				alwaysAllowExecute: true,
+				workspaceCommandListsEnabled: true,
+			})
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+
+		// A non-list edit makes the save button live without claiming ownership of the lists.
+		const content = screen.getByTestId("settings-content")
+		fireEvent.click(within(content).getByTestId("always-allow-execute-toggle"))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				commandListBaseline: {
+					allowedCommands: ["git", "curl"],
+					deniedCommands: [],
+					workspaceCommandListsEnabled: true,
+				},
+				updatedSettings: expect.objectContaining({ allowedCommands: ["git", "curl"] }),
+			}),
+		)
+	})
+
+	it("carries the gate displayed as off in the save baseline without persisting it", () => {
+		// The dialog shows the host's gate but never writes it, so the flag reaches
+		// the save path through the baseline only, not the settings payload.
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: false },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		const input = within(content).getByTestId("command-input")
+		fireEvent.change(input, { target: { value: "npm test" } })
+		fireEvent.click(within(content).getByTestId("add-command-button"))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				commandListBaseline: {
+					allowedCommands: ["git"],
+					deniedCommands: [],
+					workspaceCommandListsEnabled: false,
+				},
+				updatedSettings: expect.not.objectContaining({ workspaceCommandListsEnabled: expect.anything() }),
+			}),
+		)
+	})
+
 	it("removes command from the list", () => {
 		// Render once and get the activateTab helper
 		const { activateTab, getSettingsContent } = renderSettingsView()
