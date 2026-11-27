@@ -17,6 +17,20 @@ import {
 import { BaseTelemetryClient } from "./BaseTelemetryClient"
 import { hashDistinctId } from "./distinct-id"
 
+/** Copy the error and normalize its message without changing the caller's error. */
+function normalizeTelemetryError(error: Error, message: string): Error {
+	const stack = error.stack
+	const telemetryError = new Error()
+	Object.setPrototypeOf(telemetryError, Object.getPrototypeOf(error))
+	Object.defineProperties(telemetryError, {
+		...Object.getOwnPropertyDescriptors(error),
+		// Set normalized fields before a frozen source can make them read-only.
+		stack: { value: stack, writable: true, configurable: true },
+		message: { value: message, writable: true, configurable: true },
+	})
+	return telemetryError
+}
+
 /**
  * PostHogTelemetryClient handles telemetry event tracking for the Roo Code extension.
  * Uses PostHog analytics to track user interactions and system events.
@@ -119,16 +133,7 @@ export class PostHogTelemetryClient extends BaseTelemetryClient {
 			mergedProperties = { ...extractedProperties, ...additionalProperties }
 		}
 
-		// Normalize a detached error so telemetry cannot change the caller-facing message.
-		const stack = error.stack
-		const telemetryError = new Error()
-		Object.setPrototypeOf(telemetryError, Object.getPrototypeOf(error))
-		Object.defineProperties(telemetryError, {
-			...Object.getOwnPropertyDescriptors(error),
-			// Set normalized fields before a frozen source can make them read-only.
-			stack: { value: stack, writable: true, configurable: true },
-			message: { value: errorMessage, writable: true, configurable: true },
-		})
+		const telemetryError = normalizeTelemetryError(error, errorMessage)
 
 		const provider = this.providerRef?.deref()
 		let telemetryProperties: TelemetryProperties | undefined = undefined

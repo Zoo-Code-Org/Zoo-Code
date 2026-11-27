@@ -89,6 +89,42 @@ describe("TelemetryService.captureException single-capture policy", () => {
 		expect(mockClient.captureException).toHaveBeenCalledTimes(1)
 	})
 
+	it("marks a window-suppressed instance before its later rethrow", () => {
+		const service = new TelemetryService([mockClient])
+		service.captureException(makeApiProviderError())
+		vi.advanceTimersByTime(1_000)
+		const suppressed = makeApiProviderError()
+		service.captureException(suppressed)
+		expect(suppressed.captured).toBe(true)
+		vi.advanceTimersByTime(31_000)
+		service.captureException(suppressed)
+		expect(mockClient.captureException).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not refresh the window when the same instance returns", () => {
+		const service = new TelemetryService([mockClient])
+		const first = makeApiProviderError()
+		service.captureException(first)
+		vi.advanceTimersByTime(20_000)
+		service.captureException(first)
+		vi.advanceTimersByTime(11_000)
+		service.captureException(makeApiProviderError())
+		expect(mockClient.captureException).toHaveBeenCalledTimes(2)
+	})
+
+	it.each([false, true])("does not consume opted-out errors before opt-in (reuse=%s)", (reuse) => {
+		const service = new TelemetryService([mockClient])
+		vi.mocked(mockClient.isTelemetryEnabled).mockReturnValue(false)
+		const first = makeApiProviderError()
+		service.captureException(first)
+		expect(first.captured).toBeUndefined()
+		expect(service["recentExceptionFingerprints"].size).toBe(0)
+		expect(mockClient.captureException).not.toHaveBeenCalled()
+		vi.mocked(mockClient.isTelemetryEnabled).mockReturnValue(true)
+		service.captureException(reuse ? first : makeApiProviderError())
+		expect(mockClient.captureException).toHaveBeenCalledTimes(1)
+	})
+
 	it("does not collapse distinct errors", () => {
 		const service = new TelemetryService([mockClient])
 

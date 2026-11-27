@@ -84,6 +84,7 @@ describe.each(errorKinds)("$name", ({ create }) => {
 		expect(sent.name).toBe(error.name)
 		expect(sent.message).toBe(raw)
 		expect(sent.stack).toBe(stack)
+		expect(Object.getOwnPropertyDescriptor(sent, "stack")).toMatchObject({ writable: true, configurable: true })
 		expect(sent.cause).toBe(cause)
 		if (error instanceof AggregateError) {
 			expect(sent).toBeInstanceOf(AggregateError)

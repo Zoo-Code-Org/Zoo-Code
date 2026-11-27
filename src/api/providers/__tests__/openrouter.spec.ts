@@ -24,6 +24,7 @@ import { ApiProviderError, extractApiProviderErrorProperties } from "@roo-code/t
 import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 
 import { OpenRouterHandler } from "../openrouter"
+import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -616,6 +617,27 @@ describe("OpenRouterHandler", () => {
 			expect(thrown).toMatchObject({ name: "ApiProviderError", message: expected, status: code })
 			expect(mockCaptureException).toHaveBeenCalledTimes(1)
 			expect(thrown).toBe(mockCaptureException.mock.calls[0]?.[0])
+		})
+
+		it.each([
+			{ code: 400, message: "maximum context length exceeded", condense: true },
+			{ code: 400, message: "invalid request", condense: false },
+			{ code: 500, message: "maximum context length exceeded", condense: false },
+		])("routes stream error $code $message with condense=$condense", async ({ code, message, condense }) => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(asyncStreamFrom([{ error: { code, message } }]))
+			// The SDK double supplies only chat.completions.create.
+			const prototype = OpenAI.prototype as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			prototype.chat = { completions: { create: mockCreate } }
+			let thrown: unknown
+			try {
+				await handler.createMessage("test", []).next()
+			} catch (error) {
+				thrown = error
+			}
+			expect(thrown).toBeInstanceOf(ApiProviderError)
+			expect(thrown).toBe(mockCaptureException.mock.calls[0]?.[0])
+			expect(checkContextWindowExceededError(thrown)).toBe(condense)
 		})
 
 		it("handles API errors and captures telemetry", async () => {

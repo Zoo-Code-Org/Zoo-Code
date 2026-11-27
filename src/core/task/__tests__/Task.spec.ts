@@ -745,7 +745,7 @@ describe("Cline", () => {
 			return task
 		}
 
-		it("captures exactly one exception when a provider captures and throws across retry attempts", async () => {
+		it("captures one exception across retries with a simulated provider capture contract", async () => {
 			const task = await createAutoApprovedTask()
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 

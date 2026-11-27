@@ -1,30 +1,17 @@
 ---- MODULE ExceptionCopy ----
-\* Review ratchet, PR 2330 summary item 6: added frozen message inputs and the Delivery invariant.
-\* Current round: 0 covered, 1 added, 0 gap. writable abstracts the message descriptor, not the full object.
-\* Expected: assignment to a frozen message prevents delivery. The fixed descriptor transform must deliver.
-\* Replay: all 12 frozen cases failed on the unfixed client. The descriptor fix passes the same cases.
-\* Result: fixed model holds in 64 states. Assignment fails Delivery; the two prior sabotages still fail.
-\* Cost: shared with ExceptionCapture. No new bug beyond the frozen-error failure in the review.
-\* attempted distinguishes a dropped delivery from a call that has not started.
-\* Source: PostHogTelemetryClient.captureException(error). Sink: PostHog.captureException(payload).
-\* Failures: normalization changes the caller error, loses error type or children, or sends the wrong message.
-\* Rules: CallerMessage, SourceShape, and NormalizedMessage compare source and delivered records directly.
-\* The transform is an oracle. ExceptionCopyMC supplies fixed and broken transforms for the finite check.
-\* Expected before simplification: fixed records pass; mutation and prototype loss each fail.
-\* Review: PR 2330 discussion_r4486068932 added CallerMessage to the original combined model.
-\* Review: PR 2330 discussion_r4638627894 added SourceShape after the copy lost built-in prototypes.
-\* Review counts for this module: 0 covered, 2 added, 0 gap. Dedupe feedback is in ExceptionCapture.
-\* Replay: the real client changed three caller messages before the detached-copy fix.
-\* Replay: TypeError, RangeError, and AggregateError each lost their prototype for three test messages.
-\* Property tests: PostHogTelemetryClient.message-preservation.test.ts checks messages, types, stacks, causes, and children.
-\* proto represents the inherited error type. Only an AggregateError exposes children to the sink.
-\* Fields stand for data or references. This model does not copy JavaScript descriptors or PostHog parsing.
-\* Historical cost: about 2 minutes for the prototype-loss spec, replay, fix, and checks.
-\* Previous result: ExceptionCopyMC holds in 32 states. Mutating fails CallerMessage; PlainCopy fails SourceShape.
-\* Cost: included in ExceptionCapture. Each TLC run takes less than 2 seconds. No new production bug was found.
-\* Removed caller and shape success flags. The invariants now inspect the actual transform output.
-\* Guidance: https://lamport.azurewebsites.net/tla/book-02-02-27.pdf (Chapter 7).
-\* TLC checks the model, not code correctness. Real-code tests provide the source-to-sink replay.
+\* Source: normalizeTelemetryError called by PostHogTelemetryClient.captureException(error). Sink: PostHog.captureException(payload).
+\* Failures: normalization changes the caller, loses type or children, sends the wrong message, or drops frozen inputs.
+\* CallerMessage, SourceShape, NormalizedMessage, and Delivery check these failures. Transform is an oracle.
+\* Prior review additions: caller isolation, built-in prototypes, and frozen message delivery.
+\* Current PR #2330 supplied review items 9 and 10: descriptor flags and header layout are gaps, checked directly.
+\* The review totals appear once in ExceptionCapture. Writable stack descriptors use runtime assertions, not a descriptor model.
+\* Expectation: the unchanged model passes. Assignment, mutation, and plain-copy sabotages must still fail.
+\* Property tests: PostHogTelemetryClient.message-preservation.test.ts checks messages, shapes, frozen errors, and stack flags.
+\* Results: all 64 fixed states pass. All three sabotage configs fail. Changing stack flags fails all 24 shape cases.
+\* Review cost is included in ExceptionCapture. Helper extraction took one agent about two minutes. No delegates.
+\* Refactor expectation: extracting normalizeTelemetryError preserves all four copy invariants. No new defect is expected.
+\* Refactor result: all 109 telemetry tests pass. All three copy mutations fail the existing property tests. No new defect found.
+\* TLC checks the abstraction, not JavaScript descriptors or PostHog parsing.
 
 EXTENDS Naturals, Sequences
 CONSTANTS Inputs, Messages, Transform(_, _)

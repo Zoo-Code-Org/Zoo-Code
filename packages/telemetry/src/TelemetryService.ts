@@ -214,7 +214,7 @@ export class TelemetryService {
 	 * @param additionalProperties Additional properties to include with the exception
 	 */
 	public captureException(error: Error, additionalProperties?: Record<string, unknown>): void {
-		if (!this.isReady || this.isShuttingDown) {
+		if (this.isShuttingDown || !this.isTelemetryEnabled()) {
 			return
 		}
 
@@ -226,7 +226,7 @@ export class TelemetryService {
 		//
 		// 1. Identity. An ApiProviderError is marked on its first capture; any
 		//    later capture of the same instance (enclosing catch, re-throw) is a
-		//    no-op. Marking happens only after the readiness check above, so an
+		//    no-op. Marking happens only after the readiness and opt-in checks, so an
 		//    error captured while telemetry is down can still be captured later.
 		//
 		// 2. Fingerprint window. Each retry attempt constructs a fresh
