@@ -53,25 +53,32 @@ describe("collapseCommandOutputByDefault global setting", () => {
 	})
 })
 
-describe.each(["mcp.dynamicLoad.threshold", "mcp.dynamicLoad.initialK"] as const)("%s", (key) => {
-	it.each([undefined, 1, 30, 50, 100])("round-trips %s through the settings schema", (value) => {
-		const settings = globalSettingsSchema.parse({ [key]: value })
-		expect(globalSettingsSchema.parse(JSON.parse(JSON.stringify(settings)))[key]).toBe(value)
-		expect(GLOBAL_SETTINGS_KEYS).toContain(key)
-	})
-	it.each([-1, 1.5, NaN, Infinity, "30", null])("rejects %s", (value) => {
-		expect(globalSettingsSchema.safeParse({ [key]: value }).success).toBe(false)
-	})
-	it("allows zero only for the threshold", () => {
-		expect(globalSettingsSchema.safeParse({ [key]: 0 }).success).toBe(key === "mcp.dynamicLoad.threshold")
-	})
-})
+describe.each(["mcp.dynamicLoad.threshold", "mcp.dynamicLoad.initialK", "mcp.dynamicLoad.searchTurns"] as const)(
+	"%s",
+	(key) => {
+		it.each([undefined, 1, 30, 50, 100])("round-trips %s through the settings schema", (value) => {
+			const settings = globalSettingsSchema.parse({ [key]: value })
+			expect(globalSettingsSchema.parse(JSON.parse(JSON.stringify(settings)))[key]).toBe(value)
+			expect(GLOBAL_SETTINGS_KEYS).toContain(key)
+		})
+		it.each([-1, 1.5, NaN, Infinity, "30", null])("rejects %s", (value) => {
+			expect(globalSettingsSchema.safeParse({ [key]: value }).success).toBe(false)
+		})
+		it("allows zero except for initialK", () => {
+			expect(globalSettingsSchema.safeParse({ [key]: 0 }).success).toBe(key !== "mcp.dynamicLoad.initialK")
+		})
+	},
+)
 
 describe("runtime MCP routing defaults", () => {
 	it.each([undefined, null, -1, 1.5, NaN, Infinity, "30", {}])("replaces invalid input %j", (value) => {
-		expect(resolveMcpDynamicLoadSettings(value, value)).toEqual({ threshold: 50, initialK: 30 })
+		expect(resolveMcpDynamicLoadSettings(value, value, value)).toEqual({
+			threshold: 50,
+			initialK: 30,
+			searchTurns: 7,
+		})
 	})
-	it("preserves a zero threshold and a positive limit", () => {
-		expect(resolveMcpDynamicLoadSettings(0, 1)).toEqual({ threshold: 0, initialK: 1 })
+	it("preserves a zero threshold, a positive limit and zero search turns", () => {
+		expect(resolveMcpDynamicLoadSettings(0, 1, 0)).toEqual({ threshold: 0, initialK: 1, searchTurns: 0 })
 	})
 })

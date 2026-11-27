@@ -888,7 +888,11 @@ export const webviewMessageHandler = async (
 						}
 					} else if (key === "execaShellPath") {
 						Terminal.setExecaShellPath(value as string | undefined)
-					} else if (key === "mcp.dynamicLoad.threshold" || key === "mcp.dynamicLoad.initialK") {
+					} else if (
+						key === "mcp.dynamicLoad.threshold" ||
+						key === "mcp.dynamicLoad.initialK" ||
+						key === "mcp.dynamicLoad.searchTurns"
+					) {
 						const parsed = globalSettingsSchema.shape[key].safeParse(value)
 						if (!parsed.success) {
 							console.warn(

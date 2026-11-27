@@ -10,12 +10,25 @@ The selection is stored in task history. Missing or invalid selections are
 initialized on demand; a valid empty selection remains initialized. Nonempty selections are checked against the current scope on each gated build;
 selections with no available names are ranked again. Concurrent callers check
 their own scope after the preceding selection completes. MCP names
-already used in conversation history are retained for provider compatibility,
-so resumed tasks can require more than `initialK` declarations. This is an
-initial selection limit, not a lifetime cap. Historical names accumulate during
-a task and are not trimmed, since removing their definitions can cause providers
-to reject conversation history. Current server, mode, and tool-policy
-restrictions still apply.
+used in conversation history since the last condensation are retained for
+provider compatibility, so resumed tasks can require more than `initialK`
+declarations. Current server, mode, and tool-policy restrictions still apply.
+
+The first rank uses the latest text tagged `<user_message>`, or the task text when
+no user text exists. Each new user message gets a supplemental rank of up to 7
+unselected tools. Tool results and environment details do not count as user
+messages. Supplemental ranks stop after `mcp.dynamicLoad.searchTurns` (default 7)
+user messages since the last summary. A value of 0 turns dynamic loading off.
+Supplemental ranks also stop at 60 attached tools (`MAX_ATTACHED_DURING_ROLLING`).
+
+Condensation resets the selection. The next tool build ranks the full scope
+again. The condensation save writes the selection as absent, so a reload after
+condensation also ranks again. Names used before the summary are not retained,
+because the fresh-start history no longer sends their `tool_use` blocks.
+
+Any change to the tools array, an append too, ends the provider prompt cache. The
+search window limits that cost to one cache rewrite for each searched turn.
+`docs/architecture/tla/McpToolSelectionLifecycle.tla` models these rules.
 
 If saving fails, the task retains its in-memory selection and continues. Later
 normal history saves retry persistence. History writes union attached names under
@@ -26,7 +39,8 @@ stream retries.
 The gate limits advertised definitions; it does not add an execution permission
 boundary. Existing tool authorization still applies to calls by name.
 
-The settings schema and extension-state round trip are implemented. SettingsView
+The settings schema and extension-state round trip are implemented for
+`threshold`, `initialK`, and `searchTurns`. SettingsView
 controls and replacement of the legacy catalog-wide warning are deferred to
 #581. The legacy warning uses its own catalog advisory threshold; it does not
 report the scoped tool count for a running task. The `mcp_load` escape hatch is

@@ -417,6 +417,7 @@ export type ExtensionState = Pick<
 	mcpEnabled: boolean
 	"mcp.dynamicLoad.threshold"?: number
 	"mcp.dynamicLoad.initialK"?: number
+	"mcp.dynamicLoad.searchTurns"?: number
 
 	mode: string
 	customModes: ModeConfig[]

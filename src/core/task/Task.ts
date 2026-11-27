@@ -100,7 +100,7 @@ import { SYSTEM_PROMPT } from "../prompts/system"
 import type { InstructionFailureCollector } from "../prompts/sections/custom-instructions"
 import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
-import { McpToolSelection } from "./mcpToolSelection"
+import { McpToolSelection, type McpSelectionLimits } from "./mcpToolSelection"
 import type { ToolDoc } from "../../services/tools/types"
 
 // core modules
@@ -2749,6 +2749,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				task: this,
 				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
 				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+				mcpDynamicLoadSearchTurns: state?.["mcp.dynamicLoad.searchTurns"],
 				provider,
 				cwd: this.cwd,
 				mode,
@@ -2832,6 +2833,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		if (summary) {
 			this.armInstructionRefresh()
+			this.mcpToolSelection.reset()
 		}
 		await this.overwriteApiConversationHistory(messages)
 
@@ -3094,10 +3096,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/** Revalidate the current scope and persist additions before use. */
-	public async initializeAttachedMcpTools(scopedTools: ToolDoc[], initialK: number): Promise<void> {
+	public async initializeAttachedMcpTools(scopedTools: ToolDoc[], limits: McpSelectionLimits): Promise<void> {
 		await this.mcpToolSelection.initialize(
 			scopedTools,
-			initialK,
+			limits,
 			this.metadata.task ?? "",
 			this.apiConversationHistory,
 			async () => {
@@ -3105,7 +3107,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (!(await this.saveClineMessages(true, true)))
 						throw new Error("Failed to save MCP tool selection")
 				} catch (error) {
-					// Keep the selection on failure. Normal history saves retry it.
 					console.error("[Task] Failed to persist MCP tool selection; keeping in-memory selection:", error)
 				}
 			},
@@ -5625,6 +5626,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					task: this,
 					mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
 					mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+					mcpDynamicLoadSearchTurns: state?.["mcp.dynamicLoad.searchTurns"],
 					provider,
 					cwd: this.cwd,
 					mode,
@@ -5696,6 +5698,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			if (truncateResult.summary) {
 				this.armInstructionRefresh()
+				this.mcpToolSelection.reset()
 			}
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
@@ -5898,6 +5901,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							task: this,
 							mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
 							mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+							mcpDynamicLoadSearchTurns: state?.["mcp.dynamicLoad.searchTurns"],
 							provider,
 							cwd: this.cwd,
 							mode,
@@ -5972,6 +5976,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				if (truncateResult.summary) {
 					this.armInstructionRefresh()
+					this.mcpToolSelection.reset()
 				}
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
@@ -6056,6 +6061,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				task: this,
 				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
 				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+				mcpDynamicLoadSearchTurns: state?.["mcp.dynamicLoad.searchTurns"],
 				provider,
 				cwd: this.cwd,
 				mode,

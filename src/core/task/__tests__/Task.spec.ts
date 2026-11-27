@@ -328,6 +328,13 @@ const stubModelInfo: ModelInfo = {
 	supportsPromptCache: true,
 }
 
+function seedMcpSelection(task: Task) {
+	const selection = task["mcpToolSelection"]
+	selection.names.add("mcp--jira--search")
+	selection.initialized = true
+	return selection
+}
+
 describe("Cline", () => {
 	let mockProvider: ClineProvider
 	let mockApiConfig: ProviderSettings
@@ -2644,6 +2651,51 @@ describe("Cline", () => {
 				expect(reported.newContextTokens).toBeGreaterThan(0)
 				expect(reported.newContextTokens).toBeLessThan(reported.prevContextTokens)
 			})
+
+			it.each([
+				{ outcome: "summary", result: { summary: "summary" }, kept: false },
+				{ outcome: "error", result: { summary: "", error: "Condensing failed" }, kept: true },
+			])("clears the MCP selection before the save only on a $outcome", async ({ result, kept }) => {
+				const { task, say } = await createOverflowingTask(providerStateWith())
+				const selection = seedMcpSelection(task)
+				const initializedAtSave: boolean[] = []
+				say.mockImplementation(async () => {
+					initializedAtSave.push(selection.initialized)
+					return undefined
+				})
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: task.apiConversationHistory,
+					cost: 0,
+					...result,
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				expect(initializedAtSave[0]).toBe(kept)
+				expect([...selection.names]).toEqual(kept ? ["mcp--jira--search"] : [])
+			})
+		})
+
+		it("clears the MCP selection before a manual condense saves", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			const selection = seedMcpSelection(task)
+			const initializedAtCondenseSay: boolean[] = []
+			vi.spyOn(task, "say").mockImplementation(async (type) => {
+				if (type === "condense_context") initializedAtCondenseSay.push(selection.initialized)
+				return undefined
+			})
+
+			await task.condenseContext()
+
+			expect(initializedAtCondenseSay).toEqual([false])
+			expect([...selection.names]).toEqual([])
 		})
 
 		it("uses the task mode when manually condensing after focused state changes", async () => {

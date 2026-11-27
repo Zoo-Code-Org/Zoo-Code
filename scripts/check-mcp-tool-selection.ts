@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { setImmediate } from "node:timers/promises"
+import { DEFAULT_MCP_DYNAMIC_LOAD_SEARCH_TURNS } from "@roo-code/types"
 import { McpToolSelection } from "../src/core/task/mcpToolSelection"
 import type { ToolDoc } from "../src/services/tools/types"
 import { buildMcpToolName } from "../src/utils/mcp-name"
@@ -14,6 +15,7 @@ const scopes = [[], [tools[0]], [tools[1]], tools]
 const savedSelections = [undefined, [], [names[0]], [names[1]], names]
 const MAX_DEPTH = 6 // two calls, each with at most one rank and one save
 const MAX_STATES = 500
+const LIMITS = { initialK: 1, searchTurns: DEFAULT_MCP_DYNAMIC_LOAD_SEARCH_TURNS }
 
 type Caller = 0 | 1
 type Action = { kind: "call" | "rank" | "save"; caller: Caller }
@@ -80,7 +82,7 @@ async function replay(scenario: Scenario, trace: Action[], fault: Fault): Promis
 					? Promise.resolve()
 					: fault === "shared-promise" && preceding
 						? preceding
-						: selection.initialize(scenario.scopes[caller], 1, "search", [], () => {
+						: selection.initialize(scenario.scopes[caller], LIMITS, "search", [], () => {
 								const completion = new Promise<void>((resolve) => {
 									saves.set(caller, resolve)
 								})

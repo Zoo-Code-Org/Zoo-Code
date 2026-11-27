@@ -23,6 +23,7 @@ interface BuildToolsOptions {
 	task?: Pick<Task, "attachedMcpToolNames" | "initializeAttachedMcpTools">
 	mcpDynamicLoadThreshold?: number
 	mcpDynamicLoadInitialK?: number
+	mcpDynamicLoadSearchTurns?: number
 	provider: ClineProvider
 	cwd: string
 	mode: string | undefined
@@ -145,16 +146,17 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		modelInfo,
 	})
 	let advertisedMcpTools = mcpTools
-	const { threshold, initialK } = resolveMcpDynamicLoadSettings(
+	const { threshold, initialK, searchTurns } = resolveMcpDynamicLoadSettings(
 		options.mcpDynamicLoadThreshold,
 		options.mcpDynamicLoadInitialK,
+		options.mcpDynamicLoadSearchTurns,
 	)
-	if (options.task && filteredMcpTools.length > threshold) {
+	if (options.task && searchTurns > 0 && filteredMcpTools.length > threshold) {
 		const scopedNames = new Set(filteredMcpTools.map(getToolName))
 		const scopedTools = getMcpToolCatalog(mcpHub, allowedMcpServers)
 			.filter(({ name }) => scopedNames.has(name))
 			.map(({ serverName, tool }) => ({ serverName, toolName: tool.name, description: tool.description ?? "" }))
-		await options.task.initializeAttachedMcpTools(scopedTools, initialK)
+		await options.task.initializeAttachedMcpTools(scopedTools, { initialK, searchTurns })
 		// This gate limits advertised definitions. Existing execution authorization
 		// still decides whether a requested tool call is permitted.
 		const attached = options.task.attachedMcpToolNames

@@ -167,9 +167,24 @@ describe.each([false, true])("MCP dynamic loading (all definitions: %s)", (inclu
 			...options,
 			mcpDynamicLoadThreshold: NaN,
 			mcpDynamicLoadInitialK: Infinity,
+			mcpDynamicLoadSearchTurns: NaN,
 			includeAllToolsWithRestrictions,
 		})
 		expect(names(result.tools).filter((name) => name.startsWith("mcp--"))).toHaveLength(30)
+	})
+
+	it.each([
+		{ searchTurns: 0, advertised: 100, ranked: false },
+		{ searchTurns: 1, advertised: 30, ranked: true },
+	])("advertises $advertised tools when searchTurns is $searchTurns", async ({ searchTurns, advertised, ranked }) => {
+		const { task, options } = setup(100)
+		const result = await buildNativeToolsArrayWithRestrictions({
+			...options,
+			mcpDynamicLoadSearchTurns: searchTurns,
+			includeAllToolsWithRestrictions,
+		})
+		expect(names(result.tools).filter((name) => name.startsWith("mcp--"))).toHaveLength(advertised)
+		expect(task.initializeAttachedMcpTools).toHaveBeenCalledTimes(ranked ? 1 : 0)
 	})
 
 	it("uses a configured threshold, including zero", async () => {

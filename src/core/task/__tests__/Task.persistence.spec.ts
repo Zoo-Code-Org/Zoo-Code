@@ -6,6 +6,7 @@ import * as path from "path"
 import * as vscode from "vscode"
 
 import {
+	DEFAULT_MCP_DYNAMIC_LOAD_SEARCH_TURNS,
 	RooCodeEventName,
 	type ClineMessage,
 	type GlobalState,
@@ -25,6 +26,10 @@ import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../to
 import type { ToolUse } from "../../../shared/tools"
 import { setAbortLatch } from "../../../test-utils/run-state"
 import { ToolRouter } from "../../../services/tools/ToolRouter"
+import { summarizeConversation } from "../../condense"
+import type { ApiMessage } from "../../task-persistence/apiMessages"
+
+const limits = (initialK: number) => ({ initialK, searchTurns: DEFAULT_MCP_DYNAMIC_LOAD_SEARCH_TURNS })
 
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
@@ -34,6 +39,7 @@ type TaskPersistenceAccess = {
 	resumeTaskFromHistory: () => Promise<void>
 	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
+	getSystemPrompt: () => Promise<string>
 	initiateTaskLoop: (
 		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
 	) => Promise<void>
@@ -41,6 +47,12 @@ type TaskPersistenceAccess = {
 
 function getTaskPersistenceAccess(task: Task): TaskPersistenceAccess {
 	return task as unknown as TaskPersistenceAccess
+}
+
+function requireLastMetadata(): { attachedMcpToolNames?: string[] } {
+	const call = mockTaskMetadata.mock.calls.at(-1)
+	if (!call) throw new Error("Expected a saved history item")
+	return call[0]
 }
 
 function createDeferred<T>() {
@@ -227,6 +239,10 @@ vi.mock("../../condense", async (importOriginal) => {
 	}
 })
 
+vi.mock("../../../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: { getOrCreate: vi.fn().mockReturnValue(undefined) },
+}))
+
 vi.mock("../../../utils/storage", () => ({
 	getTaskDirectoryPath: vi
 		.fn()
@@ -322,13 +338,13 @@ describe("Task persistence", () => {
 					startTask: false,
 				})
 				await Promise.all([
-					task.initializeAttachedMcpTools(scope, 30),
-					task.initializeAttachedMcpTools(scope, 30),
+					task.initializeAttachedMcpTools(scope, limits(30)),
+					task.initializeAttachedMcpTools(scope, limits(30)),
 				])
 				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", scope, 30)
 				expect([...task.attachedMcpToolNames]).toEqual(names)
 				expect(mockTaskMetadata).toHaveBeenCalledWith(expect.objectContaining({ attachedMcpToolNames: names }))
-				await task.initializeAttachedMcpTools(scope, 10)
+				await task.initializeAttachedMcpTools(scope, limits(10))
 				expect(rank).toHaveBeenCalledTimes(1)
 				rank.mockRestore()
 			},
@@ -346,10 +362,10 @@ describe("Task persistence", () => {
 				task: "find tickets",
 				startTask: false,
 			})
-			const first = task.initializeAttachedMcpTools(scope, 1)
+			const first = task.initializeAttachedMcpTools(scope, limits(1))
 			const second = task.initializeAttachedMcpTools(
 				[{ serverName: "other", toolName: "search", description: "tickets" }],
-				1,
+				limits(1),
 			)
 			gate.resolve(["mcp--github--issues"])
 			await Promise.all([first, second])
@@ -367,10 +383,10 @@ describe("Task persistence", () => {
 				task: "find tickets",
 				startTask: false,
 			})
-			await task.initializeAttachedMcpTools(scope, 1)
+			await task.initializeAttachedMcpTools(scope, limits(1))
 			await task.initializeAttachedMcpTools(
 				[{ serverName: "other", toolName: "search", description: "tickets" }],
-				1,
+				limits(1),
 			)
 			expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues", "mcp--other--search"])
 			expect(mockTaskMetadata).toHaveBeenLastCalledWith(
@@ -404,7 +420,10 @@ describe("Task persistence", () => {
 					attachedMcpToolNames: savedNames,
 				},
 			})
-			await task.initializeAttachedMcpTools([{ serverName: "github", toolName: "issues", description: "" }], 30)
+			await task.initializeAttachedMcpTools(
+				[{ serverName: "github", toolName: "issues", description: "" }],
+				limits(30),
+			)
 			expect([...task.attachedMcpToolNames]).toEqual(names)
 			expect(rank).not.toHaveBeenCalled()
 			rank.mockRestore()
@@ -418,11 +437,14 @@ describe("Task persistence", () => {
 				startTask: false,
 				historyItem: { ...legacyHistory(), attachedMcpToolNames: ["mcp--catalog--returning"] },
 			})
-			await task.initializeAttachedMcpTools([{ serverName: "github", toolName: "issues", description: "" }], 30)
+			await task.initializeAttachedMcpTools(
+				[{ serverName: "github", toolName: "issues", description: "" }],
+				limits(30),
+			)
 			expect([...task.attachedMcpToolNames]).toEqual(["mcp--catalog--returning", "mcp--github--issues"])
 			await task.initializeAttachedMcpTools(
 				[{ serverName: "catalog", toolName: "returning", description: "" }],
-				30,
+				limits(30),
 			)
 			expect([...task.attachedMcpToolNames]).toEqual(["mcp--catalog--returning", "mcp--github--issues"])
 			expect(rank).toHaveBeenCalledTimes(1)
@@ -452,7 +474,7 @@ describe("Task persistence", () => {
 				if (stage === "history")
 					vi.mocked(mockProvider.updateTaskHistory).mockRejectedValueOnce(new Error("disk full"))
 				if (stage === "messages") mockSaveTaskMessages.mockRejectedValueOnce(new Error("disk full"))
-				await expect(task.initializeAttachedMcpTools(scope, 30)).resolves.toBeUndefined()
+				await expect(task.initializeAttachedMcpTools(scope, limits(30))).resolves.toBeUndefined()
 				expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues"])
 				expect(log).toHaveBeenCalledWith(
 					expect.stringContaining("keeping in-memory selection"),
@@ -465,7 +487,7 @@ describe("Task persistence", () => {
 							message.startsWith("[Task] Failed to persist MCP tool selection"),
 					).length
 				expect(persistenceFailures()).toBe(1)
-				await task.initializeAttachedMcpTools(scope, 30)
+				await task.initializeAttachedMcpTools(scope, limits(30))
 				expect(rank).toHaveBeenCalledTimes(1)
 				expect(persistenceFailures()).toBe(1)
 				lostProvider?.mockRestore()
@@ -509,7 +531,7 @@ describe("Task persistence", () => {
 					historyItem,
 					startTask: false,
 				})
-				await task.initializeAttachedMcpTools(scope, 30)
+				await task.initializeAttachedMcpTools(scope, limits(30))
 				expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues"])
 				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", scope, 30)
 				rank.mockRestore()
@@ -540,7 +562,7 @@ describe("Task persistence", () => {
 					images: ["image-data"],
 					startTask: false,
 				})
-				await task.initializeAttachedMcpTools([], 2)
+				await task.initializeAttachedMcpTools([], limits(2))
 				expect(mockTaskMetadata).not.toHaveBeenCalled()
 				await task.initializeAttachedMcpTools(
 					[
@@ -549,7 +571,7 @@ describe("Task persistence", () => {
 						{ serverName: "other", toolName: "u", description: "" },
 						{ serverName: "extra", toolName: "v", description: "" },
 					],
-					2,
+					limits(2),
 				)
 				expect([...task.attachedMcpToolNames]).toEqual(["mcp--a_b--t", "mcp--other--u"])
 				expect(mockTaskMetadata).toHaveBeenLastCalledWith(
@@ -581,13 +603,70 @@ describe("Task persistence", () => {
 					],
 				},
 			]
-			await task.initializeAttachedMcpTools([{ serverName: "catalog", toolName: "top", description: "" }], 1)
+			await task.initializeAttachedMcpTools(
+				[{ serverName: "catalog", toolName: "top", description: "" }],
+				limits(1),
+			)
 			expect(task.attachedMcpToolNames).toEqual(new Set(["mcp--catalog--previous", "mcp--catalog--top"]))
 			expect(rank).toHaveBeenCalledTimes(initialized ? 0 : 1)
 			expect(mockTaskMetadata).toHaveBeenLastCalledWith(
 				expect.objectContaining({
 					attachedMcpToolNames: expect.arrayContaining(["mcp--catalog--previous", "mcp--catalog--top"]),
 				}),
+			)
+			rank.mockRestore()
+		})
+
+		it.each([
+			{ outcome: "summary", condensed: { summary: "summary" }, fullRank: true },
+			{ outcome: "error", condensed: { summary: "", error: "Condensing failed" }, fullRank: false },
+		])("rehydrates the selection saved by a manual condense ($outcome)", async ({ condensed, fullRank }) => {
+			const scope = ["jira", "slack"].map((toolName) => ({ serverName: "catalog", toolName, description: "" }))
+			const savedNames = ["mcp--catalog--jira"]
+			const userTurn: ApiMessage = {
+				role: "user",
+				content: [{ type: "text", text: "<user_message>\nsend a slack dm\n</user_message>" }],
+			}
+			const summary: ApiMessage = { role: "user", content: [{ type: "text", text: "summary" }], isSummary: true }
+			const condensing = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: { ...legacyHistory(), attachedMcpToolNames: savedNames },
+				startTask: false,
+			})
+			condensing.apiConversationHistory = [
+				userTurn,
+				{ role: "assistant", content: [{ type: "text", text: "ok" }] },
+			]
+			vi.spyOn(getTaskPersistenceAccess(condensing), "getSystemPrompt").mockResolvedValue("system prompt")
+			vi.mocked(summarizeConversation).mockResolvedValueOnce({
+				messages: [...condensing.apiConversationHistory, ...(fullRank ? [summary] : [])],
+				cost: 0,
+				...condensed,
+			})
+
+			await condensing.condenseContext()
+
+			const savedItem = requireLastMetadata()
+			expect(savedItem.attachedMcpToolNames).toEqual(fullRank ? undefined : savedNames)
+			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial").mockResolvedValue(["mcp--catalog--slack"])
+			const restarted = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: { ...legacyHistory(), attachedMcpToolNames: savedItem.attachedMcpToolNames },
+				startTask: false,
+			})
+			restarted.apiConversationHistory = condensing.apiConversationHistory
+
+			await restarted.initializeAttachedMcpTools(scope, limits(1))
+
+			expect(rank).toHaveBeenCalledExactlyOnceWith(
+				expect.stringContaining("send a slack dm"),
+				fullRank ? scope : [scope[1]],
+				fullRank ? 1 : 7,
+			)
+			expect([...restarted.attachedMcpToolNames]).toEqual(
+				fullRank ? ["mcp--catalog--slack"] : [...savedNames, "mcp--catalog--slack"],
 			)
 			rank.mockRestore()
 		})
