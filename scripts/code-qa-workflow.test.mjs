@@ -109,12 +109,6 @@ describe("platform unit-test workflow", () => {
 			assert.deepEqual(plainTask.inputs, coverageTask.inputs)
 		}
 	})
-
-	it("caps Windows CI extension lanes at two workers per lane to fill the runner vCPUs", () => {
-		const config = fs.readFileSync(path.join(repositoryRoot, "src/vitest.config.ts"), "utf8")
-
-		assert.match(config, /maxWorkers: isWindowsCI \? 2 : undefined/)
-	})
 })
 
 describe("Knip quality gate", () => {
@@ -131,7 +125,7 @@ describe("Knip quality gate", () => {
 			assert.match(workflowStep(stepName), new RegExp(`run: ${command}\\s*$`))
 			assert.doesNotMatch(workflowStep(stepName), /continue-on-error|if:/)
 		}
-		const job = workflow.match(/\n    knip:\n(?<body>[\s\S]*?)\n    compile:/)?.groups?.body
+		const job = workflow.match(/\n {4}knip:\n(?<body>[\s\S]*?)\n {4}compile:/)?.groups?.body
 		assert.ok(job, "missing knip job")
 		assert.doesNotMatch(job, /continue-on-error|if:/)
 	})

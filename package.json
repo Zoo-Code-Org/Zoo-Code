@@ -14,7 +14,7 @@
 		"check-types": "tsc -p tsconfig.json --noEmit && turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
 		"test:local": "node scripts/test-local.mjs",
-		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs",
+		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs scripts/test-local.test.mjs",
 		"solheim:smoke": "node --import tsx scripts/solheim-smoke/driver.mts",
 		"test:solheim-smoke-ci": "node --test scripts/solheim-smoke-workflow.test.mjs",
 		"test:solheim-smoke:unit": "node --import tsx --test scripts/solheim-smoke/*.test.ts",

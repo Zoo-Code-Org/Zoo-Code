@@ -30,8 +30,9 @@ const passthrough = args.filter(
 	(arg) => !arg.startsWith("--vitest-workers=") && !arg.startsWith("--turbo-concurrency="),
 )
 
-function run(command, commandArgs, env) {
-	const result = spawnSync(command, commandArgs, {
+function runTurbo(task, args = [], env) {
+	const commandArgs = ["exec", "turbo", "run", task, "--log-order", "grouped", "--output-logs", "new-only", ...args]
+	const result = spawnSync("pnpm", commandArgs, {
 		stdio: "inherit",
 		env: { ...process.env, ...env },
 	})
@@ -46,22 +47,8 @@ console.log(
 
 // The dist smoke test needs bundled assets. Bundling first avoids the race
 // where a concurrent bundle wipes `src/dist` while the extension suite reads it.
-run("pnpm", ["exec", "turbo", "run", "bundle", "--log-order", "grouped", "--output-logs", "new-only"])
+runTurbo("bundle")
 
-run(
-	"pnpm",
-	[
-		"exec",
-		"turbo",
-		"run",
-		"test",
-		"--concurrency",
-		String(turboConcurrency),
-		"--log-order",
-		"grouped",
-		"--output-logs",
-		"new-only",
-		...passthrough,
-	],
-	{ VITEST_MAX_WORKERS: String(vitestWorkers) },
-)
+runTurbo("test", ["--concurrency", String(turboConcurrency), ...passthrough], {
+	VITEST_MAX_WORKERS: String(vitestWorkers),
+})
