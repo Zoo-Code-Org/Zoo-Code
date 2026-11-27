@@ -47,6 +47,12 @@
 \* pinned by unit tests in ClineProvider.restore-follows-active-profile.spec.ts;
 \* the defensive profile?.name chain is an equivalent mutant documented beside
 \* the condition in ClineProvider.ts).
+\* Review (PR 2649, round on 6ca11ea04): 1 gap (CR thread on
+\* ClineProvider.restore-follows-active-profile.spec.ts:403 - the fall-through
+\* restore must construct the task from the exact unresolved-settings snapshot;
+\* expressing it would mean modeling the caller's profile.apiProvider activation
+\* guard, which sits outside the decision record like the activation side
+\* effects above; pinned by the strengthened exact-config unit assertion).
 
 CONSTANT NoActive   \* sentinel: no resolvable active profile at restore time
 

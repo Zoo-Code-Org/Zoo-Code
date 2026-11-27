@@ -29,7 +29,11 @@
 // Red-verify: tests 1 and 3 fail on pre-fix code because the restore block
 // activates the stale pin unconditionally. Test 6 fails because the rejected
 // updateTaskHistory await escapes before the Task is constructed. Test 7 fails
-// because the mutated cache makes the store persist the old pin.
+// because the mutated cache makes the store persist the old pin. Test 8's
+// exact-settings assertion fails when the caller's profile.apiProvider guard
+// is dropped (activation then reports 'model-of-provider-1') or when the
+// fall-through skips Task construction; a bare resolves-defined check passed
+// both (review round on 6ca11ea04).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
@@ -400,7 +404,17 @@ describe("ClineProvider restore follows the active profile", () => {
 			activeProfileName: undefined,
 		})
 
-		await expect(harness.runRestore(makeHistoryItem("provider-1"))).resolves.toBeDefined()
+		await harness.runRestore(makeHistoryItem("provider-1"))
+
+		// The fall-through must still construct the task from the settings snapshot
+		// getState reports after no activation ran: the unresolved-profile fallback.
+		// A wrongly re-activated settings-less pin surfaces 'model-of-provider-1'
+		// here, and a restore that skips Task construction leaves no call to read.
+		expect(vi.mocked(Task).mock.calls.length).toBe(1)
+		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiModelId: "model-of-unresolved",
+		})
 
 		expect(harness.activateProviderProfile).not.toHaveBeenCalled()
 		expect(harness.updateTaskHistory).not.toHaveBeenCalled()
