@@ -3,7 +3,7 @@ import * as path from "path"
 
 import { listFiles } from "../../services/glob/list-files"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import { toRelativePath, getWorkspacePath } from "../../utils/path"
+import { toRelativePath, getTaskCwdPath, getWorkspacePath } from "../../utils/path"
 
 const MAX_INITIAL_FILES = 1_000
 
@@ -74,6 +74,15 @@ class WorkspaceTracker {
 	}
 
 	private getOpenedTabsInfo() {
+		// Tab paths feed the @-mention values the webview offers; parseMentions
+		// resolves them against the task anchor the task stored at construction
+		// (Task.workspacePath). Without a workspace root there is no root to cut
+		// against, and recomputing getTaskCwdPath() per update would track the
+		// live active editor instead of the stored anchor: after an editor
+		// change the offered values would resolve to different files. Prefer
+		// the current task's stored anchor; fall back to a live anchor only
+		// before a task exists to store one (issue #1271).
+		const baseCwd = this.cwd || this.providerRef?.deref()?.getCurrentTask()?.cwd || getTaskCwdPath()
 		return vscode.window.tabGroups.all.reduce(
 			(acc, group) => {
 				const groupTabs = group.tabs
@@ -81,7 +90,7 @@ class WorkspaceTracker {
 					.map((tab) => ({
 						label: tab.label,
 						isActive: tab.isActive,
-						path: toRelativePath((tab.input as vscode.TabInputText).uri.fsPath, this.cwd || ""),
+						path: toRelativePath((tab.input as vscode.TabInputText).uri.fsPath, baseCwd),
 					}))
 
 				groupTabs.forEach((tab) => (tab.isActive ? acc.unshift(tab) : acc.push(tab)))
@@ -121,6 +130,15 @@ class WorkspaceTracker {
 		}
 		this.updateTimer = setTimeout(() => {
 			if (!this.cwd) {
+				// Rootless session (issue #1271): there is no workspace root to
+				// scan, so the directory listing stays empty. Opened tabs still
+				// feed the webview's mention values, cut against the task anchor.
+				void this.providerRef.deref()?.postMessageToWebview({
+					type: "workspaceUpdated",
+					filePaths: [],
+					openedTabs: this.getOpenedTabsInfo(),
+				})
+				this.updateTimer = null
 				return
 			}
 
@@ -162,6 +180,16 @@ class WorkspaceTracker {
 	private async removeFilePath(filePath: string): Promise<boolean> {
 		const normalizedPath = this.normalizeFilePath(filePath)
 		return this.filePaths.delete(normalizedPath) || this.filePaths.delete(normalizedPath + "/")
+	}
+
+	// A task activation (start or history resume) changes the anchor that
+	// offered tab values are cut against (issue #1271): values published
+	// before a task existed were cut against the live anchor, and a resumed
+	// task stores the workspacePath from its history item, which can differ.
+	// Republish through the same debounced path the tab and file events use;
+	// their behavior is unchanged.
+	public publishOpenedTabs(): void {
+		this.workspaceDidUpdate()
 	}
 
 	public dispose() {

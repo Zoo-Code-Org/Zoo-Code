@@ -3,7 +3,7 @@ import * as vscode from "vscode"
 import WorkspaceTracker from "../WorkspaceTracker"
 import { ClineProvider } from "../../../core/webview/ClineProvider"
 import { listFiles } from "../../../services/glob/list-files"
-import { getWorkspacePath } from "../../../utils/path"
+import { getTaskCwdPath, getWorkspacePath } from "../../../utils/path"
 
 // Mock functions - must be defined before vitest.mock calls
 const mockOnDidCreate = vitest.fn()
@@ -16,6 +16,7 @@ let registeredTabChangeCallback: (() => Promise<void>) | null = null
 // Mock workspace path
 vitest.mock("../../../utils/path", () => ({
 	getWorkspacePath: vitest.fn().mockReturnValue("/test/workspace"),
+	getTaskCwdPath: vitest.fn().mockReturnValue("/anchor/dir"),
 	toRelativePath: vitest.fn(function (path, cwd) {
 		// Handle both Windows and POSIX paths by using path.relative
 		const relativePath = require("path").relative(cwd, path)
@@ -63,6 +64,7 @@ vitest.mock("vscode", () => ({
 		},
 	},
 	FileType: { File: 1, Directory: 2 },
+	TabInputText: class MockTabInputText {},
 }))
 
 vitest.mock("../../../services/glob/list-files", () => ({
@@ -83,9 +85,11 @@ describe("WorkspaceTracker", () => {
 		// Reset workspace path mock
 		;(getWorkspacePath as Mock).mockReturnValue("/test/workspace")
 
-		// Create provider mock
+		// Create provider mock. getCurrentTask returns undefined: no task is
+		// open in these tests, so the tracker falls back to the live anchor.
 		mockProvider = {
 			postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
+			getCurrentTask: vitest.fn().mockReturnValue(undefined),
 		} as unknown as ClineProvider & { postMessageToWebview: Mock }
 
 		// Create tracker instance
@@ -372,5 +376,191 @@ describe("WorkspaceTracker", () => {
 
 		// No postMessage should be called after dispose
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	// Issue #1271: without a workspace root there is no root to cut tab paths
+	// against. Mention values must be relative to the task anchor so
+	// parseMentions resolves them back to the open files.
+	it("cuts opened-tab mention values against the task anchor without a workspace", async () => {
+		const TabInputText = (vscode as unknown as { TabInputText: new () => object }).TabInputText
+		const makeTab = (fsPath: string, isActive: boolean) => ({
+			label: fsPath.split("/").pop() ?? "",
+			isActive,
+			input: Object.assign(new TabInputText(), { uri: { fsPath } }),
+		})
+
+		;(getWorkspacePath as Mock).mockReturnValue("")
+		;(getTaskCwdPath as Mock).mockReturnValue("/anchor/dir")
+		const tabGroupsMock = vscode.window.tabGroups as unknown as { all: unknown }
+		const previousTabs = tabGroupsMock.all
+		tabGroupsMock.all = [{ tabs: [makeTab("/anchor/dir/a.ts", true), makeTab("/elsewhere/b.ts", false)] }]
+
+		try {
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+
+			const calls = (mockProvider.postMessageToWebview as Mock).mock.calls
+			const posted = calls.map((call) => call[0]).find((message) => message.openedTabs?.length === 2)
+			expect(posted).toBeDefined()
+			expect(posted.openedTabs.map((tab: { path: string }) => tab.path)).toEqual(["a.ts", "../../elsewhere/b.ts"])
+		} finally {
+			tabGroupsMock.all = previousTabs
+		}
+	})
+
+	// Review round 2: a session that starts without a workspace keeps
+	// prevWorkSpacePath equal to cwd, so tab changes take workspaceDidUpdate,
+	// not workspaceDidReset. Directory scanning stays off, but every tab
+	// update must still publish the opened tabs (cut against the task
+	// anchor) with an empty file list, or the webview never sees any tabs.
+	it("publishes opened tabs on repeated tab updates without a workspace", async () => {
+		const TabInputText = (vscode as unknown as { TabInputText: new () => object }).TabInputText
+		const makeTab = (fsPath: string, isActive: boolean) => ({
+			label: fsPath.split("/").pop() ?? "",
+			isActive,
+			input: Object.assign(new TabInputText(), { uri: { fsPath } }),
+		})
+
+		// Rootless from construction: prevWorkSpacePath and cwd are both empty.
+		;(getWorkspacePath as Mock).mockReturnValue("")
+		;(getTaskCwdPath as Mock).mockReturnValue("/anchor/dir")
+		workspaceTracker = new WorkspaceTracker(mockProvider)
+		const tabGroupsMock = vscode.window.tabGroups as unknown as { all: unknown }
+		const previousTabs = tabGroupsMock.all
+		tabGroupsMock.all = [{ tabs: [makeTab("/anchor/dir/a.ts", true)] }]
+
+		try {
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+
+			expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "a.ts", isActive: true, path: "a.ts" }],
+			})
+
+			// A second tab change publishes again.
+			tabGroupsMock.all = [{ tabs: [makeTab("/anchor/dir/b.ts", true)] }]
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+
+			expect(mockProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "b.ts", isActive: true, path: "b.ts" }],
+			})
+		} finally {
+			tabGroupsMock.all = previousTabs
+		}
+	})
+
+	// Review round: the task keeps the anchor it computed at construction
+	// (Task.workspacePath) and parseMentions resolves against it. If the
+	// active editor moves after task start, recomputing getTaskCwdPath()
+	// per publish would cut tab values against the NEW directory while the
+	// resolver still joins them to the stored anchor - the offered mention
+	// would resolve to a different file. The tracker must cut against the
+	// task's stored anchor.
+	it("cuts tab values against the task's stored anchor when the editor moves after task start", async () => {
+		const TabInputText = (vscode as unknown as { TabInputText: new () => object }).TabInputText
+		const makeTab = (fsPath: string, isActive: boolean) => ({
+			label: fsPath.split("/").pop() ?? "",
+			isActive,
+			input: Object.assign(new TabInputText(), { uri: { fsPath } }),
+		})
+
+		// Rootless session. The task stored /anchor/dir at construction; the
+		// active editor now sits in /new/dir, so a live getTaskCwdPath() call
+		// would return the NEW directory.
+		;(getWorkspacePath as Mock).mockReturnValue("")
+		;(getTaskCwdPath as Mock).mockReturnValue("/new/dir")
+		const anchoredProvider = {
+			postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
+			getCurrentTask: vitest.fn(() => ({ cwd: "/anchor/dir" })),
+		} as unknown as ClineProvider & { postMessageToWebview: Mock; getCurrentTask: Mock }
+		workspaceTracker = new WorkspaceTracker(anchoredProvider)
+
+		const tabGroupsMock = vscode.window.tabGroups as unknown as { all: unknown }
+		const previousTabs = tabGroupsMock.all
+		tabGroupsMock.all = [{ tabs: [makeTab("/new/dir/a.ts", true)] }]
+
+		try {
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+
+			// The value must resolve back under the STORED anchor:
+			// path.relative("/anchor/dir", "/new/dir/a.ts") = "../../new/dir/a.ts".
+			// Cutting against the live editor dir would offer "a.ts", which the
+			// resolver joins to /anchor/dir/a.ts - a different file.
+			expect(anchoredProvider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "a.ts", isActive: true, path: "../../new/dir/a.ts" }],
+			})
+			// The stored anchor was consulted, not just the live recompute.
+			expect(anchoredProvider.getCurrentTask).toHaveBeenCalled()
+		} finally {
+			tabGroupsMock.all = previousTabs
+		}
+	})
+
+	// Review round 4: a task activation (start or history resume) must
+	// republish the offered tab values. Values published before a task
+	// existed were cut against the live anchor; a resumed task stores the
+	// workspacePath from its history item, which can differ. The webview
+	// keeps the last values until the next workspaceUpdated message, so
+	// the provider calls publishOpenedTabs() when a task becomes current.
+	it("republishes tab values against the resumed task's stored anchor after activation", async () => {
+		const TabInputText = (vscode as unknown as { TabInputText: new () => object }).TabInputText
+		const makeTab = (fsPath: string, isActive: boolean) => ({
+			label: fsPath.split("/").pop() ?? "",
+			isActive,
+			input: Object.assign(new TabInputText(), { uri: { fsPath } }),
+		})
+
+		// Rootless session, no task yet: a tab event publishes values cut
+		// against the live anchor (/live/dir).
+		;(getWorkspacePath as Mock).mockReturnValue("")
+		;(getTaskCwdPath as Mock).mockReturnValue("/live/dir")
+		let currentTask: { cwd: string } | undefined = undefined
+		const resumingProvider = {
+			postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
+			getCurrentTask: vitest.fn(() => currentTask),
+		} as unknown as ClineProvider & { postMessageToWebview: Mock; getCurrentTask: Mock }
+		workspaceTracker = new WorkspaceTracker(resumingProvider)
+
+		const tabGroupsMock = vscode.window.tabGroups as unknown as { all: unknown }
+		const previousTabs = tabGroupsMock.all
+		tabGroupsMock.all = [{ tabs: [makeTab("/live/dir/a.ts", true)] }]
+
+		try {
+			// Pre-task publish: cut against the live anchor.
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+			expect(resumingProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "a.ts", isActive: true, path: "a.ts" }],
+			})
+
+			// The task resumes from history with a stored anchor /anchor/dir.
+			// No tab or file event fires; the provider reports the activation.
+			currentTask = { cwd: "/anchor/dir" }
+			workspaceTracker.publishOpenedTabs()
+			vitest.runAllTimers()
+
+			// The republish cuts against the STORED anchor, not the live one:
+			// path.relative("/anchor/dir", "/live/dir/a.ts"). Offered as
+			// @/../../live/dir/a.ts the mention resolves back to the open file
+			// under the anchor the resolver joins it to.
+			expect(resumingProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "a.ts", isActive: true, path: "../../live/dir/a.ts" }],
+			})
+			expect(resumingProvider.getCurrentTask).toHaveBeenCalled()
+		} finally {
+			tabGroupsMock.all = previousTabs
+		}
 	})
 })

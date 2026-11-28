@@ -90,8 +90,10 @@ export function getReadablePath(cwd: string, relPath?: string): string {
 
 	// path.resolve is flexible in that it will resolve relative paths like '../../' to the cwd and even ignore the cwd if the relPath is actually an absolute path
 	const absolutePath = path.resolve(cwd, relPath)
-	if (arePathsEqual(cwd, path.join(os.homedir(), "Desktop"))) {
-		// User opened vscode without a workspace, so cwd is the Desktop. Show the full absolute path to keep the user aware of where files are being created
+	if (arePathsEqual(cwd, path.join(os.homedir(), "Desktop")) || arePathsEqual(cwd, os.homedir())) {
+		// The task runs from a broad personal directory (a no-workspace
+		// session, issue #1271). Show the full absolute path to keep the user
+		// aware of where files are being created
 		return absolutePath.toPosix()
 	}
 	if (arePathsEqual(path.normalize(absolutePath), path.normalize(cwd))) {
@@ -165,6 +167,28 @@ export const getWorkspacePath = (defaultCwdPath = "") => {
 		return workspaceFolder?.uri.fsPath || firstFolderPath
 	}
 	return firstFolderPath
+}
+
+/**
+ * Working directory a task runs from (issue #1271).
+ *
+ * With a workspace open this is the resolved workspace path, exactly as
+ * before. Without one there is no root, so the task anchors to the
+ * directory of the file in the active editor — the user's actual working
+ * context — and to the home directory when no editor is open. The anchor is
+ * never a constructed `<home>/Desktop` path: on systems whose home folder is
+ * named "desktop" (lowercase) that directory does not exist.
+ */
+export const getTaskCwdPath = (): string => {
+	const workspacePath = getWorkspacePath()
+	if (workspacePath) {
+		return workspacePath
+	}
+	const activeFileUri = vscode.window.activeTextEditor?.document.uri
+	if (activeFileUri && activeFileUri.scheme === "file") {
+		return path.dirname(activeFileUri.fsPath)
+	}
+	return os.homedir()
 }
 
 export const getWorkspacePathForContext = (contextPath?: string): string => {

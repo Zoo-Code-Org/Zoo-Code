@@ -704,6 +704,11 @@ export class ClineProvider
 		this.taskRegistry.push(task)
 		task.emit(RooCodeEventName.TaskFocused)
 
+		// A task just became current. Republish the offered tab values so
+		// they are cut against this task's stored anchor, not a pre-task
+		// live anchor left over in the webview (issue #1271).
+		this._workspaceTracker?.publishOpenedTabs()
+
 		// Perform special setup provider specific tasks.
 		await this.performPreparationTasks(task)
 
@@ -1694,6 +1699,10 @@ export class ClineProvider
 			}
 
 			task.emit(RooCodeEventName.TaskFocused)
+
+			// History resume made this task current through replace-in-place.
+			// Republish the offered tab values against its stored anchor.
+			this._workspaceTracker?.publishOpenedTabs()
 
 			// Perform preparation tasks and set up event listeners
 			await this.performPreparationTasks(task)

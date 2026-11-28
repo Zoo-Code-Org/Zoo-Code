@@ -611,3 +611,26 @@ describe("getRulesSection shell-aware command chaining", () => {
 		expect(result).not.toContain("Note: Using")
 	})
 })
+
+// Issue #1271: without a workspace open the prompt must not steer the model
+// into the Desktop directory. The guidance keeps its value with generic
+// directory wording instead.
+describe("issue #1271: prompt text does not steer into the Desktop", () => {
+	const settings = { todoListEnabled: true, useAgentRules: true, newTaskRequireTodos: false }
+
+	it("keeps the ask_followup guidance but drops the Desktop example", () => {
+		const result = getRulesSection("/test/path", settings, policyFor(["read", "command"]))
+
+		expect(result).toContain("may be in an outside directory")
+		expect(result).toContain("list the files in that directory")
+		expect(result).not.toContain("like the Desktop")
+		expect(result).not.toContain("list the files in the Desktop")
+	})
+
+	it("does not name Desktop in the capabilities listing guidance", () => {
+		const result = getCapabilitiesSection(policyFor(["read"]))
+
+		expect(result).toContain("list_files")
+		expect(result).not.toContain("Desktop")
+	})
+})

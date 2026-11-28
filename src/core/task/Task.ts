@@ -1,6 +1,5 @@
 import * as path from "path"
 import * as vscode from "vscode"
-import os from "os"
 import crypto from "crypto"
 import { v7 as uuidv7 } from "uuid"
 import EventEmitter from "events"
@@ -91,7 +90,7 @@ import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor
 
 // utils
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
-import { getWorkspacePath } from "../../utils/path"
+import { getTaskCwdPath } from "../../utils/path"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 import { getTaskDirectoryPath } from "../../utils/storage"
 
@@ -779,9 +778,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this._isHistoryTask = !!historyItem && !task && !images
 
 		// Normal use-case is usually retry similar history task with new workspace.
-		this.workspacePath = parentTask
-			? parentTask.workspacePath
-			: (workspacePath ?? getWorkspacePath(path.join(os.homedir(), "Desktop")))
+		this.workspacePath = parentTask ? parentTask.workspacePath : (workspacePath ?? getTaskCwdPath())
 
 		this.instanceId = crypto.randomUUID().slice(0, 8)
 		this.taskNumber = -1

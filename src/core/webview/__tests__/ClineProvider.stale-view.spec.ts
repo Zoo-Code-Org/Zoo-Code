@@ -98,6 +98,7 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 		default: vi.fn().mockImplementation(function () {
 			return {
 				initializeFilePaths: vi.fn(),
+				publishOpenedTabs: vi.fn(),
 				dispose: vi.fn(),
 			}
 		}),
