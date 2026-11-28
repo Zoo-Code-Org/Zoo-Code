@@ -1,12 +1,23 @@
-import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
-import { DecorationController } from "../DecorationController"
-import type { Task } from "../../../core/task/Task"
-import type { Mock } from "vitest"
+import {
+	DocumentSaveFailedError,
+	DiffViewProvider,
+	DIFF_VIEW_URI_SCHEME,
+	DIFF_VIEW_LABEL_CHANGES,
+} from "../DiffViewProvider"
 import * as vscode from "vscode"
 import delay from "delay"
 import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
-
-import { makePosition, makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+import {
+	makeDisposable,
+	makePosition,
+	makeRange,
+	makeTextDocument,
+	makeTextEditor,
+	makeUri,
+} from "../../../test-utils/vscode"
+import { DecorationController } from "../DecorationController"
+import type { Task } from "../../../core/task/Task"
+import type { Mock } from "vitest"
 
 // Mock delay
 vi.mock("delay", () => ({
@@ -18,6 +29,12 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
+	// revertChanges() rolls a new-file edit back by deleting the placeholder and the
+	// directories the edit created. stat lets the editorless rollback check the placeholder
+	// is still empty before unlinking it (default: an empty placeholder).
+	stat: vi.fn().mockResolvedValue({ size: 0 }),
+	unlink: vi.fn().mockResolvedValue(undefined),
+	rmdir: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock utils
@@ -54,7 +71,7 @@ vi.mock("vscode", () => ({
 		onDidChangeTextEditorVisibleRanges: vi.fn(() => ({ dispose: vi.fn() })),
 		tabGroups: {
 			all: [],
-			close: vi.fn(),
+			close: vi.fn().mockResolvedValue(true),
 			activeTabGroup: { activeTab: undefined },
 		},
 		visibleTextEditors: [],
@@ -151,7 +168,7 @@ describe("DiffViewProvider", () => {
 	const makeDiffTabInput = (originalScheme: string, modifiedFsPath: string): vscode.TabInputTextDiff =>
 		Object.assign(new vscode.TabInputTextDiff(makeUri(modifiedFsPath), makeUri(modifiedFsPath)), {
 			original: { scheme: originalScheme },
-			modified: { fsPath: modifiedFsPath },
+			modified: makeUri(modifiedFsPath),
 		})
 
 	const makeTab = (input: vscode.Tab["input"], label: string, overrides: Partial<vscode.Tab> = {}): vscode.Tab => ({
@@ -374,6 +391,26 @@ describe("DiffViewProvider", () => {
 
 			expect(diffViewProvider["documentWasPinned"]).toBe(true)
 			expect(diffViewProvider["documentWasOpen"]).toBe(true)
+		})
+		it("folds directories the caller created into createdDirs so a rollback can remove them", async () => {
+			// WriteToFileTool.execute() creates the parent directories before the diff view
+			// exists, so the provider's own mkdir records nothing. Without the adoption
+			// createdDirs stayed empty and a rolled-back new-file write left them on disk.
+			const mockDocument = makeTextDocument({ uri: makeUri(`${mockCwd}/adopt.md`) })
+			const mockEditor = makeTextEditor({ document: mockDocument })
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockDocument), 0)
+				return makeDisposable()
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			diffViewProvider.adoptCreatedDirs([`${mockCwd}/new-parent`])
+			diffViewProvider.editType = "create"
+
+			await diffViewProvider.open("adopt.md")
+
+			expect(diffViewProvider["createdDirs"]).toEqual([`${mockCwd}/new-parent`])
 		})
 	})
 
@@ -930,6 +967,153 @@ describe("DiffViewProvider", () => {
 			expect(mockDelay).toHaveBeenCalledWith(5000)
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 		})
+
+		it("signals the commit point once the document write has landed", async () => {
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			const onCommit = vi.fn()
+
+			await diffViewProvider.saveChanges(false, 0, onCommit)
+
+			// The shared document is clean, so nothing is written: the file already matches the
+			// buffer, which is just as irreversible. The caller stops rolling back here.
+			expect(onCommit).toHaveBeenCalledTimes(1)
+			// The stand-down flag revertChanges() relies on must be set by saveChanges(), not by
+			// the caller: remove this assignment in the provider and an abort-driven teardown
+			// would roll back an approved write.
+			expect((diffViewProvider as unknown as { writeCommitted: boolean })["writeCommitted"]).toBe(true)
+		})
+
+		it("does not signal the commit point when the document save rejects", async () => {
+			const save = vi.fn().mockRejectedValue(new Error("save failed"))
+			// Structural double carrying only the members saveChanges() reaches before the commit
+			// point; the full TextEditor shape needs a live editor host - hence the assertion.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			const onCommit = vi.fn()
+
+			await expect(diffViewProvider.saveChanges(false, 0, onCommit)).rejects.toThrow("save failed")
+
+			// A rejected save leaves the file absent or holding the previous content: the caller has
+			// to keep the rollback available, so signalling here would lose the write's debris.
+			expect(onCommit).not.toHaveBeenCalled()
+			expect((diffViewProvider as unknown as { writeCommitted: boolean })["writeCommitted"]).toBe(false)
+		})
+
+		it("throws a typed write failure before any success bookkeeping when the save reports false", async () => {
+			// The double resolves an explicit false, not undefined: a bare await would let a
+			// double resolving undefined pass by accident, so the reported-failure contract is
+			// pinned with a real false.
+			const save = vi.fn().mockResolvedValue(false)
+			// Structural double carrying only the members saveChanges() reaches at the save; the
+			// full TextEditor shape needs a live editor host - hence the assertion.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+
+			await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow(DocumentSaveFailedError)
+
+			expect(save).toHaveBeenCalledTimes(1)
+			// Success bookkeeping must not run: the caller is told the write failed, so the diff
+			// views stay open and no result is stored for formatFileWriteResponse().
+			expect(closeAllDiffViews).not.toHaveBeenCalled()
+			expect(diffViewProvider.newProblemsMessage).toBeUndefined()
+			expect(diffViewProvider.userEdits).toBeUndefined()
+		})
+
+		it("does not signal the commit point when the save reports false", async () => {
+			const save = vi.fn().mockResolvedValue(false)
+			// Structural double, as in the rejected-save test above.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			const onCommit = vi.fn()
+
+			await expect(diffViewProvider.saveChanges(false, 0, onCommit)).rejects.toThrow(DocumentSaveFailedError)
+
+			// Ordering for this branch: the commit point stands in for the placeholder release the
+			// sibling branches gate on. A callback that ran here would set the caller's
+			// writeCommitted flag and stand the rollback down on a write that never landed.
+			expect(onCommit).not.toHaveBeenCalled()
+		})
+
+		it("behaves exactly as before when the save reports true", async () => {
+			const save = vi.fn().mockResolvedValue(true)
+			// Structural double, as in the rejected-save test above.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			let commitSeenByCleanup: boolean | undefined
+			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
+				commitSeenByCleanup = diffViewProvider["writeCommitted"]
+			})
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			const onCommit = vi.fn()
+
+			const result = await diffViewProvider.saveChanges(false, 0, onCommit)
+
+			expect(save).toHaveBeenCalledTimes(1)
+			expect(onCommit).toHaveBeenCalledTimes(1)
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			// Ordering, not just presence: a regression that set the flag and fired the callback after
+			// cleanup would still satisfy the three counts above and would leave an approved write
+			// eligible for rollback in the window between the save and the tab close.
+			expect(commitSeenByCleanup).toBe(true)
+			expect(onCommit.mock.invocationCallOrder[0]).toBeLessThan(closeAllDiffViews.mock.invocationCallOrder[0])
+			expect(result.finalContent).toBe("new content")
+		})
+	})
+
+	describe("pushToolWriteResult result scoping", () => {
+		beforeEach(() => {
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider["preDiagnostics"] = []
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+		})
+
+		it("lines 520 and 527: reports the patch of the save whose call it reports, not of the save that parked last", async () => {
+			// Two saves on one provider, which is the interleaving the thread describes: the first
+			// edit's report is serialized only after a second edit has parked its own pair on the
+			// provider. A report that reads the parked pair hands the second edit's patch to the first
+			// edit's caller, under the first edit's path.
+			const say = vi.fn().mockResolvedValue(undefined)
+			// pushToolWriteResult only reaches task.say(), so the double carries only that member.
+			const reportTask = { say } as unknown as Task
+
+			diffViewProvider["newContent"] = "aaa"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({ getText: vi.fn().mockReturnValue("aaa\nuser typed one"), isDirty: false }),
+			})
+			const saveA = await diffViewProvider.saveChanges(false, 0)
+
+			diffViewProvider["newContent"] = "bbb"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({ getText: vi.fn().mockReturnValue("bbb\nuser typed two"), isDirty: false }),
+			})
+			const saveB = await diffViewProvider.saveChanges(false, 0)
+
+			// Both saves typed a patch, and the parked pair now holds save B.
+			expect(saveA.userEdits).toBeTruthy()
+			expect(saveB.userEdits).toBeTruthy()
+			expect(saveA.userEdits).not.toBe(saveB.userEdits)
+			expect(diffViewProvider.userEdits).toBe(saveB.userEdits)
+
+			const reportA: { path: string; user_edits?: string } = JSON.parse(
+				await diffViewProvider.pushToolWriteResult(reportTask, mockCwd, false, saveA),
+			)
+
+			expect(reportA.user_edits).toBe(saveA.userEdits)
+			expect(reportA.path).toBe("test.ts")
+			const card: { tool: string; path: string; diff: string } = JSON.parse(String(say.mock.calls[0]?.[1]))
+
+			expect(card.tool).toBe("editedExistingFile")
+			expect(card.diff).toBe(saveA.userEdits)
+			expect(card.diff).not.toBe(saveB.userEdits)
+		})
 	})
 
 	describe("preEditScrollLine capture and restore", () => {
@@ -1060,14 +1244,20 @@ describe("DiffViewProvider", () => {
 
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockSavedEditor)
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			// Self-contained: revertChanges() only acts while an edit is in progress.
+			diffViewProvider["relPath"] = "test.txt"
+			diffViewProvider["isEditing"] = true
 			diffViewProvider["documentWasOpen"] = true
 			diffViewProvider["preEditScrollLine"] = 15
-			diffViewProvider.editType = "modify"
-			diffViewProvider.originalContent = "original"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
 			diffViewProvider["activeDiffEditor"] = makeTextEditor({
 				document: makeTextDocument({
 					uri: makeUri(`${mockCwd}/test.txt`),
 					getText: vi.fn().mockReturnValue("modified"),
+					isDirty: false,
+					// The revert branch reads the save result; report a save that landed.
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue(makePosition()),
 				}),
 			})
@@ -1086,11 +1276,16 @@ describe("DiffViewProvider", () => {
 	describe("userTouchedDocument close/keep behavior", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
 
-		const buildActiveDiffEditor = () =>
+		// Both the approved save (saveChanges) and the existing-file rollback (revertChanges) read
+		// the save result, so the shared double reports a save that landed; an undefined-
+		// resolving double would read as a refused save.
+		const buildActiveDiffEditor = (docOverrides: { isDirty?: boolean } = {}) =>
 			makeTextEditor({
 				document: makeTextDocument({
 					uri: makeUri(mockTargetPath),
 					getText: vi.fn().mockReturnValue("content"),
+					isDirty: docOverrides.isDirty ?? false,
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue(makePosition()),
 				}),
 			})
@@ -1136,11 +1331,13 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeFileTab"] = closeFileTab
 			diffViewProvider["relPath"] = "mock-target-file.ts"
+			// revertChanges() only acts while an edit is in progress.
+			diffViewProvider["isEditing"] = true
 			diffViewProvider["documentWasOpen"] = false
 			diffViewProvider["userTouchedDocument"] = false
 			diffViewProvider["preEditScrollLine"] = undefined
-			diffViewProvider.editType = "modify"
-			diffViewProvider.originalContent = "original"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
 			diffViewProvider["activeDiffEditor"] = buildActiveDiffEditor()
 
 			await diffViewProvider.revertChanges()
@@ -1152,15 +1349,17 @@ describe("DiffViewProvider", () => {
 		it("revertChanges() keeps the file open when the user touched it", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor({ revealRange: vi.fn() }))
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeFileTab"] = closeFileTab
 			diffViewProvider["relPath"] = "mock-target-file.ts"
+			// revertChanges() only acts while an edit is in progress.
+			diffViewProvider["isEditing"] = true
 			diffViewProvider["documentWasOpen"] = false
 			diffViewProvider["userTouchedDocument"] = true
 			diffViewProvider["preEditScrollLine"] = undefined
-			diffViewProvider.editType = "modify"
-			diffViewProvider.originalContent = "original"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
 			diffViewProvider["activeDiffEditor"] = buildActiveDiffEditor()
 
 			await diffViewProvider.revertChanges()
@@ -1212,11 +1411,16 @@ describe("DiffViewProvider", () => {
 	describe("userTouchedDiffEditor keep/close behavior", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
 
-		const buildActiveDiffEditor = () =>
+		// Both the approved save (saveChanges) and the existing-file rollback (revertChanges) read
+		// the save result, so the shared double reports a save that landed; an undefined-
+		// resolving double would read as a refused save.
+		const buildActiveDiffEditor = (docOverrides: { isDirty?: boolean } = {}) =>
 			makeTextEditor({
 				document: makeTextDocument({
 					uri: makeUri(mockTargetPath),
 					getText: vi.fn().mockReturnValue("content"),
+					isDirty: docOverrides.isDirty ?? false,
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue(makePosition()),
 				}),
 			})
@@ -1409,6 +1613,8 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeFileTab"] = closeFileTab
 			diffViewProvider["relPath"] = "mock-target-file.ts"
+			// revertChanges() only acts while an edit is in progress.
+			diffViewProvider["isEditing"] = true
 			diffViewProvider["documentWasOpen"] = false
 			diffViewProvider["userTouchedDocument"] = false
 			// The user clicked inside the diff pane -- but this is a deny, so it must be ignored.
@@ -1594,11 +1800,16 @@ describe("DiffViewProvider", () => {
 	describe("auto-close settings decision table", () => {
 		const mockTargetPath = `${mockCwd}/auto-close-test.ts`
 
-		const buildActiveDiffEditor = () =>
+		// Both the approved save (saveChanges) and the existing-file rollback (revertChanges) read
+		// the save result, so the shared double reports a save that landed; an undefined-
+		// resolving double would read as a refused save.
+		const buildActiveDiffEditor = (docOverrides: { isDirty?: boolean } = {}) =>
 			makeTextEditor({
 				document: makeTextDocument({
 					uri: makeUri(mockTargetPath),
 					getText: vi.fn().mockReturnValue("content"),
+					isDirty: docOverrides.isDirty ?? false,
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue(makePosition()),
 				}),
 			})
