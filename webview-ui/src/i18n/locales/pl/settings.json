@@ -1111,6 +1111,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "Nie udało się załadować niektórych skills",
+			"description": "Popraw frontmatter YAML w wymienionych plikach SKILL.md, a następnie otwórz ponownie lub odśwież tę stronę."
+		},
 		"description": "Zarządzaj umiejętnościami, które dostarczają kontekstowe instrukcje dla agenta. Umiejętności są automatycznie stosowane, gdy są istotne dla Twoich zadań. <DocsLink>Dowiedz się więcej</DocsLink>",
 		"workspaceSkills": "Umiejętności obszaru roboczego",
 		"globalSkills": "Umiejętności Globalne",

@@ -1105,6 +1105,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "कुछ skills लोड नहीं हो सके",
+			"description": "सूचीबद्ध SKILL.md फ़ाइलों में YAML frontmatter को ठीक करें, फिर इस पृष्ठ को फिर से खोलें या रिफ़्रेश करें।"
+		},
 		"description": "Skills का प्रबंधन करें जो एजेंट को संदर्भात्मक निर्देश प्रदान करते हैं। जब आपके कार्यों के लिए प्रासंगिक हों तो Skills स्वचालित रूप से लागू होते हैं। <DocsLink>और जानें</DocsLink>",
 		"workspaceSkills": "वर्कस्पेस Skills",
 		"globalSkills": "ग्लोबल Skills",

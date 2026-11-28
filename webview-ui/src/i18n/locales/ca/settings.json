@@ -1108,6 +1108,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "No s'han pogut carregar algunes skills",
+			"description": "Corrigeu el frontmatter YAML dels fitxers SKILL.md esmentats i, a continuació, torneu a obrir o actualitzar aquesta pàgina."
+		},
 		"description": "Gestiona les skills que proporcionen instruccions contextuals a l'agent. Les skills s'apliquen automàticament quan són rellevants per a les teves tasques. <DocsLink>Més informació</DocsLink>",
 		"workspaceSkills": "Skills de l'espai de treball",
 		"globalSkills": "Skills globals",

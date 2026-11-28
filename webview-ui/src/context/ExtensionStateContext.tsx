@@ -16,6 +16,7 @@ import {
 	type ExtensionState,
 	type MarketplaceInstalledMetadata,
 	type SkillMetadata,
+	type SkillDiagnostic,
 	type RuleMetadata,
 	type Command,
 	type McpServer,
@@ -163,6 +164,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	showWorktreesInHomeScreen: boolean
 	setShowWorktreesInHomeScreen: (value: boolean) => void
 	skills?: SkillMetadata[]
+	skillDiagnostics: SkillDiagnostic[]
 	rules: RuleMetadata[]
 }
 
@@ -324,6 +326,10 @@ export const createInitialExtensionState = (): ExtensionState => ({
 
 type ExtensionStateProviderInitialState = Partial<ExtensionState> & {
 	routerModels?: RouterModels
+	// The skill state lives outside ExtensionState; the fixture and tests seed it here so the
+	// initial-state contract covers every value the provider exposes.
+	skills?: SkillMetadata[]
+	skillDiagnostics?: SkillDiagnostic[]
 }
 
 export const ExtensionStateContextProvider: React.FC<{
@@ -382,7 +388,10 @@ export const ExtensionStateContextProvider: React.FC<{
 				global: {},
 			},
 	)
-	const [skills, setSkills] = useState<SkillMetadata[]>([])
+	const [skills, setSkills] = useState<SkillMetadata[]>(() => initialState?.skills ?? [])
+	const [skillDiagnostics, setSkillDiagnostics] = useState<SkillDiagnostic[]>(
+		() => initialState?.skillDiagnostics ?? [],
+	)
 	const [rules, setRules] = useState<RuleMetadata[]>([])
 	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(
 		() => initialState?.includeTaskHistoryInEnhance ?? true,
@@ -541,9 +550,8 @@ export const ExtensionStateContextProvider: React.FC<{
 					break
 				}
 				case "skills": {
-					if (message.skills) {
-						setSkills(message.skills)
-					}
+					setSkills(message.skills ?? [])
+					setSkillDiagnostics(message.skillDiagnostics ?? [])
 					break
 				}
 				case "rules": {
@@ -777,6 +785,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		includeCurrentCost,
 		setIncludeCurrentCost,
 		skills,
+		skillDiagnostics,
 		rules,
 		showWorktreesInHomeScreen: state.showWorktreesInHomeScreen ?? true,
 		setShowWorktreesInHomeScreen: (value) =>

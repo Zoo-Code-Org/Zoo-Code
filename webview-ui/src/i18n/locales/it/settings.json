@@ -1108,6 +1108,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "Impossibile caricare alcune skills",
+			"description": "Correggi il frontmatter YAML nei file SKILL.md elencati, quindi riapri o aggiorna questa pagina."
+		},
 		"description": "Gestisci le skills che forniscono istruzioni contestuali all'agente. Le skills vengono applicate automaticamente quando rilevanti per le tue attività. <DocsLink>Scopri di più</DocsLink>",
 		"workspaceSkills": "Skills dell'area di lavoro",
 		"globalSkills": "Skills Globali",

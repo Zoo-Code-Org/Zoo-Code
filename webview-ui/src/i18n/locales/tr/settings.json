@@ -1105,6 +1105,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "Bazı skill'ler yüklenemedi",
+			"description": "Listelenen SKILL.md dosyalarındaki YAML frontmatter'ını düzeltin, ardından bu sayfayı yeniden açın veya yenileyin."
+		},
 		"description": "Ajana bağlamsal talimatlar sağlayan becerileri yönetin. Beceriler, görevlerinizle ilgili olduklarında otomatik olarak uygulanır. <DocsLink>Daha fazla bilgi</DocsLink>",
 		"workspaceSkills": "Çalışma Alanı Becerileri",
 		"globalSkills": "Genel Beceriler",

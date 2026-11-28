@@ -1105,6 +1105,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "Sommige skills konden niet worden geladen",
+			"description": "Corrigeer de YAML-frontmatter in de opgesomde SKILL.md-bestanden en open daarna deze pagina opnieuw of vernieuw deze."
+		},
 		"description": "Beheer skills die contextuele instructies aan de agent verstrekken. Skills worden automatisch toegepast wanneer ze relevant zijn voor uw taken. <DocsLink>Meer informatie</DocsLink>",
 		"workspaceSkills": "Werkruimteskills",
 		"globalSkills": "Globale skills",

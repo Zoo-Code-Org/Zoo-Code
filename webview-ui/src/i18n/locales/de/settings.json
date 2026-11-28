@@ -1105,6 +1105,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "Einige Skills konnten nicht geladen werden",
+			"description": "Korrigiere das YAML-Frontmatter in den aufgeführten SKILL.md-Dateien und öffne diese Seite anschließend erneut oder aktualisiere sie."
+		},
 		"description": "Verwalten Sie Skills, die dem Agenten kontextbezogene Anweisungen bereitstellen. Skills werden automatisch angewendet, wenn sie für Ihre Aufgaben relevant sind. <DocsLink>Mehr erfahren</DocsLink>",
 		"workspaceSkills": "Workspace-Skills",
 		"globalSkills": "Globale Skills",

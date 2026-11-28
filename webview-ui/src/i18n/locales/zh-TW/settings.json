@@ -1102,6 +1102,10 @@
 		"tooltip": "如需更快處理 API 請求，請試試優先處理服務層級。如需以較高延遲換取較低價格，請試試彈性處理層級。"
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "部分技能無法載入",
+			"description": "請修正所列 SKILL.md 檔案中的 YAML frontmatter，然後重新開啟或重新整理此頁面。"
+		},
 		"description": "管理為代理提供上下文指令的技能。技能會在與您的任務相關時自動套用。<DocsLink>深入了解</DocsLink>",
 		"workspaceSkills": "工作區技能",
 		"globalSkills": "全域技能",

@@ -1102,6 +1102,10 @@
 		}
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "一部のスキルを読み込めませんでした",
+			"description": "該当する SKILL.md ファイルの YAML フロントマターを修正してから、このページを再表示してください。"
+		},
 		"description": "エージェントにコンテキスト指示を提供するスキルを管理します。スキルはタスクに関連する場合に自動的に適用されます。<DocsLink>詳細を見る</DocsLink>",
 		"workspaceSkills": "ワークスペーススキル",
 		"globalSkills": "グローバルスキル",

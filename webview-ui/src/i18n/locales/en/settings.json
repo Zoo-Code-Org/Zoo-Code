@@ -167,6 +167,10 @@
 		"footer": "Rules load mode-specific guidance before general guidance. Global rules load before workspace rules."
 	},
 	"skills": {
+		"diagnostics": {
+			"title": "Some skills could not be loaded",
+			"description": "Fix the YAML frontmatter in the listed SKILL.md files, then reopen or refresh this page."
+		},
 		"description": "Skills encapsulate contextual instructions and workflows, which the agent can load on-demand. They can include general instructions, specific workflows and even scripts to be run as needed. <DocsLink>Learn more</DocsLink>",
 		"workspaceSkills": "Workspace Skills",
 		"globalSkills": "Global Skills",
