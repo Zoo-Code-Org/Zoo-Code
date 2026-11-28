@@ -56,6 +56,14 @@ export interface ProviderInfoResultMap {
  * ExtensionMessage
  * Extension -> Webview | CLI
  */
+export interface ClineMessagesDelta {
+	taskId: string
+	baseSeq: number
+	baseLength: number
+	length: number
+	updates: { index: number; message: ClineMessage }[]
+}
+
 export interface ExtensionMessage {
 	type:
 		| "action"
@@ -170,6 +178,8 @@ export interface ExtensionMessage {
 	 * The webview is responsible for merging.
 	 */
 	state?: Partial<ExtensionState>
+	clineMessagesDelta?: ClineMessagesDelta
+	clineMessageTaskId?: string
 	images?: string[]
 	filePaths?: string[]
 	openedTabs?: Array<{
@@ -576,6 +586,7 @@ export interface WebviewMessage {
 		| "customInstructions"
 		| "webviewDidLaunch"
 		| "webviewHeartbeat"
+		| "requestClineMessagesSync"
 		| "webviewDidFocus"
 		| "newTask"
 		| "askResponse"
@@ -760,6 +771,7 @@ export interface WebviewMessage {
 		| "diagnosticsResponse"
 	text?: string
 	taskId?: string
+	supportsClineMessagesDelta?: boolean
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
 	disabled?: boolean

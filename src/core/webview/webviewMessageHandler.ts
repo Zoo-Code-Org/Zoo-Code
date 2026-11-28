@@ -596,12 +596,16 @@ export const webviewMessageHandler = async (
 	}
 
 	switch (message.type) {
+		case "requestClineMessagesSync":
+			await provider.postStateToWebview()
+			break
 		case "themeFixtureProbeResponse":
 			if (process.env.ROO_CODE_THEME_FIXTURE_PROBE === "1" && message.requestId && message.themeFixture) {
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
 			}
 			break
 		case "webviewDidLaunch":
+			provider.supportsClineMessagesDelta ||= message.supportsClineMessagesDelta === true
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)

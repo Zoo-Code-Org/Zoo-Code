@@ -3,6 +3,7 @@ import * as path from "path"
 import fs from "fs/promises"
 import EventEmitter from "events"
 import crypto from "crypto"
+import { ClineMessageDelivery } from "./ClineMessageDelivery"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
@@ -418,6 +419,8 @@ export class ClineProvider
 	 * Used by the frontend to reject stale state that arrives out-of-order.
 	 */
 	private clineMessagesSeq = 0
+	public supportsClineMessagesDelta = false
+	private readonly clineMessageDelivery = new ClineMessageDelivery()
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
@@ -3055,8 +3058,10 @@ export class ClineProvider
 	async postStateToWebview() {
 		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview()
+		if (state.currentTaskId !== this.getCurrentTask()?.taskId) return
 		state.clineMessagesSeq = clineMessagesSeq
-		await this.postMessageToWebview({ type: "state", state })
+		const message = this.clineMessageDelivery.prepare(state, true)
+		if (message) await this.postMessageToWebview(message)
 	}
 
 	/**
@@ -3070,9 +3075,12 @@ export class ClineProvider
 	async postStateToWebviewWithoutTaskHistory(): Promise<void> {
 		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		if (state.currentTaskId !== this.getCurrentTask()?.taskId) return
 		state.clineMessagesSeq = clineMessagesSeq
-		const { taskHistory: _omit, ...rest } = state
-		await this.postMessageToWebview({ type: "state", state: rest })
+		const message = this.clineMessageDelivery.prepare(state, !this.supportsClineMessagesDelta)
+		if (!message) return
+		const { taskHistory: _omit, ...rest } = message.state ?? {}
+		await this.postMessageToWebview({ ...message, state: rest })
 	}
 
 	/**
