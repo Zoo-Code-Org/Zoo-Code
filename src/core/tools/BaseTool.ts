@@ -99,6 +99,31 @@ export abstract class BaseTool<TName extends ToolName> {
 	}
 
 	/**
+	 * Teardown boundary for a completed tool call that never reaches execute(): the
+	 * parse-failure catch in handle(), and presentAssistantMessage's missing-nativeArgs
+	 * guard, which emits its own tool_result and returns before handle() is reached.
+	 * No-op for tools without per-task state; the scope is a single task because tool
+	 * instances are singletons shared by concurrent tasks.
+	 *
+	 * Default: there is no per-task streaming state to release, so the generic parse
+	 * error is what the user sees. A tool that keeps per-task stream state may release
+	 * it, restore any diff document a stream opened, and report a more specific failure
+	 * through callbacks.handleError - returning true suppresses the incidental parse
+	 * error so the failure is reported exactly once. Per-task only: a global teardown
+	 * would clobber another task that is still streaming through this singleton.
+	 *
+	 * Public because that caller sits outside handle(). Its guard owns the single
+	 * tool_result a native tool call must produce, so it passes a handleError that folds
+	 * the reported failure into that result instead of pushing a second one.
+	 */
+	async releaseStreamStateOnParseFailure(
+		_task: Task,
+		_callbacks: Pick<ToolCallbacks, "handleError">,
+	): Promise<boolean> {
+		return false
+	}
+
+	/**
 	 * Main entry point for tool execution.
 	 *
 	 * Handles the complete flow:
@@ -157,7 +182,14 @@ export abstract class BaseTool<TName extends ToolName> {
 		} catch (error) {
 			console.error(`Error parsing parameters:`, error)
 			const errorMessage = `Failed to parse ${this.name} parameters: ${error instanceof Error ? error.message : String(error)}`
-			await callbacks.handleError(`parsing ${this.name} args`, new Error(errorMessage))
+			// execute() never runs on this path, so a tool that keeps per-task streaming
+			// state must still release THIS task's state and restore any diff document the
+			// stream opened. If a streaming delta already hit a fatal error, the tool reports
+			// that (the actionable failure) and the incidental parse error is suppressed.
+			const reportedStreamFailure = await this.releaseStreamStateOnParseFailure(task, callbacks)
+			if (!reportedStreamFailure) {
+				await callbacks.handleError(`parsing ${this.name} args`, new Error(errorMessage))
+			}
 			// Note: handleError already emits a tool_result via formatResponse.toolError in the caller.
 			// Do NOT call pushToolResult here to avoid duplicate tool_result payloads.
 			return
