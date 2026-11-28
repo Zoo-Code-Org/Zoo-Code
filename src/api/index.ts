@@ -141,6 +141,9 @@ export interface ModelCacheScope {
 }
 
 export interface ApiHandler {
+	/** Drain interrupted streams before history captures signatures that can arrive in later chunks. */
+	readonly requiresThoughtSignatureDrain?: boolean
+
 	createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],

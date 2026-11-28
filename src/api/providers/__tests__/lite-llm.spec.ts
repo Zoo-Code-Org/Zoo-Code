@@ -688,6 +688,146 @@ describe("LiteLLMHandler", () => {
 					expect(handler.getThoughtSignatureOrigin()).toBe(thoughtSignatureOrigin(endpoint, "gemini-3-pro"))
 				})
 
+				it.each([
+					{ sources: ["encoded", "explicit"], expected: "explicit-1" },
+					{ sources: ["explicit", "encoded"], expected: "explicit-0" },
+					{ sources: ["explicit", "explicit"], expected: "explicit-0" },
+					{ sources: ["encoded", "encoded"], expected: "encoded-0" },
+				])("keeps signature source priority across $sources chunks", async ({ sources, expected }) => {
+					useModel("gemini-3-pro")
+					const chunks = sources.map((source, index) => ({
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											...(index === 0
+												? { id: "call_1", function: { name: "read_file", arguments: "{}" } }
+												: {}),
+											...(source === "explicit"
+												? {
+														provider_specific_fields: {
+															thought_signature: `explicit-${index}`,
+														},
+													}
+												: { id: `call_1__thought__encoded-${index}` }),
+										},
+									],
+								},
+							},
+						],
+					}))
+					mockStream([...chunks, { choices: [{ delta: { tool_calls: [{ index: 0 }] } }] }])
+					await collectStream(handler.createMessage("system", [], metadata))
+					expect(handler.requiresThoughtSignatureDrain).toBe(true)
+					expect(handler.getThoughtSignature()).toBe(expected)
+				})
+
+				// RequestSignatureOwned: an older drain cannot change the current request's history signature.
+				it.each(
+					[undefined, "old"].flatMap((oldSignature) =>
+						[undefined, "new"].flatMap((newSignature) =>
+							[false, true].map((lateExplicit) => ({ oldSignature, newSignature, lateExplicit })),
+						),
+					),
+				)(
+					"keeps request signature ownership for $oldSignature/$newSignature (lateExplicit=$lateExplicit)",
+					async ({ oldSignature, newSignature, lateExplicit }) => {
+						useModel("gemini-3-pro")
+						const firstChunk = (signature: string | undefined) => ({
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{
+												index: 0,
+												id: "call_1",
+												function: { name: "read_file", arguments: "{}" },
+												...(signature
+													? { provider_specific_fields: { thought_signature: signature } }
+													: {}),
+											},
+										],
+									},
+								},
+							],
+						})
+						let chunks = [
+							firstChunk(oldSignature),
+							lateExplicit
+								? {
+										choices: [
+											{
+												delta: {
+													tool_calls: [
+														{
+															index: 0,
+															provider_specific_fields: { thought_signature: "late-old" },
+														},
+													],
+												},
+											},
+										],
+									}
+								: { choices: [{ delta: {} }] },
+						]
+						mockStream(chunks)
+						const older = handler.createMessage("system", [], metadata)
+						await older.next()
+						chunks = [firstChunk(newSignature)]
+						mockStream(chunks)
+						await collectStream(handler.createMessage("system", [], metadata))
+						await collectStream(older)
+						expect(handler.getThoughtSignature()).toBe(newSignature)
+						const saved = prepareApiConversationMessage({
+							message: {
+								role: "assistant",
+								content: [{ type: "tool_use", id: "call_1", name: "read_file", input: {} }],
+							},
+							api: handler,
+							apiConfiguration: {
+								apiProvider: providerIdentifiers.litellm,
+								litellmModelId: "gemini-3-pro",
+							},
+							apiConversationHistory: [],
+						})
+						expect(saved.content).toEqual(
+							newSignature
+								? expect.arrayContaining([
+										expect.objectContaining({
+											type: "thoughtSignature",
+											thoughtSignature: newSignature,
+										}),
+									])
+								: [expect.objectContaining({ type: "tool_use" })],
+						)
+					},
+				)
+
+				it("captures a signature sent only in the tool call ID", async () => {
+					useModel("gemini-3-pro")
+					mockStream([
+						{
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{
+												index: 0,
+												id: `call_1__thought__${TEST_THOUGHT_SIGNATURE}`,
+												function: { name: "read_file", arguments: "{}" },
+											},
+										],
+									},
+								},
+							],
+						},
+					])
+					await collectStream(handler.createMessage("system", [], metadata))
+					expect(handler.getThoughtSignature()).toBe(TEST_THOUGHT_SIGNATURE)
+				})
+
 				it("captures the signature from a streamed tool call and resets it per request", async () => {
 					useModel("gemini-3-pro")
 					mockStream(signedToolCallStream)

@@ -1,5 +1,39 @@
 # Zoo Code Changelog
 
+## [3.98.3]
+
+### Security and Reliability
+
+- Fix: Stop session history from sending duplicate tool results after an empty-response retry, so resumed tasks do not fail with duplicate `tool_result` errors (#2691 by @edelauna, PR #2701 by @app/zoomote)
+- Fix: Listen for webview messages before the view HTML loads, so the Zoo Code view does not stay blank when it is open at VS Code startup (#2710 by @DiamondGo, PR #2711 by @DiamondGo)
+- Fix: Stop code index telemetry storms with a failure circuit breaker and hash the telemetry machine ID (#830 by @edelauna, PR #2329 by @app/zoomote)
+- Fix: Keep project rules, mode rules, and AGENTS.md instructions after context condensation (#2676 by @simurg79, PR #2660 by @simurg79)
+- Fix: Exclude messages hidden by sliding-window truncation from context condensation, so condensation requests fit the configured context window (#1823 by @julian35152, PR #2647 by @gh311)
+- Fix: Extract nested shell substitutions for the command allowlist, so a payload hidden inside a parameter expansion or a nested substitution no longer rides the outer command's approval (#1947 by @DaubnerF, PR #2068 by @DaubnerF)
+- Fix: Decide `read_file` auto-approval on its actual file targets instead of the display path, so escaped characters in a display path cannot approve a different file (PR #2657 by @kanchinadd98)
+- Fix: Emit a consistent provider value in OpenRouter error telemetry (#1302 by @edelauna, PR #2645 by @gh311)
+- Fix: Honor caller cancellation and the configured request timeout in the Poe provider, so aborted requests stop cleanly (#2508 by @easonLiangWorldedtech, PR #1535 by @easonLiangWorldedtech)
+- Fix: Send max output tokens for OpenAI Compatible providers whenever the include-max-output-tokens checkbox shows ticked (#2230 by @scriptxyz, PR #2684 by @SoccerField24x7)
+
+### Models and Provider Controls
+
+- Add the advertised Claude Fable 5.2 context budget for VS Code LM models, so condensation and the context gauge use the correct window (PR #2759 by @simurg79)
+- Retire the Gemini CLI provider, correct OpenRouter model costs, and verify provider usage after the listing audit (PR #2673 by @app/zoomote)
+
+### Testing, CI, and Repository Automation
+
+- Speed up repeat pre-push type checks with incremental root checking and corrected Turbo cache inputs (#2685 by @edelauna, PR #2686 by @app/zoomote)
+- Make the tracked Roo configuration optional, with templates under `contrib/roo/`, so personal `.roo/` and `.roomodes` files do not create Git noise (#2693 by @edelauna, PR #2694 by @app/zoomote)
+- Add a bounded model checker for the task run-state kernel (#1792 by @edelauna, PR #2244 by @edelauna)
+
+### Dependencies
+
+- Update AI SDK core and providers (PR #2364 by @app/renovate)
+- Update react-virtuoso to v4.18.24 (PR #2394 by @app/renovate)
+- Update @tanstack/react-query to v5.108.2 (PR #2347 by @app/renovate)
+- Update hast-util-to-jsx-runtime to v2.3.7 (PR #2348 by @app/renovate)
+- Update @next/eslint-plugin-next to v15.5.29 (PR #2346 by @app/renovate)
+
 ## [3.98.2]
 
 ### Models and Provider Controls

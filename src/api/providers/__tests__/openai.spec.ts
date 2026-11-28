@@ -22,6 +22,12 @@ import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import axios from "axios"
+import {
+	signedAssistantMessage,
+	toolResultsMessage,
+	TEST_THOUGHT_SIGNATURE,
+} from "../../../test-utils/thought-signature"
+import { sanitizeToolUseId } from "../../../utils/tool-id"
 
 vitest.mock("../utils/timeout-config", () => ({
 	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
@@ -116,6 +122,200 @@ vitest.mock("axios", () => ({
 		get: vitest.fn(),
 	},
 }))
+
+describe("OpenAI Compatible proxy signatures", () => {
+	it.each([
+		{ sources: ["encoded", "explicit"], expected: "explicit-1" },
+		{ sources: ["explicit", "encoded"], expected: "explicit-0" },
+		{ sources: ["explicit", "explicit"], expected: "explicit-0" },
+		{ sources: ["encoded", "encoded"], expected: "encoded-0" },
+	])("keeps signature source priority across $sources chunks", async ({ sources, expected }) => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({ openAiApiKey: "test", openAiModelId: "gemini-3-flash" }),
+		)
+		const chunks = sources.map((source, index) => ({
+			choices: [
+				{
+					delta: {
+						tool_calls: [
+							{
+								index: 0,
+								...(index === 0
+									? { id: "call_1", function: { name: "read_file", arguments: "{}" } }
+									: {}),
+								...(source === "explicit"
+									? { provider_specific_fields: { thought_signature: `explicit-${index}` } }
+									: { id: `call_1__thought__encoded-${index}` }),
+							},
+						],
+					},
+				},
+			],
+		}))
+		mockCreate.mockResolvedValueOnce(
+			asyncStreamFrom([...chunks, { choices: [{ delta: { tool_calls: [{ index: 0 }] } }] }]),
+		)
+		await collectStream(handler.createMessage("system", []))
+		expect(handler.requiresThoughtSignatureDrain).toBe(true)
+		expect(handler.getThoughtSignature()).toBe(expected)
+	})
+
+	// RequestSignatureOwned: an older drain cannot change the current request's history signature.
+	it.each(
+		[undefined, "old"].flatMap((oldSignature) =>
+			[undefined, "new"].flatMap((newSignature) =>
+				[false, true].map((lateExplicit) => ({ oldSignature, newSignature, lateExplicit })),
+			),
+		),
+	)(
+		"keeps request signature ownership for $oldSignature/$newSignature (lateExplicit=$lateExplicit)",
+		async ({ oldSignature, newSignature, lateExplicit }) => {
+			const handler = new OpenAiHandler(
+				makeApiHandlerOptions({ openAiApiKey: "test", openAiModelId: "gemini-3-flash" }),
+			)
+			const firstChunk = (signature: string | undefined) => ({
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{
+									index: 0,
+									id: "call_1",
+									function: { name: "read_file", arguments: "{}" },
+									...(signature
+										? { provider_specific_fields: { thought_signature: signature } }
+										: {}),
+								},
+							],
+						},
+					},
+				],
+			})
+			let chunks = [
+				firstChunk(oldSignature),
+				lateExplicit
+					? {
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{ index: 0, provider_specific_fields: { thought_signature: "late-old" } },
+										],
+									},
+								},
+							],
+						}
+					: { choices: [{ delta: {} }] },
+			]
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom(chunks))
+			const older = handler.createMessage("system", [])
+			await older.next()
+			chunks = [firstChunk(newSignature)]
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom(chunks))
+			await collectStream(handler.createMessage("system", []))
+			await collectStream(older)
+			expect(handler.getThoughtSignature()).toBe(newSignature)
+			const saved = prepareApiConversationMessage({
+				message: {
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call_1", name: "read_file", input: {} }],
+				},
+				api: handler,
+				apiConfiguration: { apiProvider: providerIdentifiers.openai, openAiModelId: "gemini-3-flash" },
+				apiConversationHistory: [],
+			})
+			expect(saved.content).toEqual(
+				newSignature
+					? expect.arrayContaining([
+							expect.objectContaining({ type: "thoughtSignature", thoughtSignature: newSignature }),
+						])
+					: [expect.objectContaining({ type: "tool_use" })],
+			)
+		},
+	)
+
+	it.each([true, false])("returns an ID-only signature with streaming=%s", async (streaming) => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test",
+				openAiModelId: "gemini-3-flash",
+				openAiBaseUrl: "http://proxy:4000/v1",
+				openAiStreamingEnabled: streaming,
+			}),
+		)
+		const id = `call_1__thought__${TEST_THOUGHT_SIGNATURE}`
+		const call = { id, type: "function" as const, function: { name: "read_file", arguments: "{}" } }
+		mockCreate.mockResolvedValueOnce(
+			streaming
+				? asyncStreamFrom([{ choices: [{ delta: { tool_calls: [{ ...call, index: 0 }] } }] }])
+				: { choices: [{ message: { content: "", tool_calls: [call] } }] },
+		)
+		await collectStream(handler.createMessage("system", []))
+		expect(handler.getThoughtSignature()).toBe(TEST_THOUGHT_SIGNATURE)
+		const origin = handler.getThoughtSignatureOrigin()
+		expect(origin).toBeDefined()
+		const storedId = sanitizeToolUseId(id)
+		const history = [signedAssistantMessage([storedId], { origin }), toolResultsMessage([storedId])]
+		mockCreate.mockResolvedValueOnce(
+			streaming ? asyncStreamFrom([]) : { choices: [{ message: { content: "ok" } }] },
+		)
+		await collectStream(handler.createMessage("system", history))
+		const request: OpenAI.Chat.ChatCompletionCreateParams = mockCreate.mock.calls.at(-1)![0]
+		const assistant = request.messages.find((message) => message.role === "assistant")
+		expect(assistant).toMatchObject({
+			tool_calls: [{ id: storedId, provider_specific_fields: { thought_signature: TEST_THOUGHT_SIGNATURE } }],
+		})
+		expect(request.messages.find((message) => message.role === "tool")).toMatchObject({ tool_call_id: storedId })
+		expect(handler.getThoughtSignature()).toBeUndefined()
+	})
+
+	it.each([
+		{ streaming: true, changed: "endpoint", openAiBaseUrl: "http://other-proxy:4000/v1" },
+		{ streaming: false, changed: "endpoint", openAiBaseUrl: "http://other-proxy:4000/v1" },
+		{ streaming: true, changed: "model", openAiModelId: "gemini-3-pro" },
+		{ streaming: false, changed: "model", openAiModelId: "gemini-3-pro" },
+	])(
+		"withholds a signature after a $changed change with streaming=$streaming",
+		async ({ streaming, changed: _changed, ...overrides }) => {
+			const options = makeApiHandlerOptions({
+				openAiApiKey: "test",
+				openAiModelId: "gemini-3-flash",
+				openAiBaseUrl: "http://proxy:4000/v1",
+				openAiStreamingEnabled: streaming,
+			})
+			const source = new OpenAiHandler(options)
+			const id = `call_1__thought__${TEST_THOUGHT_SIGNATURE}`
+			const call = { id, type: "function" as const, function: { name: "read_file", arguments: "{}" } }
+			mockCreate.mockResolvedValueOnce(
+				streaming
+					? asyncStreamFrom([{ choices: [{ delta: { tool_calls: [{ ...call, index: 0 }] } }] }])
+					: { choices: [{ message: { content: "", tool_calls: [call] } }] },
+			)
+			await collectStream(source.createMessage("system", []))
+			expect(source.getThoughtSignature()).toBe(TEST_THOUGHT_SIGNATURE)
+			const storedId = sanitizeToolUseId(id)
+			const history = [
+				signedAssistantMessage([storedId], { origin: source.getThoughtSignatureOrigin() }),
+				toolResultsMessage([storedId]),
+			]
+			const target = new OpenAiHandler({ ...options, ...overrides })
+			mockCreate.mockResolvedValueOnce(
+				streaming ? asyncStreamFrom([]) : { choices: [{ message: { content: "ok" } }] },
+			)
+			await collectStream(target.createMessage("system", history))
+			expect(target.getThoughtSignatureOrigin()).not.toBe(source.getThoughtSignatureOrigin())
+			const request: OpenAI.Chat.ChatCompletionCreateParams = mockCreate.mock.calls.at(-1)![0]
+			const assistant = request.messages.find((message) => message.role === "assistant")
+			expect(assistant).toMatchObject({ tool_calls: [{ id: expect.stringMatching(/^call_1_[a-f0-9]{16}$/) }] })
+			expect(assistant).not.toHaveProperty("tool_calls.0.provider_specific_fields.thought_signature")
+			expect(JSON.stringify(request.messages)).not.toContain(TEST_THOUGHT_SIGNATURE)
+			expect(JSON.stringify(request.messages)).not.toContain("__thought__")
+			expect(request.messages.find((message) => message.role === "tool")).toMatchObject({
+				tool_call_id: assistant?.role === "assistant" ? assistant.tool_calls?.[0].id : undefined,
+			})
+		},
+	)
+})
 
 describe("OpenAiHandler", () => {
 	let handler: OpenAiHandler

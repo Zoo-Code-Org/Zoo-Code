@@ -2,6 +2,32 @@
 \* Model-checking settings and variants for ThoughtSignature. Each config replaces operators with these.
 EXTENDS ThoughtSignature
 
+\* Issue 2304: the old reader ignores a signature present only in the ID.
+IgnoreId == FALSE
+\* Reader sabotage: an encoded ID wins over a later explicit field.
+EncodedFirst == FALSE
+\* Issue 2304: remove the guard that omits unsigned reasoning.
+EchoUnsigned == TRUE
+
+\* Streaming sabotage: keep the first signature, including an ID fallback.
+KeepFirstCaptured(previous, chunk) == IF previous # StreamNone THEN previous ELSE chunk
+
+\* Sabotage: origin checks omit the explicit field but keep the encoded signature in the ID.
+KeepEncodedIds == TRUE
+
+\* Sabotage: rewrite assistant call IDs but keep encoded tool-result IDs.
+KeepResultIds == FALSE
+
+\* Sabotage: look up reused call IDs without their history occurrence.
+IdOnlyReplay == FALSE
+
+\* Sabotage: a result reads the next occurrence instead of the last consumed occurrence.
+NextResult == TRUE
+
+\* Spec review sabotages: keep the cursor at zero, or keep the prior signed result for an unsigned call.
+FrozenCursor == FALSE
+KeepSignedResult == TRUE
+
 CONSTANT MaxTurns
 Bounded == Len(history) <= MaxTurns
 
@@ -17,7 +43,7 @@ ModelOrigin(b) == ModelOf(b)
 AnyOrigin(m, t) == TRUE
 \* AllCalls: a signature on every parallel call.
 EveryCall(i) == TRUE
-\* NoMarker and Legacy: no __thought__ fallback.
+\* Legacy: no __thought__ fallback. The separate NoMarker variant is retired after ID stripping.
 NoMarkerFallback(m, listed, i) == FALSE
 \* MarkerAlways: the round 2 code. The __thought__ fallback also applies to a listed model.
 MarkerAlways(m, listed, i) == m.marker /\ i = 1

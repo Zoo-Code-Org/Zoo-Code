@@ -25,40 +25,77 @@ function signatureOf(toolCall: unknown): string | undefined {
 		: undefined
 }
 
-/**
- * Read the thought signature from `provider_specific_fields` of tool calls, the slot that
- * LiteLLM fills for Gemini. LiteLLM also embeds it in the tool call id, but the history
- * sanitizes ids, so the id copy does not survive.
- */
-export function readThoughtSignature(toolCalls: readonly unknown[] | null | undefined): string | undefined {
-	return toolCalls?.map(signatureOf).find((signature) => signature !== undefined)
+/** Keep the first explicit signature, or the first ID fallback, across response chunks. */
+export class ThoughtSignatureReader {
+	private explicit: string | undefined
+	private encoded: string | undefined
+
+	get signature(): string | undefined {
+		return this.explicit ?? this.encoded
+	}
+
+	update(toolCalls: readonly unknown[] | null | undefined): void {
+		if (this.explicit !== undefined) return
+		for (const call of toolCalls ?? []) {
+			this.explicit = signatureOf(call)
+			if (this.explicit !== undefined) return
+			// Keep looking for an explicit field after an ID fallback, including in later chunks.
+			if (this.encoded !== undefined) continue
+			if (typeof call !== "object" || call === null || !("id" in call) || typeof call.id !== "string") continue
+			const marker = call.id.indexOf(LITELLM_THOUGHT_SIGNATURE_ID_MARKER)
+			if (marker < 0) continue
+			const signature = call.id.slice(marker + LITELLM_THOUGHT_SIGNATURE_ID_MARKER.length)
+			if (signature) this.encoded = signature
+		}
+	}
 }
 
-function collectThoughtSignatures(
+interface ToolCallReplay {
+	id: string
+	signature?: string
+}
+
+interface ToolCallReplayCursor {
+	occurrences: ToolCallReplay[]
+	next: number
+}
+
+function collectToolCallReplay(
 	history: Anthropic.Messages.MessageParam[],
 	origin: string,
 	normalizeToolCallId: (id: string) => string,
-): Map<string, string> {
-	const signatureByToolCallId = new Map<string, string>()
+): Map<string, ToolCallReplayCursor> {
+	const calls = new Map<string, ToolCallReplayCursor>()
 	for (const message of history) {
-		if (message.role !== "assistant" || !Array.isArray(message.content)) {
-			continue
-		}
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue
 		let signature: string | undefined
-		let firstToolUseId: string | undefined
+		const toolUseIds: string[] = []
 		const blocks: readonly ExtendedContentBlockParam[] = message.content
 		for (const block of blocks) {
 			if (isThoughtSignatureContentBlock(block)) {
 				signature = block.origin === origin ? block.thoughtSignature : undefined
 			} else if (block.type === "tool_use") {
-				firstToolUseId ??= block.id
+				toolUseIds.push(block.id)
 			}
 		}
-		if (signature && firstToolUseId) {
-			signatureByToolCallId.set(normalizeToolCallId(firstToolUseId), signature)
+		for (const [index, id] of toolUseIds.entries()) {
+			const marker = id.indexOf(LITELLM_THOUGHT_SIGNATURE_ID_MARKER)
+			// Remove foreign signature bytes before normalization can truncate or hash the ID.
+			// Keep calls with the same prefix distinct after removing their signature suffixes.
+			const outgoingId =
+				!signature && marker >= 0
+					? `${id.slice(0, marker) || "call"}_${createHash("sha256").update(id).digest("hex").slice(0, 16)}`
+					: id
+			const key = normalizeToolCallId(id)
+			const replay = calls.get(key) ?? { occurrences: [], next: 0 }
+			replay.occurrences.push({
+				id: normalizeToolCallId(outgoingId),
+				...(index === 0 && signature ? { signature } : {}),
+			})
+			calls.set(key, replay)
 		}
 	}
-	return signatureByToolCallId
+	return calls
 }
 
 interface ApplyThoughtSignaturesOptions {
@@ -80,20 +117,36 @@ export function applyThoughtSignatures(
 	openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[],
 	{ origin, normalizeToolCallId = (id) => id, fallback }: ApplyThoughtSignaturesOptions,
 ): OpenAI.Chat.ChatCompletionMessageParam[] {
-	const storedSignatures = collectThoughtSignatures(history, origin, normalizeToolCallId)
+	const replayByToolCallId = collectToolCallReplay(history, origin, normalizeToolCallId)
 
 	return openAiMessages.map((message) => {
+		if (message.role === "tool") {
+			const replay = replayByToolCallId.get(message.tool_call_id)
+			const id = replay?.occurrences[replay.next - 1]?.id ?? message.tool_call_id
+			return id === message.tool_call_id ? message : { ...message, tool_call_id: id }
+		}
 		if (message.role !== "assistant" || !message.tool_calls?.length) {
 			return message
 		}
-		return {
+		let signed = false
+		const toolCalls = message.tool_calls.map((toolCall) => {
+			const replay = replayByToolCallId.get(toolCall.id)
+			const stored = replay?.occurrences[replay.next]
+			if (replay && stored) replay.next++
+			const signature = stored?.signature ?? fallback?.(toolCall.id)
+			const id = stored?.id ?? toolCall.id
+			signed ||= Boolean(signature)
+			if (signature) {
+				return { ...toolCall, id, provider_specific_fields: { thought_signature: signature } }
+			}
+			return id === toolCall.id ? toolCall : { ...toolCall, id }
+		})
+		const result: OpenAI.Chat.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
 			...message,
-			tool_calls: message.tool_calls.map((toolCall) => {
-				const signature = storedSignatures.get(toolCall.id) ?? fallback?.(toolCall.id)
-				return signature
-					? { ...toolCall, provider_specific_fields: { thought_signature: signature } }
-					: toolCall
-			}),
+			tool_calls: toolCalls,
 		}
+		// LiteLLM can turn this text into an unsigned Gemini thought part.
+		if (signed) delete result.reasoning_content
+		return result
 	})
 }
