@@ -55,10 +55,19 @@
 \*             the allOf conjunct - it no longer sees the inlined target's
 \*             annotations and rejects values the original accepted
 \*             (review 4723722028).
+\* Failure 19: a moved rule's existing allOf conjunct keeps its own $ref
+\*             through the removed patternProperties location un-relocated -
+\*             the pointer dangles in the compiled document and the conjunct
+\*             rejects values the original accepted (review 4724111350).
+\* Failure 20: a schema-map entry inside a moved rule whose NAME matches a
+\*             literal keyword keeps its schema unrelocated - the map's keys
+\*             are property names, not keywords, so the literal exclusion
+\*             must not suppress relocation there (review 4724111355).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
 \*             SatPreserved, SiblingConjunctKept, ArraySatKept,
 \*             MovedRefResolvable, LiteralPreserved, ExpansionBounded,
-\*             MovedRefSiblingOuter.
+\*             MovedRefSiblingOuter, MovedConjunctResolvable,
+\*             MapEntryResolvable.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
 \* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate, KeepUnevaluated and
@@ -67,7 +76,9 @@
 \* Expect: KeepPrefixEvaluator fail ArraySatKept. KeepMovedRef fails
 \* Expect: MovedRefResolvable. RewriteLiteral fails LiteralPreserved.
 \* Expect: UnboundedDiamond fails ExpansionBounded. AbsorbRefSibling fails
-\* Expect: MovedRefSiblingOuter.
+\* Expect: MovedRefSiblingOuter. KeepRefConjunct fails
+\* Expect: MovedConjunctResolvable. KeepMapEntryRef fails
+\* Expect: MapEntryResolvable.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -86,13 +97,14 @@
 \* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
 \* regression test for review 4712438384).
 \* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).
-\* Result: Fixed holds in 1048576 states. ForceRequired fails RequiredPreserved.
+\* Result: Fixed holds in 33554432 states. ForceRequired fails RequiredPreserved.
 \* KeepPattern fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded.
 \* NotTighten, KeepOneOf, KeepClosed and KeepConditional each fail
 \* SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. TLC found no state
 \* outside the sabotages. RewriteLiteral fails LiteralPreserved;
 \* UnboundedDiamond fails ExpansionBounded; AbsorbRefSibling fails
-\* MovedRefSiblingOuter.
+\* MovedRefSiblingOuter; KeepRefConjunct fails MovedConjunctResolvable;
+\* KeepMapEntryRef fails MapEntryResolvable.
 \* Cost: TLC runs in seconds. Agent time is not measured.
 \* Review: 3 added (4712438380, 4712438393, 4712438405), 1 gap (4712438384
 \* __proto__ own-property semantics are a JS artifact, pinned by the
@@ -118,6 +130,11 @@
 \* ExpansionBounded; a moved reference's sibling evaluation keywords stay on
 \* the outer schema beside the inlined allOf target,
 \* MovedRefSiblingOuter), 0 covered, 0 gap.
+\* Round 10 (reviews 4724111350, 4724111355): 2 added (a moved rule's
+\* existing allOf conjunct relocates its own removed-location reference,
+\* MovedConjunctResolvable; a schema-map entry named after a literal
+\* keyword keeps relocating its schema, MapEntryResolvable), 0 covered,
+\* 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
@@ -126,7 +143,8 @@ CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "KeepUnevaluated", "KeepContainsUneval",
                                   \* "KeepPrefixEvaluator", "KeepUepSchema"
                                   \* or "KeepMovedRef", "RewriteLiteral",
-                                  \* "UnboundedDiamond", "AbsorbRefSibling"
+                                  \* "UnboundedDiamond", "AbsorbRefSibling",
+                                  \* "KeepRefConjunct", "KeepMapEntryRef"
 
 VARIABLE in
 
@@ -154,8 +172,12 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* through the removed patternProperties location (movedRef2), the moved
 \* rule carrying a literal-valued keyword with a "$ref"-shaped value
 \* (literalRef2), the moved rule referencing an acyclic branched graph that
-\* exceeds the relocation budget (budgetDiamond2), and the moved $ref
-\* carrying a sibling evaluation keyword (refSibling2).
+\* exceeds the relocation budget (budgetDiamond2), the moved $ref
+\* carrying a sibling evaluation keyword (refSibling2), the moved rule's
+\* existing allOf conjunct carrying its own reference through the removed
+\* location (refConjunct2), and the moved rule's properties map holding an
+\* entry named after a literal keyword whose schema carries such a
+\* reference (mapKeyLiteral2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
@@ -164,7 +186,8 @@ Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            arrEvaluator2 : BOOLEAN, partialPrefix2 : BOOLEAN,
            uepSchema2 : BOOLEAN, movedRef2 : BOOLEAN,
            literalRef2 : BOOLEAN, budgetDiamond2 : BOOLEAN,
-           refSibling2 : BOOLEAN]
+           refSibling2 : BOOLEAN, refConjunct2 : BOOLEAN,
+           mapKeyLiteral2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -204,7 +227,9 @@ Decisions(i) ==
          uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
          movedRefInlined |-> i.closed2 /\ i.uepSchema2 /\ i.movedRef2,
+         conjunctRelocated |-> TRUE,
          literalKept |-> TRUE,
+         mapEntryRelocated |-> TRUE,
          diamondRelaxed |-> i.budgetDiamond2,
          siblingOnOuter |-> TRUE,
          siblingKept |-> TRUE,
@@ -250,6 +275,10 @@ Decisions(i) ==
         [fixed EXCEPT !["diamondRelaxed"] = FALSE]
     [] Variant = "AbsorbRefSibling" ->
         [fixed EXCEPT !["siblingOnOuter"] = FALSE]
+    [] Variant = "KeepRefConjunct" ->
+        [fixed EXCEPT !["conjunctRelocated"] = FALSE]
+    [] Variant = "KeepMapEntryRef" ->
+        [fixed EXCEPT !["mapEntryRelocated"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -268,6 +297,8 @@ TypeOK ==
     /\ Decisions(in).literalKept \in BOOLEAN
     /\ Decisions(in).diamondRelaxed \in BOOLEAN
     /\ Decisions(in).siblingOnOuter \in BOOLEAN
+    /\ Decisions(in).conjunctRelocated \in BOOLEAN
+    /\ Decisions(in).mapEntryRelocated \in BOOLEAN
 
 Init == in \in Inputs
 Next == UNCHANGED in
@@ -371,5 +402,22 @@ ExpansionBounded ==
 \* target's annotations and reject values the original accepted.
 MovedRefSiblingOuter ==
     (in.movedRef2 /\ in.closed2 /\ in.uepSchema2 /\ in.refSibling2) => Decisions(in).siblingOnOuter
+
+\* Safety (review 4724111350): a moved rule's existing allOf conjuncts stay
+\* conjuncts and relocate: a conjunct can carry its own reference through
+\* the removed patternProperties location, the compiled document has no
+\* such location left, and an unrelocated conjunct pointer would dangle and
+\* reject values the original accepted.
+MovedConjunctResolvable ==
+    (in.movedRef2 /\ in.closed2 /\ in.uepSchema2 /\ in.refConjunct2) =>
+        Decisions(in).conjunctRelocated
+
+\* Safety (review 4724111355): inside a schema map the keys are property or
+\* definition names, not keywords - an entry named after a literal keyword
+\* carries a schema whose reference must relocate, while a literal VALUE
+\* under const inside a schema object stays verbatim (LiteralPreserved).
+MapEntryResolvable ==
+    (in.closed2 /\ in.uepSchema2 /\ in.mapKeyLiteral2) =>
+        Decisions(in).mapEntryRelocated
 
 ====

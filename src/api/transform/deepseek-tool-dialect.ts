@@ -94,6 +94,21 @@ const MAX_RELOCATION_NODES = 4096
 // to inline (issue #547 review 4723722038).
 const LITERAL_VALUE_KEYWORDS = new Set(["const", "enum", "default", "examples"])
 
+// A record under one of these keywords is a name-to-schema map: its keys are
+// property or definition names, never schema keywords, so a name that happens
+// to match a literal keyword must not suppress relocation of the schema
+// beneath it (issue #547 review 4724111355). The set matches the compiler's
+// own map traversal; patternProperties is rejected before relocation runs.
+const SCHEMA_MAP_KEYWORDS = new Set(["properties", "$defs", "definitions", "dependentSchemas"])
+
+/**
+ * A schema-map keyword's record value holds schemas under name keys, so the
+ * relocation walk descends into it in map mode.
+ */
+function entersSchemaMap(key: string, value: unknown): boolean {
+	return SCHEMA_MAP_KEYWORDS.has(key) && isRecord(value)
+}
+
 /**
  * Per-document memo of finished node compilations. The same schema object at
  * the same depth always compiles to the same output, and the predicate checks
@@ -231,7 +246,14 @@ function pointerTraversesLostKey(ref: string): boolean {
  * inside the conjunct would lose sight of the inlined target's annotations
  * and reject values the original accepted (issue #547 review 4723722028).
  * Literal values under const, enum, default and examples are instance data,
- * never schemas, and pass through untouched (issue #547 review 4723722038).
+ * never schemas, and pass through untouched inside a schema object (issue
+ * #547 review 4723722038) - inside a name-to-schema map (properties, $defs,
+ * definitions, dependentSchemas) the keys are names, and an entry named
+ * const still carries a schema that relocates (issue #547 review
+ * 4724111355). Existing allOf conjuncts of the rewritten reference stay
+ * conjuncts and relocate through the same walk, so a conjunct's own
+ * reference through the removed location stays resolvable (issue #547
+ * review 4724111350).
  * The rule is passed through unchanged when its pointer is external, never
  * resolved locally even in the original, or still resolves in the compiled
  * document. An acyclic reference graph can still branch, so relocation
@@ -248,6 +270,7 @@ function relocateMovedRefs(
 	chain: Set<unknown>,
 	abandon: { hit: boolean },
 	budget: { remaining: number },
+	insideSchemaMap: boolean,
 ): unknown {
 	if (abandon.hit) {
 		return node
@@ -260,7 +283,7 @@ function relocateMovedRefs(
 		}
 		const out: unknown[] = []
 		for (const entry of node) {
-			out.push(relocateMovedRefs(entry, root, depth, memo, chain, abandon, budget))
+			out.push(relocateMovedRefs(entry, root, depth, memo, chain, abandon, budget, insideSchemaMap))
 		}
 		return out
 	}
@@ -291,6 +314,7 @@ function relocateMovedRefs(
 			chain,
 			abandon,
 			budget,
+			false,
 		)
 		chain.delete(resolved.target)
 		if (abandon.hit) {
@@ -310,14 +334,24 @@ function relocateMovedRefs(
 			if (key === "allOf" && Array.isArray(value)) {
 				// Existing conjuncts stay conjuncts; only the inlined target
 				// joins them, every other keyword keeps its outer position.
-				conjuncts.push(...value)
+				// Each conjunct relocates through the same walk first: a
+				// conjunct can carry its own reference through the removed
+				// location, and the pointer would dangle in the compiled
+				// document (issue #547 review 4724111350).
+				for (const conjunct of value) {
+					conjuncts.push(relocateMovedRefs(conjunct, root, depth, memo, chain, abandon, budget, false))
+				}
 				continue
 			}
 			if (LITERAL_VALUE_KEYWORDS.has(key)) {
 				defineOwnKey(rest, key, value)
 				continue
 			}
-			defineOwnKey(rest, key, relocateMovedRefs(value, root, depth, memo, chain, abandon, budget))
+			defineOwnKey(
+				rest,
+				key,
+				relocateMovedRefs(value, root, depth, memo, chain, abandon, budget, entersSchemaMap(key, value)),
+			)
 		}
 		if (abandon.hit) {
 			return node
@@ -339,11 +373,27 @@ function relocateMovedRefs(
 	}
 	const out: Record<string, unknown> = {}
 	for (const [key, value] of Object.entries(node)) {
-		if (LITERAL_VALUE_KEYWORDS.has(key)) {
+		// A map's keys are names, so the literal exclusion applies only
+		// inside schema objects: an entry named const keeps relocating the
+		// schema beneath it (issue #547 review 4724111355).
+		if (!insideSchemaMap && LITERAL_VALUE_KEYWORDS.has(key)) {
 			defineOwnKey(out, key, value)
 			continue
 		}
-		defineOwnKey(out, key, relocateMovedRefs(value, root, depth, memo, chain, abandon, budget))
+		defineOwnKey(
+			out,
+			key,
+			relocateMovedRefs(
+				value,
+				root,
+				depth,
+				memo,
+				chain,
+				abandon,
+				budget,
+				insideSchemaMap ? false : entersSchemaMap(key, value),
+			),
+		)
 	}
 	return out
 }
@@ -569,6 +619,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 				new Set(),
 				abandon,
 				budget,
+				false,
 			)
 			if (abandon.hit) {
 				relocatable = false
@@ -633,6 +684,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 						new Set(),
 						abandon,
 						budget,
+						false,
 					)
 				: {}
 			if (abandon.hit) {

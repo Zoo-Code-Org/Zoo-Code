@@ -2089,6 +2089,83 @@ describe("DeepSeekHandler", () => {
 			assertNoDanglingLocalRefs(params)
 		})
 
+		it("relocates a reference inside an existing allOf conjunct of a moved rule (review 4724111350)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: {
+								"^x": {
+									$defs: { v: { type: "string" } },
+									$ref: "#/patternProperties/^x/$defs/v",
+									allOf: [{ $ref: "#/patternProperties/^x/$defs/v" }],
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// Every existing conjunct relocates too: compilation removes
+			// patternProperties, so a conjunct that keeps a pointer into the
+			// removed location would dangle there and the conjunct would reject
+			// values the original accepted. The conjuncts stay conjuncts.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [
+					{ type: "number" },
+					{ allOf: [{ type: "string" }, { type: "string" }], $defs: { v: { type: "string" } } },
+				],
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("relocates a schema under a property whose name is a literal keyword (review 4724111355)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: {
+								"^x": {
+									$defs: { v: { type: "string" } },
+									properties: { const: { $ref: "#/patternProperties/^x/$defs/v" } },
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// Inside a schema map the keys are property names, never keywords:
+			// a property named "const" carries a schema, and its reference must
+			// relocate - compilation removes patternProperties and the pointer
+			// would dangle. A literal VALUE under const inside a schema object
+			// stays verbatim (the $ref-shaped const tests above).
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [
+					{ type: "number" },
+					{
+						$defs: { v: { type: "string" } },
+						properties: { const: { type: "string" } },
+					},
+				],
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
 		it("keeps a $ref-shaped const literal unrewritten (review 4723722038)", () => {
 			const literal = { $ref: "#/patternProperties/^x/$defs/v" }
 			const tools = convert([
