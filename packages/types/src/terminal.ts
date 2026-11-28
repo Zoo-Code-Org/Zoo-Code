@@ -96,6 +96,8 @@ export interface PersistedCommandOutput {
 	 * `null` if output wasn't truncated (no artifact was created).
 	 */
 	artifactPath: string | null
+	/** Short, task-local reference advertised to the model. */
+	artifactId?: string
 
 	/**
 	 * Whether the output was truncated (exceeded preview threshold).

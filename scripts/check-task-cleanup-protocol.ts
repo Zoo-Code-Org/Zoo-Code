@@ -12,7 +12,9 @@ interface TaskState {
 	disposalHandle?: 1
 	disposalStarts: number
 	reversion: PendingResult
+	// Ancillary cleanup now drains output registrations; persisted artifacts survive disposal.
 	cleanup: PendingResult
+	artifactsRetained: boolean
 	finalization: "idle" | "attempted" | "skipped"
 }
 
@@ -57,6 +59,7 @@ function task(): TaskState {
 		disposalStarts: 0,
 		reversion: "idle",
 		cleanup: "idle",
+		artifactsRetained: true,
 		finalization: "idle",
 	}
 }
@@ -203,6 +206,7 @@ function invariantViolations(state: ModelState): string[] {
 	const violations: string[] = []
 	for (const taskId of taskIds) {
 		const current = state.tasks[taskId]
+		if (!current.artifactsRetained) violations.push(`${taskId}: disposal must retain saved artifacts`)
 		if (current.abortStarts > 1 || current.disposalStarts > 1) {
 			violations.push(`${taskId}: abort and disposal may each start at most once`)
 		}
@@ -251,6 +255,9 @@ function runRepresentativeMemoizationChecks(): void {
 	assert.deepEqual(callAbort(firstAbort, "A"), firstAbort, "repeated abort must reuse the first handle")
 	const firstDisposal = callDispose(start, "A")
 	assert.deepEqual(callDispose(firstDisposal, "A"), firstDisposal, "repeated disposal must reuse the first handle")
+	const destructiveDisposal = clone(firstDisposal)
+	destructiveDisposal.tasks.A.artifactsRetained = false
+	assert.ok(invariantViolations(destructiveDisposal).includes("A: disposal must retain saved artifacts"))
 }
 
 function runModelCheck(): { states: number; actions: number; landmarks: number } {
@@ -294,7 +301,11 @@ function runModelCheck(): { states: number; actions: number; landmarks: number }
 		if (node.state.tasks.A.abort === "resolved" && node.state.tasks.A.finalization === "skipped") {
 			reachedLandmarks.add("history-task-final-save-skip")
 		}
-		if (node.state.shutdown === "done") reachedLandmarks.add("multi-task-shutdown-drained")
+		if (node.state.shutdown === "done") {
+			reachedLandmarks.add("multi-task-shutdown-drained")
+			if (taskIds.every((id) => node.state.tasks[id].artifactsRetained))
+				reachedLandmarks.add("shutdown-retains-saved-artifacts")
+		}
 
 		if (node.trace.length === MAX_DEPTH) {
 			frontier.push(node.state)
@@ -323,6 +334,7 @@ function runModelCheck(): { states: number; actions: number; landmarks: number }
 		"shutdown-continues-after-abort-rejection",
 		"history-task-final-save-skip",
 		"multi-task-shutdown-drained",
+		"shutdown-retains-saved-artifacts",
 	]
 	const missingLandmarks = expectedLandmarks.filter((landmark) => !reachedLandmarks.has(landmark))
 	assert.deepEqual(missingLandmarks, [], `Cleanup protocol has unreachable landmarks: ${missingLandmarks.join(", ")}`)
@@ -332,5 +344,5 @@ function runModelCheck(): { states: number; actions: number; landmarks: number }
 runRepresentativeMemoizationChecks()
 const result = runModelCheck()
 console.log(
-	`Task cleanup protocol model check passed: ${result.states} reachable states, ${result.actions}/${expectedActions.length} actions reachable, ${result.landmarks}/8 landmarks reached, depth <= ${MAX_DEPTH}, tasks=${taskIds.length}`,
+	`Task cleanup protocol model check passed: ${result.states} reachable states, ${result.actions}/${expectedActions.length} actions reachable, ${result.landmarks}/9 landmarks reached, depth <= ${MAX_DEPTH}, tasks=${taskIds.length}`,
 )

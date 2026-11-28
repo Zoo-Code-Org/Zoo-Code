@@ -10,6 +10,15 @@ import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistr
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { ExecaTerminal } from "../../../integrations/terminal/ExecaTerminal"
 import type { RooTerminalCallbacks } from "../../../integrations/terminal/types"
+import { OutputInterceptor } from "../../../integrations/terminal/OutputInterceptor"
+import { registerCommandOutput } from "../../task-persistence/commandOutputArtifacts"
+
+vitest.mock("../../../utils/storage", () => ({
+	getTaskDirectoryPath: vitest.fn().mockResolvedValue("/storage/tasks/test-task"),
+}))
+vitest.mock("../../task-persistence/commandOutputArtifacts", () => ({
+	registerCommandOutput: vitest.fn(),
+}))
 const filesystemMocks = vitest.hoisted(() => ({
 	access: vitest.fn(),
 	stat: vitest.fn(),
@@ -88,6 +97,42 @@ describe("executeCommand", () => {
 	})
 
 	describe("Working Directory Behavior", () => {
+		it("advertises the short reference only after output finalization and registration", async () => {
+			mockProvider.context = { globalStorageUri: { fsPath: "/storage" } }
+			vitest.spyOn(OutputInterceptor.prototype, "finalize").mockResolvedValue({
+				preview: "preview",
+				totalBytes: 20_000,
+				truncated: true,
+				artifactPath: path.join("/storage/tasks/test-task/command-output", "cmd-123.txt"),
+			})
+			let finishRegistration!: (id: string) => void
+			vitest.mocked(registerCommandOutput).mockReturnValueOnce(
+				new Promise((resolve) => {
+					finishRegistration = resolve
+				}),
+			)
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+				void callbacks.onCompleted("preview", mockProcess)
+				callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
+				return mockProcess
+			})
+			let returned = false
+			const execution = executeCommandInTerminal(mockTask, {
+				executionId: "123",
+				toolCallId: "short-output",
+				command: "echo test",
+				terminalShellIntegrationDisabled: false,
+			}).then((value) => {
+				returned = true
+				return value
+			})
+			await vitest.waitFor(() => expect(registerCommandOutput).toHaveBeenCalled())
+			expect(returned).toBe(false)
+			finishRegistration("output-7")
+			const [, result] = await execution
+			expect(result).toContain("Artifact ID: output-7")
+			expect(result).not.toContain("cmd-123.txt")
+		})
 		it("should use terminal.getCurrentWorkingDirectory() in the output message for completed commands", async () => {
 			// Setup: Mock terminal to return a different current working directory
 			const initialCwd = "/test/project"
