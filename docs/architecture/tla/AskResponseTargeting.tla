@@ -54,6 +54,14 @@
 \* The unwind race itself is modeled since review 6084536709: ask k mints over
 \* a superseded, unended k-1, and StaleCleanup(k-1) then clears only k-1's own
 \* arm; ArmSlotCurrent pins it and .StaleWipe is the unconditional sabotage.
+\* Review ratchet (review 6094053233, finding on Task.ts supersedePendingAsk
+\* same-millisecond supersession): covered 1, added 0, gap 0. The model's
+\* BumpTs already asserts the wait exits as superseded for every supersession
+\* (strict timestamp values), and the consume actions already refuse a
+\* superseded ask. The real code's Date.now write could land on the same
+\* millisecond as askTs, so the observed value never moved; the fix gives the
+\* wait a second liveness source (the armed slot) and lands in code plus a
+\* Vitest red-verify, not in the model.
 \* Code check: the sabotages match the entry-window leak that
 \* src/core/task/__tests__/ask-response-targeting.spec.ts and
 \* src/core/task/__tests__/Task.command-batch-approval.spec.ts replay on the real ask

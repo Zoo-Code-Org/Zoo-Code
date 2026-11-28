@@ -312,12 +312,21 @@ describe("ask response targeting", () => {
 		// The streaming partial row the completion path updates in place.
 		access.clineMessages = [{ type: "ask", ask: "command", ts: 11, partial: true, text: "ec" }]
 		// Park the completion path inside its save await: the window where a
-		// delayed previous-command approval would be processed.
+		// delayed previous-command approval would be processed. Only the first
+		// save parks (review r9, additional comment on this test): the
+		// answered-stamp save that starts after the valid approval must
+		// complete normally instead of leaking an unreleased promise.
 		let releaseSave: (() => void) | undefined
+		let saveCalls = 0
 		access.saveClineMessages = vi.fn(
 			() =>
 				new Promise<void>((resolve) => {
-					releaseSave = resolve
+					saveCalls += 1
+					if (saveCalls === 1) {
+						releaseSave = resolve
+						return
+					}
+					resolve()
 				}),
 		)
 
@@ -419,6 +428,46 @@ describe("ask response targeting", () => {
 			// asks even when an earlier assertion fails (review 6087624965).
 			releaseFirstPublication?.()
 		}
+	})
+
+	it("ends the wait when a same-millisecond supersession clears the arm", async () => {
+		const provider = stubProvider()
+		const task = buildTask(provider)
+		await attachQueue(task)
+		const access = task as unknown as AskTargetingTaskAccess
+
+		const askPromise = task.ask("command", "echo hi", false)
+		const settled = askPromise.then(
+			() => "answered" as const,
+			() => "thrown" as const,
+		)
+		await vi.waitFor(() => {
+			if (access.awaitingAskTarget === undefined) {
+				throw new Error("ask not armed yet")
+			}
+		})
+		const askTs = access.lastMessageTs!
+
+		// A supersede inside the publication millisecond (review r9 4724196995,
+		// ExecuteCommandTool's error path): Date.now() returns askTs again, so
+		// supersedePendingAsk's timestamp write never moves the value the wait
+		// polls. The cleared arm must end the wait, not leave it hanging with
+		// no valid response route.
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(askTs)
+		try {
+			task.supersedePendingAsk()
+		} finally {
+			nowSpy.mockRestore()
+		}
+
+		// The wait polls on pWaitFor's interval, so give the race a bound that
+		// outlasts a poll tick: the fixed code exits on the first poll after
+		// the supersession; the unfixed code never exits and reads "waiting".
+		const raced = await Promise.race([
+			settled,
+			new Promise((resolve) => setTimeout(() => resolve("waiting"), 2000)),
+		])
+		expect(raced).toBe("thrown")
 	})
 
 	it("emits TaskInteractive when the ask stays pending past the two-second delay", async () => {

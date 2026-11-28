@@ -2492,6 +2492,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						return true
 					}
 
+					// A supersession inside the publication millisecond leaves
+					// the timestamp check blind: supersedePendingAsk() reads
+					// Date.now(), which can return askTs again, so the observed
+					// value never moves. The armed slot is the wait's second
+					// liveness source (issue 998 review r9): when the pending
+					// ask's own token is gone from the slot, no response can
+					// ever carry it, so the wait ends as superseded instead of
+					// hanging with no valid response route.
+					if (this.awaitingAskTarget !== askTarget) {
+						return true
+					}
+
 					// A response whose tag is not this ask's token arrived while no
 					// ask was awaiting (an orphan). It answers nobody: drop it here so
 					// the ask keeps waiting for its own response (issue 998).
@@ -2569,10 +2581,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 			}
 
-			if (this.lastMessageTs !== askTs) {
+			if (this.lastMessageTs !== askTs || this.awaitingAskTarget !== askTarget) {
 				// Could happen if we send multiple asks in a row i.e. with
 				// command_output. It's important that when we know an ask could
-				// fail, it is handled gracefully.
+				// fail, it is handled gracefully. The armed-slot clause covers
+				// the same-millisecond supersession whose Date.now() write
+				// never moved the timestamp past askTs (issue 998 review r9).
 				if (queuedMessageId) {
 					this.messageQueueService.releaseMessage(queuedMessageId)
 				}

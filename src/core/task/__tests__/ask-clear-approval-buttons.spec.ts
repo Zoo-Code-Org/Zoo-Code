@@ -333,10 +333,21 @@ describe("manual command-ask marking (#998)", () => {
 			partial: false,
 		}
 		task.clineMessages.push(toolAsk)
+		// The armed target owns the tool row (review r9 4724196974): the
+		// command-stamp guard must walk past its owner-ts gate to the ask-type
+		// check, so removing that check fails this test instead of skipping it.
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = toolAsk.ts
 
 		task.handleWebviewAskResponse("noButtonClicked")
 
 		expect(toolAsk.isAnswered).toBeUndefined()
+		// The guard settles nothing for a tool ask: no update post and no save.
+		const stub = task as unknown as {
+			updateClineMessage: ReturnType<typeof vi.fn>
+			saveClineMessages: ReturnType<typeof vi.fn>
+		}
+		expect(stub.updateClineMessage).not.toHaveBeenCalled()
+		expect(stub.saveClineMessages).not.toHaveBeenCalled()
 	})
 })
 

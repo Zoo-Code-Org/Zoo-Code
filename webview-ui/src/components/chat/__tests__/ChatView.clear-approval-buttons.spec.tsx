@@ -526,80 +526,180 @@ describe("ChatView approval button behavior", () => {
 			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
 		})
 
-		// Property test from the AskPresentation.tla invariant sentences:
-		// F1 a masked pending command ask shows Run, F2 an answered ask never
-		// does, F3 an api_req_started supersedes. The mirror below is the
-		// derivation the fixed code implements.
-		// The suite renders 32 snapshot shapes, so give it a larger budget
-		// than the 5 s default.
-		it("matches the derivation for every generated snapshot shape", async () => {
-			const deriveRunButton = (msgs: ClineMessage[]): boolean => {
-				const last = msgs.at(-1)
-				if (!last) {
-					return false
-				}
-				if (last.type === "ask") {
-					return last.ask === "command" && last.isAnswered !== true
-				}
-				if (last.say === "api_req_started") {
-					return false
-				}
-				for (let i = msgs.length - 1; i >= 0; i--) {
-					const message = msgs[i]
-					if (message.type === "ask") {
-						return message.ask === "command" && message.isAnswered !== true && message.partial !== true
-					}
-					if (message.type === "say" && message.say === "api_req_started") {
-						return false
-					}
-				}
-				return false
-			}
+		it("keeps Run/Deny hidden when a preceding-row update re-runs the live command branch after a local Run (review r9)", async () => {
+			const { getByText, queryByText, getAllByTestId } = renderChatView()
 
-			// Each prefix models the messages before the snapshot tail. A
-			// command_output ask cannot stand alone: it always follows the
-			// command ask it resolves, so the last prefix pairs it with one.
-			const prefixes: ClineMessage[][] = [
-				[task, say("text", 2)],
-				[task, commandAsk(2)],
-				[task, commandAsk(2, true)],
-				[task, commandAsk(2), { type: "ask", ask: "command_output", ts: 3, text: "", partial: false }],
-			]
-			const tails: ClineMessage[] = [
-				say("command_output", 3),
-				say("command_output", 3, true),
-				say("text", 3),
-				say("error", 3),
-				say("api_req_started", 3),
-				commandAsk(3),
-				commandAsk(3, true),
-			]
+			await act(async () => {
+				hydrateState([task, say("api_req_started", 1), commandAsk(2)])
+			})
+			await waitFor(() => expect(getByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
 
-			for (const prefix of prefixes) {
-				for (const tail of tails) {
-					const messages = [...prefix, tail]
-					const { queryByText, getAllByTestId, unmount } = renderChatView()
+			await act(async () => {
+				fireEvent.click(getByText(RUN_BUTTON_LABEL))
+			})
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
 
-					await act(async () => {
-						hydrateState(messages)
+			// An in-flight cost update changes only the preceding api_req_started
+			// row while the command ask still waits for the host stamp. The rerun
+			// of the last-two-rows effect must not re-enable the controls that
+			// the local Run just cleared (review r9 4724197009).
+			await act(async () => {
+				hydrateState([
+					task,
+					{
+						type: "say",
+						say: "api_req_started",
+						ts: 1,
+						text: '{"tokensIn":140,"tokensOut":80,"cost":0.002}',
+						partial: false,
+					},
+					commandAsk(2),
+				])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		it("clears stale Run/Deny when a newer answered ask installs no controls (review r9)", async () => {
+			const { getByRole, queryByText, getAllByTestId } = renderChatView()
+
+			await act(async () => {
+				hydrateState([task, commandAsk(2)])
+			})
+			await waitFor(() => expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeEnabled(), {
+				timeout: 5000,
+			})
+
+			// The host stamps command A answered and an auto-answered tool ask B
+			// sits at the tail. B installs no controls (it is answered), so the
+			// reconcile must still clear A's stale Run/Deny (review r9 4724197014).
+			await act(async () => {
+				hydrateState([
+					task,
+					commandAsk(2, true),
+					{
+						type: "ask",
+						ask: "tool",
+						ts: 3,
+						text: '{"tool":"readFile","path":"/tmp/example.ts","content":""}',
+						partial: false,
+						isAnswered: true,
+					},
+				])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		it("keeps a newer pending tool ask's controls when an older command ask is answered (review r9)", async () => {
+			const { getByRole, queryByText } = renderChatView()
+
+			// The preservation case (review r9 4724197014): a newer UNANSWERED
+			// tool ask owns the presentation and keeps its approval controls.
+			await act(async () => {
+				hydrateState([
+					task,
+					commandAsk(2, true),
+					{
+						type: "ask",
+						ask: "tool",
+						ts: 3,
+						text: '{"tool":"readFile","path":"/tmp/example.ts","content":""}',
+						partial: false,
+					},
+				])
+			})
+			await waitFor(() => expect(getByRole("button", { name: "chat:approve.title" })).toBeEnabled(), {
+				timeout: 5000,
+			})
+			// The command's Run is gone; the visible reject button belongs to
+			// the tool ask, whose secondary shares the chat:reject.title label.
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		// Literal expected outcomes per named snapshot shape (review r9
+		// 4724197000): no test-local derivation mirrors the implementation.
+		// Run/Deny show exactly when the newest ask-or-api_req_started row is
+		// a pending command ask. The shapes keep the mixed ask types, answered
+		// states, partial states, and superseding rows.
+		const prefixCases: Record<string, ClineMessage[]> = {
+			"text say": [task, say("text", 2)],
+			"pending command ask": [task, commandAsk(2)],
+			"answered command ask": [task, commandAsk(2, true)],
+			"command_output ask": [
+				task,
+				commandAsk(2),
+				{ type: "ask", ask: "command_output", ts: 3, text: "", partial: false },
+			],
+		}
+		const tailCases: Record<string, ClineMessage> = {
+			"command_output say": say("command_output", 3),
+			"partial command_output say": say("command_output", 3, true),
+			"text say": say("text", 3),
+			"error say": say("error", 3),
+			"api_req_started say": say("api_req_started", 3),
+			"pending command ask": commandAsk(3),
+			"answered command ask": commandAsk(3, true),
+		}
+		const runButtonMatrix: Array<[string, string, boolean]> = [
+			["text say", "command_output say", false],
+			["text say", "partial command_output say", false],
+			["text say", "text say", false],
+			["text say", "error say", false],
+			["text say", "api_req_started say", false],
+			["text say", "pending command ask", true],
+			["text say", "answered command ask", false],
+			["pending command ask", "command_output say", true],
+			["pending command ask", "partial command_output say", true],
+			["pending command ask", "text say", true],
+			["pending command ask", "error say", true],
+			["pending command ask", "api_req_started say", false],
+			["pending command ask", "pending command ask", true],
+			["pending command ask", "answered command ask", false],
+			["answered command ask", "command_output say", false],
+			["answered command ask", "partial command_output say", false],
+			["answered command ask", "text say", false],
+			["answered command ask", "error say", false],
+			["answered command ask", "api_req_started say", false],
+			["answered command ask", "pending command ask", true],
+			["answered command ask", "answered command ask", false],
+			["command_output ask", "command_output say", false],
+			["command_output ask", "partial command_output say", false],
+			["command_output ask", "text say", false],
+			["command_output ask", "error say", false],
+			["command_output ask", "api_req_started say", false],
+			["command_output ask", "pending command ask", true],
+			["command_output ask", "answered command ask", false],
+		]
+
+		it.each(runButtonMatrix)(
+			"presents Run for the %s prefix + %s tail shape",
+			async (prefix, tail, showsRun) => {
+				const { queryByText, getAllByTestId, unmount } = renderChatView()
+
+				await act(async () => {
+					hydrateState([...prefixCases[prefix], tailCases[tail]])
+				})
+				await settle(getAllByTestId)
+
+				// The presence check waits, so a slow render cannot make a
+				// true shape read as false. The absence check runs after the
+				// settle step, so it cannot read a false shape as true.
+				if (showsRun) {
+					await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), {
+						timeout: 5000,
 					})
-					await settle(getAllByTestId)
-
-					const expected = deriveRunButton(messages)
-					// The presence check waits, so a slow render cannot make a
-					// true shape read as false. The absence check runs after the
-					// settle step, so it cannot read a false shape as true.
-					if (expected) {
-						await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), {
-							timeout: 5000,
-						})
-					} else {
-						expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
-					}
-					unmount()
+				} else {
+					expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
 				}
-			}
-		}, 60000)
+				unmount()
+			},
+			60000,
+		)
 	})
 
 	describe("approval feedback segments", () => {
@@ -968,6 +1068,11 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 		// queued message for an unprotected command ask as yesButtonClicked,
 		// so queued text would approve the command it was meant to stop.
 		expect(asked("messageResponse")).toBe(true)
+		// Value assertion (review r9 4724197002): the payload must carry the
+		// exact submitted text, not just the response discriminator.
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "askResponse", askResponse: "messageResponse", text: "do not run this" }),
+		)
 		expect(sentTypes()).not.toContain("queueMessage")
 	})
 
@@ -996,6 +1101,11 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 
 		expect(asked("messageResponse")).toBe(false)
 		expect(sentTypes()).toContain("queueMessage")
+		// Value assertion (review r9 4724197002): the queued payload must
+		// carry the exact submitted text.
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "queueMessage", text: "do not run this" }),
+		)
 	})
 
 	it("a direct text reply keeps a trailing say from restoring Run/Deny before the host stamp (#998 review)", async () => {
@@ -1017,6 +1127,11 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 		})
 
 		expect(asked("messageResponse")).toBe(true)
+		// Value assertion (review r9 4724197002): the direct reply payload
+		// must carry the exact submitted text.
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "askResponse", askResponse: "messageResponse", text: "use flags, not rm" }),
+		)
 		// The chat reset disables the controls until the host state lands.
 		expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeDisabled()
 

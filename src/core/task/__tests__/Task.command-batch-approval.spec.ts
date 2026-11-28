@@ -376,6 +376,26 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 			{ timeout: 5000, interval: 50 },
 		)
 		task.approveAsk()
+		// Readiness gate (review r9 4724196978): a result absence plus a
+		// pending loop cannot distinguish a live approval wait from a request
+		// that stalled before publishing command 2. Command 2's exact
+		// unanswered prompt is the readiness evidence, not elapsed time.
+		await vi.waitFor(
+			() => {
+				const second = task.clineMessages.find(
+					(m) =>
+						m.type === "ask" &&
+						m.ask === "command" &&
+						!m.partial &&
+						!m.isAnswered &&
+						(m.text ?? "").includes("cmd2"),
+				)
+				if (!second) {
+					throw new Error("command 2 prompt not published yet")
+				}
+			},
+			{ timeout: 5000, interval: 50 },
+		)
 		await settleWindow()
 
 		const commandAsks = task.clineMessages.filter((m) => m.type === "ask" && m.ask === "command" && !m.partial)
@@ -431,6 +451,25 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 			{ timeout: 5000, interval: 50 },
 		)
 		task.approveAsk()
+		// The same readiness gate (review r9 4724196978): the orphan verdict
+		// needs command 2's prompt on the record, so a stalled request cannot
+		// read as a live approval wait.
+		await vi.waitFor(
+			() => {
+				const second = task.clineMessages.find(
+					(m) =>
+						m.type === "ask" &&
+						m.ask === "command" &&
+						!m.partial &&
+						!m.isAnswered &&
+						(m.text ?? "").includes("cmd2"),
+				)
+				if (!second) {
+					throw new Error("command 2 prompt not published yet")
+				}
+			},
+			{ timeout: 5000, interval: 50 },
+		)
 		await settleWindow()
 
 		const toolResults = access.userMessageContent.filter((b) => b.type === "tool_result")

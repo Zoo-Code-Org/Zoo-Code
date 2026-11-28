@@ -12,8 +12,10 @@
 \* Failure F7 (review 6088358220): the send/deny lookup scans past the newest ask-or-api_req_started row and answers an
 \* older cancelled ask while a newer partial ask or api_req_started streams. The host discards the response; the message
 \* is lost instead of queued.
-\* Invariants: NoMaskedPendingAsk (F1), NoStaleRunButton (F2), ReqSupersedes (F3), NoSettledKeptOrRestored (F4, F5), NoStampOnPartial (F6), NoRoutePastNewestRow (F7).
-\* Expected: Old fails on ask then command_output. Each guard variant fails on its own shape. NoReconcile fails F4. NoPartialGuard fails F6. ScanAnywhere fails F7.
+\* Failure F8 (review 6094053233): a host stamp on the owned row while a newer command ask is still publishing. Stamping
+\* A in [A, B] must keep B's controls; a recency selector or an unreconciled stamp hides them.
+\* Invariants: NoMaskedPendingAsk (F1), NoStaleRunButton (F2), ReqSupersedes (F3), NoSettledKeptOrRestored (F4, F5), NoStampOnPartial (F6), NoRoutePastNewestRow (F7), NoHiddenPendingCaTail (F8).
+\* Expected: Old fails on ask then command_output. Each guard variant fails on its own shape. NoReconcile fails F2 then F4 (the owned stamp can leave the shown bit on an answered row). NoPartialGuard fails F6. ScanAnywhere fails F7. StampClears fails F8.
 \* CountsLocal fails NoStaleRunButton on [ca, cu] after a local answer.
 \* Kinds: ca ask command, cp partial ask command, ou ask command_output, cu say command_output, tx say text, os other say, rq say api_req_started.
 \* A message is [kind, answered]. Only ca carries answered true. The host stamps it when the ask is settled.
@@ -28,7 +30,7 @@
 EXTENDS Naturals, Sequences
 
 CONSTANTS Inputs, Variant
-\* Inputs: snapshot sequences. Variant: Fixed, Old, NoAnsweredGuard, NoReqGuard, TailOnly, NoReconcile, CountsLocal, ScanAnywhere.
+\* Inputs: snapshot sequences. Variant: Fixed, Old, NoAnsweredGuard, NoReqGuard, TailOnly, NoReconcile, CountsLocal, ScanAnywhere, StampClears.
 
 VARIABLES in, shown, loc
 
@@ -68,17 +70,17 @@ PendingCaIx(s, l) ==
 	LET C == {i \in 1..Len(s) : IsCa(s[i]) /\ s[i].answered = FALSE /\ i # l}
 	IN IF C = {} THEN 0 ELSE Max(C)
 
-\* The ask the host stamps. The host reads no webview state: the local
-\* answer bookkeeping lives in the webview, so the stamp selector ignores
-\* loc and keeps the complete-ask filter (thread 4682318851).
-StampCaIx(s) ==
-	LET C == {i \in 1..Len(s) : IsCa(s[i]) /\ s[i].answered = FALSE}
-	IN IF C = {} THEN 0 ELSE Max(C)
+\* The ask rows whose armed response token the host can stamp. Ownership,
+\* not recency: the token names its row, so while a newer ask B is still
+\* publishing, the host stamps the older armed ask A and leaves B unanswered
+\* (review r9 4724196970). The selector ignores loc: the host reads no
+\* webview state, so the local-answer bookkeeping stays out (thread 4682318851).
+StampCandidates(s) ==
+	{i \in 1..Len(s) : IsCa(s[i]) /\ s[i].answered = FALSE}
 
 \* The sabotage selector also matches a partial record (thread 4680322903).
-StampAnyCaIx(s) ==
-	LET C == {i \in 1..Len(s) : s[i].kind \in {"ca", "cp"} /\ s[i].answered = FALSE}
-	IN IF C = {} THEN 0 ELSE Max(C)
+StampAnyCandidates(s) ==
+	{i \in 1..Len(s) : s[i].kind \in {"ca", "cp"} /\ s[i].answered = FALSE}
 
 \* The newest partial command ask. 0 when there is none. The stream completes it.
 NewestPartialCaIx(s) ==
@@ -168,14 +170,21 @@ LocalRespond == /\ shown
 \* The host stamps the row that owns the armed response token. It reads no
 \* local-answer state, so a locally answered ask is stampable too and the
 \* LocalRespond-then-HostStamp order is reachable (thread 4682318851).
+\* The stamp is the owned-row choice: any unanswered command ask the token
+\* can name, independent of recency (review r9 4724196970).
 \* NoReconcile models the code that keeps the button state (thread 4658203877).
-\* NoPartialGuard models the predicate that also matches a partial record (thread 4680322903).
+\* NoPartialGuard models the predicate that also matches a partial record
+\* (thread 4680322903). StampClears models a stamp that wipes the derivation
+\* instead of reconciling from the updated snapshot: it hides a newer pending
+\* ask's controls when the owned row is not the tail (review r9 4724196970).
 HostStamp ==
-	LET ix == IF Variant = "NoPartialGuard" THEN StampAnyCaIx(in) ELSE StampCaIx(in)
-	IN /\ ix > 0
-	   /\ in' = [in EXCEPT ![ix] = [in[ix] EXCEPT !.answered = TRUE]]
-	   /\ loc' = loc
-	   /\ shown' = IF Variant = "NoReconcile" THEN shown ELSE FALSE
+	\E ix \in (IF Variant = "NoPartialGuard" THEN StampAnyCandidates(in) ELSE StampCandidates(in)) :
+		/\ in' = [in EXCEPT ![ix] = [in[ix] EXCEPT !.answered = TRUE]]
+		/\ loc' = loc
+		/\ shown' =
+			IF Variant = "NoReconcile" THEN shown
+			ELSE IF Variant = "StampClears" THEN FALSE
+			ELSE Derives(in', loc)
 
 \* The stream completes the newest partial command ask. It keeps the answered
 \* flag, so a stamp that landed while partial stays on the completed record.
@@ -229,6 +238,13 @@ NoStampOnPartial == \A i \in 1..Len(in) : in[i].kind = "cp" => in[i].answered = 
 \* streams; the host discards the response and the message is lost.
 NoRoutePastNewestRow == RouteMatchCa(in, loc) => NewestRowCa(in, loc)
 
+\* Safety F8 (review r9 4724196970): a host stamp on an owned row that is
+\* not the tail must preserve the newest pending command ask's controls.
+\* With A armed and B publishing, the stamp on A keeps B's Run button; the
+\* owned-newest case still clears it because the stamped tail is answered.
+NoHiddenPendingCaTail ==
+	(Len(in) > 0 /\ Last(in).kind = "ca" /\ Last(in).answered = FALSE /\ Len(in) # loc) => shown
+
 \* Result, MaxLen 3: base passes, 794 states. Old fails NoMaskedPendingAsk on [ca, cu].
 \* Result: NoAnsweredGuard fails NoStaleRunButton on [ca answered, cu].
 \* Result: NoReqGuard fails NoStaleRunButton on [ca, rq, cu]. TailOnly fails NoMaskedPendingAsk on [ca, cu, cu].
@@ -270,5 +286,15 @@ NoRoutePastNewestRow == RouteMatchCa(in, loc) => NewestRowCa(in, loc)
 \* bookkeeping (StampCaIx drops the loc exclusion, the complete-ask filter
 \* stays), so the LocalRespond-then-HostStamp order is reachable and
 \* checked. Base passes at 1003 states; every sabotage config still fails.
+\* Review round 9 (review 6094053233, finding 4724196970): covered 0,
+\* added 1, gap 0.
+\* Added: the owned-row stamp selector and its reconcile. The old StampCaIx
+\* took the newest unanswered ask, so for [A armed, B publishing] the model
+\* stamped B and could not check that stamping A keeps B's controls.
+\* HostStamp now stamps any row in StampCandidates -- the owned-row choice,
+\* independent of recency and loc -- and derives shown from the updated
+\* snapshot, matching Task.handleWebviewAskResponse's ownedRowTs match.
+\* NoHiddenPendingCaTail (F8) pins the preserve case; the StampClears
+\* sabotage (owned stamp that wipes the derivation) fails it on [ca, ca].
 
 ====

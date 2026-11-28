@@ -428,6 +428,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							}
 							break
 						case "command":
+							// (#998 review r9) A cost update on a preceding row
+							// re-runs this effect while the locally answered command
+							// ask still waits for the host stamp. The recorded local
+							// answer, not the host stamp alone, decides liveness;
+							// a different unanswered command stays eligible.
+							if (lastMessage.ts === answeredCommandAskTsRef.current) {
+								break
+							}
 							setSendingDisabled(isPartial)
 							setClineAsk("command")
 							setEnableButtons(!isPartial)
@@ -615,12 +623,19 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			messagesRef.current,
 			(message: ClineMessage) => message.type === "ask" && message.ask === "command",
 		)
-		if (newestCommandAsk && newestCommandAsk.isAnswered && newestAsk === newestCommandAsk) {
-			setSendingDisabled(true)
-			setClineAsk(undefined)
-			setEnableButtons(false)
-			setPrimaryButtonKey(undefined)
-			setSecondaryButtonKey(undefined)
+		if (newestCommandAsk && newestCommandAsk.isAnswered) {
+			// (#998 review r9) A newer PENDING ask owns the presentation and
+			// installs its own controls, so leave them alone. Any other newer
+			// ask (an auto-answered tool ask, for one) installs nothing and
+			// must not leave the answered command's controls lingering.
+			const newerAskIsPending = newestAsk !== undefined && newestAsk !== newestCommandAsk && !newestAsk.isAnswered
+			if (!newerAskIsPending) {
+				setSendingDisabled(true)
+				setClineAsk(undefined)
+				setEnableButtons(false)
+				setPrimaryButtonKey(undefined)
+				setSecondaryButtonKey(undefined)
+			}
 		}
 	}, [messages])
 
