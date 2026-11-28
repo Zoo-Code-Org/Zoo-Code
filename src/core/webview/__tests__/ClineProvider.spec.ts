@@ -17,7 +17,6 @@ import {
 	type ExtensionMessage,
 	type ExtensionState,
 	type RooCodeSettings,
-	type GlobalState,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
