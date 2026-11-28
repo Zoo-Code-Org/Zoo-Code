@@ -21,6 +21,7 @@ import {
 	type TaskMetadata,
 	type TaskEvents,
 	type ProviderSettings,
+	type ReasoningEffortExtended,
 	type TokenUsage,
 	type ToolUsage,
 	type ToolName,
@@ -443,6 +444,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// API
 	apiConfiguration: ProviderSettings
 	api: ApiHandler
+	// Task-local thinking effort override. Transient per-task state —
+	// never persisted to settings; cleared on dispose (see dispose()).
+	private runtimeThinkingEffort?: ReasoningEffortExtended
+	private runtimeThinkingEffortSource?: string
 	/**
 	 * Units of in-flight API work: a request from setup through its retries and
 	 * background usage drain, or a manual condense. Work can hold any handler it
@@ -2553,6 +2558,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Updates the API configuration and rebuilds the API handler.
 	 * There is no tool-protocol switching or tool parser swapping.
 	 *
+	 * When a task-local thinking effort override is active
+	 * (`setRuntimeThinkingEffort`), the incoming configuration's `reasoningEffort`
+	 * becomes the new restore value and the override is re-applied on top of the
+	 * fresh in-memory copy — clearing the override later restores the NEW profile's
+	 * value, not a stale one.
+	 *
 	 * @param newApiConfiguration - The new API configuration to use
 	 */
 	public updateApiConfiguration(newApiConfiguration: ProviderSettings): void {
@@ -2560,9 +2571,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// VS Code LM / GitHub Copilot own host listeners, so the old one is
 		// released — immediately when idle, or when the last request, retry,
 		// background drain, or condense that leased it settles.
+		// apiConfiguration stays the profile-derived projection;
+		// an active task-local override is applied to the rebuilt handler only, so
+		// a profile switch keeps the override live and clearing it later restores
+		// the NEW profile's value (it is the configuration itself now).
+		//
+		// Same disposal guard as setRuntimeThinkingEffort: this is the other path that rebuilds the
+		// handler, and once disposal has started its handler set is already collected, so a rebuild
+		// would strand the replacement and re-retire a disposed handler. The task is going away, so
+		// there is nothing left to re-project either.
+		if (this.disposalPromise !== undefined) {
+			return
+		}
+
 		const previousApi = this.api
 		this.apiConfiguration = newApiConfiguration
-		this.api = buildApiHandler(this.apiConfiguration)
+		this.api = buildApiHandler(
+			this.runtimeThinkingEffort !== undefined
+				? { ...newApiConfiguration, reasoningEffort: this.runtimeThinkingEffort }
+				: newApiConfiguration,
+		)
 		this.retireApi(previousApi)
 
 		// Refresh only the soft tool-repetition limit from the new profile so an
@@ -2577,6 +2605,76 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.consecutiveMistakeLimit,
 		)
 		this.toolRepetitionDetector.updateLimits(this.toolRepetitionSoftLimit, this.consecutiveMistakeLimit)
+	}
+
+	/**
+	 * Sets — or clears with `undefined` — the task-local thinking
+	 * effort override.
+	 *
+	 * Resolution order for the affected requests (strongest first): this
+	 * task-local override → settings `reasoningEffort` → model default. The
+	 * override applies to the NEXT API request only (no mid-stream effect): it
+	 * is passed per request as `metadata.reasoningEffort` and applied to the
+	 * rebuilt API handler. `apiConfiguration` itself stays the profile-derived
+	 * projection — the override never enters it — so the webview state (which
+	 * posts the active task's `apiConfiguration`) and any profile save built
+	 * from it can never carry the task-local effort. `undefined` clears the
+	 * override and rebuilds the handler from the projection.
+	 *
+	 * Not inherited: child, handoff, and resumed tasks construct their own Task and
+	 * start with no override — it lives in this task's private fields and is never
+	 * persisted.
+	 * @param effort - The task-local effort, or `undefined` to clear.
+	 * @param source - Optional provenance label (UI wiring lands in a later PR).
+	 */
+	public setRuntimeThinkingEffort(effort: ReasoningEffortExtended | undefined, source?: string): void {
+		// Disposal has started (or finished): `disposalPromise` is set once and never cleared, so it
+		// is the liveness signal. The override is dropped rather than applied — the task serves no
+		// further request, and the handler set that dispose collects was already snapshotted, so
+		// rebuilding here would produce a handler nobody owns (still holding its configuration
+		// listeners) and retire the handler disposal has just disposed.
+		if (this.disposalPromise !== undefined) {
+			return
+		}
+
+		const wasActive = this.runtimeThinkingEffort !== undefined
+		this.runtimeThinkingEffort = effort
+		this.runtimeThinkingEffortSource = effort === undefined ? undefined : source
+
+		if (effort === undefined && !wasActive) {
+			// Already inactive: nothing to clear.
+			return
+		}
+
+		// Rebuild the handler with the effective effort applied. The projection
+		// (this.apiConfiguration) is untouched, so clearing needs no restore: the
+		// handler is simply rebuilt from the profile-derived configuration. The
+		// replaced handler is retired like any other swap: handlers with host
+		// listeners must not leak when the effort changes.
+		const previousApi = this.api
+		this.api = buildApiHandler(
+			effort !== undefined ? { ...this.apiConfiguration, reasoningEffort: effort } : this.apiConfiguration,
+		)
+		this.retireApi(previousApi)
+	}
+
+	/**
+	 * Reads the current task-local thinking effort override.
+	 */
+	public getRuntimeThinkingEffort(): { effort?: ReasoningEffortExtended; source?: string } {
+		return {
+			effort: this.runtimeThinkingEffort,
+			source: this.runtimeThinkingEffortSource,
+		}
+	}
+
+	/**
+	 * Metadata fragment carrying the active task-local effort
+	 * override on a single request. Empty when no override is active, so the
+	 * existing settings resolution applies unchanged.
+	 */
+	private getRuntimeThinkingEffortMetadata(): Pick<ApiHandlerCreateMessageMetadata, "reasoningEffort"> {
+		return this.runtimeThinkingEffort !== undefined ? { reasoningEffort: this.runtimeThinkingEffort } : {}
 	}
 
 	/**
@@ -2761,6 +2859,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
+			// Carry the active task-local effort override.
+			...this.getRuntimeThinkingEffortMetadata(),
 		}
 		// Generate environment details to include in the condensed summary
 		const environmentDetails = await getEnvironmentDetails(this, true)
@@ -3713,6 +3813,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * Centralized task teardown: releases task resources and resets transient
+	 * task-local state.
+	 */
 	public dispose(): Promise<void> {
 		if (this.disposalPromise) {
 			return this.disposalPromise
@@ -3831,6 +3935,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
 		}
+
+		// Clear the DTE runtime-effort override so a retained disposed task never
+		// reports a stale override. The fields are cleared directly instead of via
+		// setRuntimeThinkingEffort: that setter rebuilds the handler, and during
+		// disposal the rebuild would (a) create a replacement handler this pass has
+		// already collected and disposed, and (b) retire the just-disposed handler a
+		// second time. `apiConfiguration` never carries the override (it stays the
+		// profile-derived projection), so there is nothing to restore.
+		this.runtimeThinkingEffort = undefined
+		this.runtimeThinkingEffortSource = undefined
 
 		await pendingCleanup
 		await this.diffReversionPromise
@@ -5614,6 +5728,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
+			// Carry the active task-local effort override.
+			...this.getRuntimeThinkingEffortMetadata(),
 		}
 
 		try {
@@ -5877,6 +5993,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							parallelToolCalls: true,
 						}
 					: {}),
+				// Carry the active task-local effort override.
+				...this.getRuntimeThinkingEffortMetadata(),
 			}
 
 			// Only generate environment details when context management will actually run.
@@ -6021,6 +6139,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			taskId: this.taskId,
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
 			abortSignal,
+			// Carry the active task-local effort override for this request.
+			...this.getRuntimeThinkingEffortMetadata(),
 			// Include tools whenever they are present.
 			...(shouldIncludeTools
 				? {
