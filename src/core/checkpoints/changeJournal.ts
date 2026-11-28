@@ -1,0 +1,325 @@
+import fs from "fs/promises"
+import * as path from "path"
+
+/**
+ * A single entry in the per-task change journal (changes.jsonl).
+ *
+ * One line is appended for every successful file write that goes through a
+ * B1 per-write checkpoint hook.  WriteToFileTool and EditFileTool emit one
+ * entry per write; ApplyPatchTool emits one entry per file change of a fully
+ * successful patch — those entries all reference the single B1 checkpoint
+ * that the patch's post-loop hook saves for the whole patch.  The task-start
+ * baseline never produces an entry (it is not a file write).
+ */
+export interface ChangeJournalEntry {
+	/** The file path as the tool knows it (relative to task cwd). */
+	path: string
+	/** "create" | "update" | "delete" — derived from what the tool did. */
+	operation: "create" | "update" | "delete"
+	/** The B1 checkpoint commit SHA for this write (from checkpointSave result). */
+	checkpointId: string
+	/** { additions, deletions } from the approval diff; null/omit when not computable. */
+	diffStats?: { additions: number; deletions: number }
+}
+
+const JOURNAL_FILENAME = "changes.jsonl"
+
+/**
+ * Task IDs arrive from task creation and are used as a single path segment
+ * under <globalStorageDir>/tasks. Reject anything that could escape that
+ * directory — separators, traversal, absolute paths, empty or dot-only IDs —
+ * before any filesystem operation touches the journal path.
+ */
+function assertSafeTaskId(taskId: string): void {
+	if (!/^[A-Za-z0-9._-]+$/.test(taskId) || taskId === "." || taskId === "..") {
+		throw new Error(`Unsafe task ID for checkpoint journal path: ${JSON.stringify(taskId)}`)
+	}
+}
+
+/** Derive the per-task checkpoint directory from globalStorageDir and taskId. */
+function taskCheckpointDir(globalStorageDir: string, taskId: string): string {
+	return path.join(globalStorageDir, "tasks", taskId, "checkpoints")
+}
+
+/** Journal file path for a given task. */
+export function journalPath(globalStorageDir: string, taskId: string): string {
+	assertSafeTaskId(taskId)
+	return path.join(taskCheckpointDir(globalStorageDir, taskId), JOURNAL_FILENAME)
+}
+
+/**
+ * Per-task update queue: journal replacements for one task never overlap,
+ * so concurrent checkpoint saves cannot lose each other's entries through
+ * the read-modify-write cycle below.
+ */
+const journalQueues = new Map<string, Promise<unknown>>()
+
+/** @internal Test seam: number of live per-task journal queue entries. */
+export function journalQueueDepth(): number {
+	return journalQueues.size
+}
+
+function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+	const prev = journalQueues.get(key) ?? Promise.resolve()
+	// The next update runs after the previous one settles, whatever it did.
+	const next = prev.then(run, run)
+	// The queued promise swallows its outcome so a failed update neither
+	// blocks later updates nor surfaces as an unhandled rejection; callers
+	// observe the failure through `next`.
+	const tail = next.then(
+		() => undefined,
+		() => undefined,
+	)
+	journalQueues.set(key, tail)
+	// Prune settled entries: a queue entry must not outlive its work
+	// (deleting a task removes its files but not this map). The identity
+	// check keeps a late completion from deleting a newer queued update
+	// for the same key.
+	void tail.finally(() => {
+		if (journalQueues.get(key) === tail) {
+			journalQueues.delete(key)
+		}
+	})
+	return next
+}
+
+/** True when a parsed JSON value is a complete journal record. */
+function isEntryShaped(value: unknown): value is ChangeJournalEntry {
+	return (
+		!!value &&
+		typeof value === "object" &&
+		typeof (value as ChangeJournalEntry).path === "string" &&
+		typeof (value as ChangeJournalEntry).checkpointId === "string" &&
+		["create", "update", "delete"].includes((value as ChangeJournalEntry).operation)
+	)
+}
+
+/**
+ * Append change-journal entries to the per-task changes.jsonl file as one
+ * serialized, atomic update.
+ *
+ * The whole multi-entry update is a crash-safe replacement: the current
+ * journal is read and its final record verified - an unterminated but
+ * complete, entry-shaped tail is re-terminated, any other damaged final
+ * record rejects the append - then the complete next content is written
+ * to a temporary file in the same directory and fsynced, atomically
+ * renamed onto the journal, and the parent directory is fsynced (POSIX;
+ * Windows cannot open directories). A crash at any point leaves either
+ * the old complete journal or the new complete journal - never a
+ * half-applied multi-file update - and a durable checkpoint implies a
+ * durable journal entry. Creates parent directories if they don't exist
+ * yet (e.g. first checkpoint).
+ *
+ * Failures propagate: callers must not report a fully durable checkpoint
+ * when the journal update did not complete.
+ */
+export async function appendChanges(
+	globalStorageDir: string,
+	taskId: string,
+	entries: ChangeJournalEntry[],
+): Promise<void> {
+	if (entries.length === 0) {
+		return
+	}
+	const filePath = journalPath(globalStorageDir, taskId)
+	return withTaskLock(filePath, async () => {
+		const dir = path.dirname(filePath)
+		await fs.mkdir(dir, { recursive: true })
+		let content = ""
+		try {
+			content = await fs.readFile(filePath, "utf8")
+		} catch (error) {
+			// A missing journal is a fresh history. Any other read failure
+			// means the complete next content cannot be built, so propagate
+			// instead of replacing the journal with a partial view of it.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+				throw error
+			}
+		}
+		// Torn-tail handling: the FINAL record must be complete and
+		// entry-shaped whether or not it ends with a newline. A crash can
+		// leave the final line unterminated; if that line is a complete,
+		// entry-shaped JSON record it was fully written and only its newline
+		// was lost - verified recovery: keep it and re-terminate. An
+		// unparseable or non-entry-shaped final record is NOT verified
+		// recovery material: it may be the truncated journal record of a
+		// committed write, and silently truncating it would let this append
+		// succeed while the rollback history is already incomplete (a later
+		// rollback could then resolve the file to the wrong checkpoint or
+		// lose the lost write's metadata). A malformed final record that
+		// still ends with its newline (e.g. "null\n") is the same hazard:
+		// accepting it here would demote it to a skipped middle line after
+		// the append, reporting an incomplete history as valid. Reject the
+		// append in both cases; torn-tail repair is a separately verified
+		// recovery operation, not a side effect of the next write.
+		if (content) {
+			const unterminated = !content.endsWith("\n")
+			const body = unterminated ? content : content.slice(0, -1)
+			const cut = body.lastIndexOf("\n") + 1
+			const tailText = body.slice(cut)
+			if (tailText !== "") {
+				let tail: unknown
+				try {
+					tail = JSON.parse(tailText)
+				} catch {
+					tail = undefined
+				}
+				if (!isEntryShaped(tail)) {
+					throw new Error(
+						`Cannot append to change journal ${filePath}: ${unterminated ? "unterminated " : ""}final record is not a complete entry (torn-tail recovery requires explicit repair)`,
+					)
+				}
+			}
+			if (unterminated) {
+				content = content + "\n"
+			}
+		}
+		const payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
+		const tmpPath = path.join(dir, `${JOURNAL_FILENAME}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
+		const data = Buffer.from(content + payload)
+		try {
+			const handle = await fs.open(tmpPath, "w")
+			try {
+				// A single write can complete partially; sync only after the
+				// whole content is on the handle, or a short write would
+				// rename a torn journal into place.
+				let written = 0
+				while (written < data.length) {
+					const res = await handle.write(data, written, data.length - written)
+					written += res.bytesWritten
+				}
+				await handle.sync()
+			} finally {
+				await handle.close()
+			}
+			// Windows can transiently reject a rename onto the existing journal
+			// (an antivirus or indexer holding the destination): retry with a
+			// short backoff before failing. The destination is never unlinked
+			// to make room, so atomicity is preserved on every failure.
+			const renameAttempts = process.platform === "win32" ? 5 : 1
+			for (let attempt = 1; ; attempt++) {
+				try {
+					await fs.rename(tmpPath, filePath)
+					break
+				} catch (error) {
+					const renameCode = (error as NodeJS.ErrnoException).code
+					if (
+						process.platform !== "win32" ||
+						attempt >= renameAttempts ||
+						!["EPERM", "EBUSY", "EACCES"].includes(renameCode ?? "")
+					) {
+						throw error
+					}
+					await new Promise((resolve) => setTimeout(resolve, 20 * attempt))
+				}
+			}
+			if (process.platform !== "win32") {
+				// The rename replaced the directory entry: on POSIX the
+				// directory itself must be synced for the new entry to
+				// survive a crash (Windows cannot open directories). The
+				// journal content is already in place at this point, so a
+				// sync failure means reduced crash durability, not a lost
+				// update: errnos that mean "fsync is unsupported on this
+				// mount" are tolerated and logged; any other failure still
+				// propagates.
+				try {
+					const dirHandle = await fs.open(dir, "r")
+					try {
+						await dirHandle.sync()
+					} finally {
+						await dirHandle.close()
+					}
+				} catch (error) {
+					const syncCode = (error as NodeJS.ErrnoException).code
+					if (!["EINVAL", "EISDIR", "EBADF", "ENOTSUP", "EOPNOTSUPP", "EPERM"].includes(syncCode ?? "")) {
+						throw error
+					}
+					console.warn(
+						`[changeJournal] directory sync unsupported after journal rename (${syncCode}); crash durability reduced`,
+					)
+				}
+			}
+		} catch (error) {
+			// Best-effort cleanup: the rename never completed, so the journal
+			// still holds the previous complete content; drop the temp file.
+			await fs.rm(tmpPath, { force: true }).catch(() => {})
+			throw error
+		}
+	})
+}
+
+/**
+ * Load all change-journal entries for a task.
+ *
+ * A corrupt or non-entry-shaped line before the final line is skipped. A
+ * corrupt or non-entry-shaped FINAL line rejects: it may be the torn record
+ * of a committed write, and silently dropping it would report an incomplete
+ * rollback history as valid.  The remaining entries are returned in order.
+ * An absent
+ * or empty journal returns [] — but only an ABSENT file. Any other read
+ * failure (permissions, I/O) is rethrown: a journal that cannot be read must
+ * not be indistinguishable from one that is legitimately empty.
+ * @internal Wired by a later unit in the split chain; remove when the chain completes.
+ */
+export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
+	const filePath = journalPath(globalStorageDir, taskId)
+
+	let content: string
+	try {
+		content = await fs.readFile(filePath, "utf8")
+	} catch (error) {
+		// A missing journal is a legitimate empty history; any other read
+		// failure (permissions, I/O) must propagate. Swallowing it would let
+		// a rollback report a no-op success without reading the history.
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return []
+		}
+		throw error
+	}
+
+	if (!content.trim()) {
+		return []
+	}
+
+	const lines = content.split("\n")
+	// Remove trailing empty line from a file that ends with \n.
+	if (lines[lines.length - 1] === "") {
+		lines.pop()
+	}
+
+	const entries: ChangeJournalEntry[] = []
+	for (let i = 0; i < lines.length; i++) {
+		let parsed: unknown
+		try {
+			parsed = JSON.parse(lines[i])
+		} catch {
+			// A corrupt line before the final line (e.g. a partially flushed
+			// append) must not hide the valid entries after it. The final
+			// line is different: dropping an unverified record there can
+			// report an incomplete rollback history as valid (restore-latest
+			// would no-op over the lost write), and torn-tail repair is
+			// verified truncation owned by the append path, so a read
+			// rejects instead.
+			if (i === lines.length - 1) {
+				throw new Error(`Corrupt change journal entry at line ${i + 1} of ${filePath}`)
+			}
+			continue
+		}
+		// A torn append or manual edit can leave valid JSON that is not an
+		// entry (a bare number, null, or a differently-shaped object).
+		// Consumers read path/checkpointId unguarded, so skip any line that
+		// is not entry-shaped instead of returning it as an entry. A final
+		// line that parses but is not entry-shaped is the same
+		// unverified-tail hazard as an unparseable one: silently dropping it
+		// reports an incomplete rollback history as valid and lets
+		// restore-latest pick an older entry for the same file, so it
+		// rejects like the corrupt case; middle lines keep the skip.
+		if (isEntryShaped(parsed)) {
+			entries.push(parsed)
+		} else if (i === lines.length - 1) {
+			throw new Error(`Malformed change journal entry at line ${i + 1} of ${filePath}`)
+		}
+	}
+
+	return entries
+}
