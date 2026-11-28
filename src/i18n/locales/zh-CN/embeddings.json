@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "无法创建服务：代码索引未正确配置"
 	},
 	"orchestrator": {
+		"providerWaiting": "正在等待 {{service}}；索引将自动恢复",
+		"providerWaitingUntil": "正在等待 {{service}}；索引将于 {{time}} 自动恢复",
 		"indexingFailedNoBlocks": "索引失败：没有代码块被成功索引。这通常表示 Embedder 配置问题。",
 		"fileWatcherStarted": "文件监控已启动。",
 		"fileWatcherStopped": "文件监控已停止。",
@@ -73,5 +75,6 @@
 		"downloadFailed": "下载 semble 失败：{{errorMessage}}",
 		"checkFailed": "Semble 检查失败：{{errorMessage}}",
 		"providerReset": "Semble 提供程序已重置。磁盘缓存将保留至下次重建。"
-	}
+	},
+	"quotaExceeded": "已达到嵌入提供商的配额或计费上限。检查套餐或计费信息，然后重新启动索引。"
 }

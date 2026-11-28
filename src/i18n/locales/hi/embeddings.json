@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "सेवाएं नहीं बना सकते: कोड इंडेक्सिंग ठीक से कॉन्फ़िगर नहीं है"
 	},
 	"orchestrator": {
+		"providerWaiting": "{{service}} की प्रतीक्षा है; इंडेक्सिंग अपने आप फिर शुरू होगी",
+		"providerWaitingUntil": "{{service}} की प्रतीक्षा है; इंडेक्सिंग {{time}} पर अपने आप फिर शुरू होगी",
 		"indexingFailedNoBlocks": "इंडेक्सिंग असफल: कोई भी कोड ब्लॉक सफलतापूर्वक इंडेक्स नहीं हुआ। यह आमतौर पर एम्बेडर कॉन्फ़िगरेशन समस्या को दर्शाता है।",
 		"fileWatcherStarted": "फाइल वॉचर शुरू हुआ।",
 		"fileWatcherStopped": "फाइल वॉचर रुक गया।",
@@ -73,5 +75,6 @@
 		"downloadFailed": "semble डाउनलोड करने में विफल: {{errorMessage}}",
 		"checkFailed": "Semble जाँच विफल: {{errorMessage}}",
 		"providerReset": "Semble प्रदाता रीसेट किया गया। डिस्क कैश अगले रीबिल्ड तक बना रहता है।"
-	}
+	},
+	"quotaExceeded": "एम्बेडिंग प्रदाता का कोटा या बिलिंग सीमा पूरी हो गई है। अपना प्लान या बिलिंग जाँचो, फिर इंडेक्सिंग दोबारा शुरू करो।"
 }

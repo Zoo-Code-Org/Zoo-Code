@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "No es poden crear serveis: La indexació de codi no està configurada correctament"
 	},
 	"orchestrator": {
+		"providerWaiting": "Esperant {{service}}; la indexació es reprèn automàticament",
+		"providerWaitingUntil": "Esperant {{service}}; la indexació es reprèn automàticament a les {{time}}",
 		"indexingFailedNoBlocks": "Indexació fallida: No s'ha indexat cap bloc de codi amb èxit. Això normalment indica un problema de configuració de l'embedder.",
 		"fileWatcherStarted": "Monitor de fitxers iniciat.",
 		"fileWatcherStopped": "Monitor de fitxers aturat.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "Error en descarregar semble: {{errorMessage}}",
 		"checkFailed": "Comprovació de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveïdor de Semble restablert. La memòria cau al disc es conserva fins a la propera reconstrucció."
-	}
+	},
+	"quotaExceeded": "S'ha arribat a la quota o al límit de facturació del proveïdor d'incrustacions. Revisa el teu pla o la facturació i torna a iniciar la indexació."
 }

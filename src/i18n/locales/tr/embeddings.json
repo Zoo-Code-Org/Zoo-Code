@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "Hizmetler oluşturulamıyor: Kod indeksleme düzgün yapılandırılmamış"
 	},
 	"orchestrator": {
+		"providerWaiting": "{{service}} bekleniyor; dizinleme otomatik olarak devam eder",
+		"providerWaitingUntil": "{{service}} bekleniyor; dizinleme {{time}} zamanında otomatik olarak devam eder",
 		"indexingFailedNoBlocks": "İndeksleme başarısız: Hiçbir kod bloğu başarıyla indekslenemedi. Bu genellikle bir embedder yapılandırma sorunu olduğunu gösterir.",
 		"fileWatcherStarted": "Dosya izleyici başlatıldı.",
 		"fileWatcherStopped": "Dosya izleyici durduruldu.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "semble indirilemedi: {{errorMessage}}",
 		"checkFailed": "Semble kontrolü başarısız: {{errorMessage}}",
 		"providerReset": "Semble sağlayıcısı sıfırlandı. Diskteki önbellek bir sonraki yeniden yapılandırmaya kadar korunur."
-	}
+	},
+	"quotaExceeded": "Gömülme sağlayıcısının kotasına veya faturalandırma sınırına ulaşıldı. Planını veya faturalandırma bilgilerini kontrol et, ardından indekslemeyi tekrar başlat."
 }

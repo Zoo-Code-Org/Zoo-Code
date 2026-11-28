@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "Kan geen services maken: Code-indexering is niet correct geconfigureerd"
 	},
 	"orchestrator": {
+		"providerWaiting": "Wachten op {{service}}; de indexering wordt automatisch hervat",
+		"providerWaitingUntil": "Wachten op {{service}}; de indexering wordt automatisch hervat om {{time}}",
 		"indexingFailedNoBlocks": "Indexering mislukt: Geen codeblokken werden succesvol geïndexeerd. Dit duidt meestal op een embedder configuratieprobleem.",
 		"fileWatcherStarted": "Bestandsmonitor gestart.",
 		"fileWatcherStopped": "Bestandsmonitor gestopt.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "Downloaden van semble mislukt: {{errorMessage}}",
 		"checkFailed": "Semble-controle mislukt: {{errorMessage}}",
 		"providerReset": "Semble-provider gereset. Schijfcache blijft behouden tot de volgende heropbouw."
-	}
+	},
+	"quotaExceeded": "Het quotum of de factureringslimiet van de insluitingsprovider is bereikt. Controleer je abonnement of facturering en start de indexering opnieuw."
 }

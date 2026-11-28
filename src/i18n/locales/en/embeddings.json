@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "Cannot create services: Code indexing is not properly configured"
 	},
 	"orchestrator": {
+		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
+		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
 		"indexingFailedNoBlocks": "Indexing failed: No code blocks were successfully indexed. This usually indicates an embedder configuration issue.",
 		"fileWatcherStarted": "File watcher started.",
 		"fileWatcherStopped": "File watcher stopped.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "Failed to download semble: {{errorMessage}}",
 		"checkFailed": "Semble check failed: {{errorMessage}}",
 		"providerReset": "Semble provider reset. On-disk cache remains until next rebuild."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

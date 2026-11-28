@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "No se pueden crear servicios: La indexación de código no está configurada correctamente"
 	},
 	"orchestrator": {
+		"providerWaiting": "Esperando a {{service}}; la indexación se reanuda automáticamente",
+		"providerWaitingUntil": "Esperando a {{service}}; la indexación se reanuda automáticamente a las {{time}}",
 		"indexingFailedNoBlocks": "Indexación fallida: No se indexaron exitosamente bloques de código. Esto usualmente indica un problema de configuración del incrustador.",
 		"fileWatcherStarted": "Monitor de archivos iniciado.",
 		"fileWatcherStopped": "Monitor de archivos detenido.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "Error al descargar semble: {{errorMessage}}",
 		"checkFailed": "Verificación de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveedor de Semble restablecido. La caché en disco se conserva hasta la próxima reconstrucción."
-	}
+	},
+	"quotaExceeded": "Se ha alcanzado la cuota o el límite de facturación del proveedor de incrustaciones. Comprueba tu plan o la facturación y vuelve a iniciar la indexación."
 }

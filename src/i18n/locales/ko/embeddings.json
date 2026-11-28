@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "서비스를 생성할 수 없습니다: 코드 인덱싱이 올바르게 구성되지 않았습니다"
 	},
 	"orchestrator": {
+		"providerWaiting": "{{service}} 대기 중; 인덱싱이 자동으로 재개됩니다",
+		"providerWaitingUntil": "{{service}} 대기 중; {{time}}에 인덱싱이 자동으로 재개됩니다",
 		"indexingFailedNoBlocks": "인덱싱 실패: 코드 블록이 성공적으로 인덱싱되지 않았습니다. 이는 일반적으로 임베더 구성 문제를 나타냅니다.",
 		"fileWatcherStarted": "파일 감시자가 시작되었습니다.",
 		"fileWatcherStopped": "파일 감시자가 중지되었습니다.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "semble 다운로드 실패: {{errorMessage}}",
 		"checkFailed": "Semble 확인 실패: {{errorMessage}}",
 		"providerReset": "Semble 공급자가 재설정되었습니다. 디스크 캐시는 다음 재구축까지 유지됩니다."
-	}
+	},
+	"quotaExceeded": "임베딩 공급자의 할당량 또는 결제 한도에 도달했습니다. 요금제나 결제 정보를 확인한 다음 인덱싱을 다시 시작하세요."
 }

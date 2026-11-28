@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "Não é possível criar serviços: A indexação de código não está configurada corretamente"
 	},
 	"orchestrator": {
+		"providerWaiting": "Aguardando {{service}}; a indexação é retomada automaticamente",
+		"providerWaitingUntil": "Aguardando {{service}}; a indexação é retomada automaticamente às {{time}}",
 		"indexingFailedNoBlocks": "Indexação falhou: Nenhum bloco de código foi indexado com sucesso. Isso geralmente indica um problema de configuração do embedder.",
 		"fileWatcherStarted": "Monitor de arquivos iniciado.",
 		"fileWatcherStopped": "Monitor de arquivos parado.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "Falha ao baixar semble: {{errorMessage}}",
 		"checkFailed": "Verificação do semble falhou: {{errorMessage}}",
 		"providerReset": "Provedor Semble redefinido. O cache em disco permanece até a próxima reconstrução."
-	}
+	},
+	"quotaExceeded": "A cota ou o limite de cobrança do provedor de embeddings foi atingido. Verifique seu plano ou sua cobrança e inicie a indexação novamente."
 }

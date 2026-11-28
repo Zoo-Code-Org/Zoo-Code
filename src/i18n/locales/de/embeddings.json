@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "Kann keine Dienste erstellen: Code-Indizierung ist nicht richtig konfiguriert"
 	},
 	"orchestrator": {
+		"providerWaiting": "Warten auf {{service}}; die Indexierung wird automatisch fortgesetzt",
+		"providerWaitingUntil": "Warten auf {{service}}; die Indexierung wird um {{time}} automatisch fortgesetzt",
 		"indexingFailedNoBlocks": "Indizierung fehlgeschlagen: Keine Code-Blöcke wurden erfolgreich indiziert. Dies deutet normalerweise auf ein Embedder-Konfigurationsproblem hin.",
 		"fileWatcherStarted": "Datei-Watcher gestartet.",
 		"fileWatcherStopped": "Datei-Watcher gestoppt.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "Fehler beim Herunterladen von Semble: {{errorMessage}}",
 		"checkFailed": "Semble-Überprüfung fehlgeschlagen: {{errorMessage}}",
 		"providerReset": "Semble-Anbieter zurückgesetzt. Der Cache auf der Festplatte bleibt bis zum nächsten Neuaufbau erhalten."
-	}
+	},
+	"quotaExceeded": "Kontingent oder Abrechnungslimit des Einbettungsanbieters erreicht. Überprüfe deinen Tarif oder deine Abrechnung und starte die Indexierung erneut."
 }

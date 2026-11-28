@@ -57,6 +57,8 @@
 		"codeIndexingNotConfigured": "Nie można utworzyć usług: Indeksowanie kodu nie jest poprawnie skonfigurowane"
 	},
 	"orchestrator": {
+		"providerWaiting": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione",
+		"providerWaitingUntil": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione o {{time}}",
 		"indexingFailedNoBlocks": "Indeksowanie nie powiodło się: Żadne bloki kodu nie zostały pomyślnie zaindeksowane. To zwykle wskazuje na problem z konfiguracją embeddera.",
 		"fileWatcherStarted": "Monitor plików uruchomiony.",
 		"fileWatcherStopped": "Monitor plików zatrzymany.",
@@ -73,5 +75,6 @@
 		"downloadFailed": "Nie udało się pobrać semble: {{errorMessage}}",
 		"checkFailed": "Sprawdzenie semble nie powiodło się: {{errorMessage}}",
 		"providerReset": "Dostawca Semble zresetowany. Pamięć podręczna na dysku pozostaje do kolejnej przebudowy."
-	}
+	},
+	"quotaExceeded": "Osiągnięto limit wykorzystania lub rozliczeń u dostawcy osadzeń. Sprawdź swój plan lub rozliczenia, a następnie uruchom indeksowanie ponownie."
 }
