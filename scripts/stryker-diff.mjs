@@ -13,6 +13,64 @@ export const MAX_MUTANTS = 400
 
 export const PR_COMMENT_MARKER = "<!-- zoo-code-mutation-report -->"
 export const PR_COMMENT_FILENAME = "pr-comment.md"
+// A rejection is an outcome of the run, so it is recorded where the run records everything else. The
+// artifact step uploads whatever the report root holds, and a rejection that leaves that directory
+// empty leaves the reviewer a red mark and nothing to open.
+export const REJECTION_FILENAME = "mutation-gate-rejection.md"
+// The engine declares its own initial-test-run budget in its schema
+// (node_modules/@stryker-mutator/core/schema/stryker-schema.json, key dryRunTimeoutMinutes) with a
+// default of 5 minutes, and this repository's stryker.config.mjs does not override it. A whole-delta
+// run that stops inside that default budget has not been measured: it has run out of budget. The tool
+// therefore states the budget it passed instead of letting an engine default read as a verdict.
+export const ENGINE_DEFAULT_DRY_RUN_MINUTES = 5
+export const DRY_RUN_TIMEOUT_MINUTES = 20
+// The outer kill stays above the budget handed to the engine, so the engine - not this tool - is the
+// one that decides when an initial test run stops.
+export const SPAWN_GRACE_MINUTES = 5
+export const spawnTimeoutMs = (DRY_RUN_TIMEOUT_MINUTES + SPAWN_GRACE_MINUTES) * 60 * 1_000
+// The mutation-diff job in .github/workflows/mutation-testing.yml carries timeout-minutes: 30, and a job
+// cancelled at that limit stops the script before it can write the rejection record or append the job
+// summary. Two sequential initial test runs of DRY_RUN_TIMEOUT_MINUTES each are already over that
+// limit, so the manifest measures the time it has spent itself and hands each further run only the
+// budget that is left: SPAWN_GRACE_MINUTES stays the headroom between the budget handed to the engine
+// and the outer kill, and TERMINUS_RESERVE_MINUTES is held back for the rejection record and the
+// job summary. A run is therefore never started unless it can still finish before the job is cancelled.
+export const JOB_TIMEOUT_MINUTES = 30
+export const TERMINUS_RESERVE_MINUTES = 3
+export const MANIFEST_BUDGET_MINUTES = JOB_TIMEOUT_MINUTES - TERMINUS_RESERVE_MINUTES
+export const manifestBudgetMs = MANIFEST_BUDGET_MINUTES * 60 * 1_000
+// Related-test discovery runs before the engine is handed a budget, so it needs its own cap: the
+// time the manifest still has left after TERMINUS_RESERVE_MINUTES, which is what recording a stop and
+// appending the job summary costs. A cap of zero means discovery is refused before it starts.
+export const DISCOVERY_TIMEOUT_MINUTES = 5
+export const discoveryTimeoutMs = (spentMinutes, budgetMinutes = MANIFEST_BUDGET_MINUTES) => {
+	const spareMinutes = budgetMinutes - spentMinutes - TERMINUS_RESERVE_MINUTES
+	if (spareMinutes <= 0) return 0
+	// Floor to whole milliseconds: the value goes straight into spawnSync's timeout option, and a
+	// fractional reading of the elapsed clock (a partial minute spent on the packages before
+	// this one) would otherwise hand the timeout a fractional number of milliseconds.
+	return Math.floor(Math.min(DISCOVERY_TIMEOUT_MINUTES, spareMinutes) * 60 * 1_000)
+}
+
+export function manifestRunBudgetMinutes(spentMinutes, budgetMinutes = MANIFEST_BUDGET_MINUTES) {
+	const spareMinutes = budgetMinutes - spentMinutes
+	if (spareMinutes <= SPAWN_GRACE_MINUTES) return 0
+	return Math.min(DRY_RUN_TIMEOUT_MINUTES, Math.floor(spareMinutes - SPAWN_GRACE_MINUTES))
+}
+
+export function manifestBudgetError(packageEntry, phase, spentMinutes, budgetMinutes) {
+	const error = new Error(
+		`${packageEntry.id} ${phase} was not launched: the manifest had spent ${Math.floor(spentMinutes)} min of its ${budgetMinutes} min budget, the mutation-diff job carries ${JOB_TIMEOUT_MINUTES} min and ${TERMINUS_RESERVE_MINUTES} min is held back for the rejection record and the job summary. ` +
+			"Split the PR or obtain a maintainer-reviewed narrow exclusion.",
+	)
+	// The per-package catch reports a failed package as an advisory row; a manifest that ran out of its
+	// budget is not a failed package, it is the run itself ending, so the flag keeps it on the way out.
+	error.manifestBudgetStop = true
+	return error
+}
+
+const dryRunBudgetLabel = (runMinutes) =>
+	`initial-test-run budget ${runMinutes} min (engine schema default ${ENGINE_DEFAULT_DRY_RUN_MINUTES} min)`
 
 export const PACKAGE_CONFIGS = [
 	{
@@ -351,9 +409,61 @@ export function shouldUseVitestRelated(packageEntry) {
 	return (packageEntry.testFiles?.length ?? 0) === 0 && packageEntry.vitestRelated !== false
 }
 
+// Read the executable entry the package itself declares in its package.json "bin" field, so the file
+// that runs is the one the engine names rather than whichever extensionless shim libuv happens to
+// resolve on this platform. Returns undefined when no such declaration exists, leaving the old shim
+// lookup as the fallback.
+export function resolveDeclaredBinEntry(repoRoot, runRoot, packageName, binName, packageRoot) {
+	for (const root of [
+		...new Set([runRoot, packageRoot, repoRoot].filter((candidate) => typeof candidate === "string")),
+	]) {
+		const packageDir = path.join(root, "node_modules", packageName)
+		const manifestPath = path.join(packageDir, "package.json")
+		if (!fs.existsSync(manifestPath)) {
+			continue
+		}
+		let declared
+		try {
+			declared = JSON.parse(fs.readFileSync(manifestPath, "utf8")).bin
+		} catch {
+			continue
+		}
+		const entry = typeof declared === "string" ? declared : declared?.[binName]
+		if (typeof entry !== "string") {
+			continue
+		}
+		const target = path.join(packageDir, entry.replace(/^\.\//, ""))
+		if (fs.existsSync(target)) {
+			return target
+		}
+	}
+	return undefined
+}
+
+// A bare node_modules/.bin/<name> file is the POSIX shell wrapper; on Windows the runnable files are
+// the .cmd and .ps1 siblings, and picking between them is libuv's extension guess. When the target is
+// already a JavaScript entry, run it with the Node binary that is executing this tool.
+function spawnDeclaredEntry(binary, args, options) {
+	if (/\.[cm]?jsx?$/i.test(binary)) {
+		return spawnSync(process.execPath, [binary, ...args], options)
+	}
+	return spawnSync(binary, args, options)
+}
+
+export function resolveStrykerBinary(repoRoot, runRoot) {
+	return (
+		resolveDeclaredBinEntry(repoRoot, runRoot, "@stryker-mutator/core", "stryker") ??
+		path.join(repoRoot, "node_modules/.bin/stryker")
+	)
+}
+
 export function resolveVitestBinary(repoRoot, packageEntry) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
+	const declared = resolveDeclaredBinEntry(repoRoot, runRoot, "vitest", "vitest", packageRoot)
+	if (declared) {
+		return declared
+	}
 	const candidates = [...new Set([runRoot, packageRoot, repoRoot])].map((root) =>
 		path.join(root, "node_modules/.bin/vitest"),
 	)
@@ -364,26 +474,31 @@ export function resolveStrykerTempDir(repoRoot, runRoot) {
 	return path.relative(runRoot, path.join(repoRoot, ".stryker-tmp")) || ".stryker-tmp"
 }
 
-export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory) {
+export function discoverRelatedTestFiles(
+	repoRoot,
+	packageEntry,
+	reportDirectory,
+	timeoutMs = DISCOVERY_TIMEOUT_MINUTES * 60 * 1_000,
+) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
 	const outputFile = path.join(reportDirectory, "vitest-related.json")
 	const configFile = path.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig)).replaceAll("\\", "/")
 	const sourceFiles = [...new Set(packageEntry.selectors.map(selectorFile))]
-	const result = spawnSync(
+	const result = spawnDeclaredEntry(
 		resolveVitestBinary(repoRoot, packageEntry),
 		["related", ...sourceFiles, "--run", "--config", configFile, "--reporter=json", `--outputFile=${outputFile}`],
 		{
 			cwd: runRoot,
 			encoding: "utf8",
-			timeout: 5 * 60 * 1_000,
+			timeout: timeoutMs,
 			maxBuffer: 50 * 1024 * 1024,
 			env: process.env,
 		},
 	)
 
 	if (result.error?.code === "ETIMEDOUT") {
-		throw new Error(`${packageEntry.id} related-test discovery exceeded 5 minutes`)
+		throw new Error(`${packageEntry.id} related-test discovery exceeded ${Math.round(timeoutMs / 60_000)} minutes`)
 	}
 	if (result.error) {
 		throw new Error(`${packageEntry.id} related-test discovery could not start: ${result.error.message}`)
@@ -403,7 +518,7 @@ export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory
 	return testFiles
 }
 
-function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
+function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly, runMinutes = DRY_RUN_TIMEOUT_MINUTES) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
 	const reportDirectory = path.join(reportRoot, packageEntry.id)
@@ -417,11 +532,17 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 		packageEntry.selectors.join(","),
 	]
 	if (dryRunOnly) args.push("--dryRunOnly", "--reporters", "clear-text", "--logLevel", "info")
+	args.push("--dryRunTimeoutMinutes", String(runMinutes))
 
-	const result = spawnSync(path.join(repoRoot, "node_modules/.bin/stryker"), args, {
+	const strykerBinary = resolveStrykerBinary(repoRoot, runRoot)
+	console.log(
+		`${packageEntry.id}: Stryker ${dryRunOnly ? "preflight" : "run"} starting via ${path.relative(repoRoot, strykerBinary)} with ${dryRunBudgetLabel(runMinutes)}; outer kill ${runMinutes + SPAWN_GRACE_MINUTES} min`,
+	)
+
+	const result = spawnDeclaredEntry(strykerBinary, args, {
 		cwd: runRoot,
 		encoding: "utf8",
-		timeout: 12 * 60 * 1_000,
+		timeout: (runMinutes + SPAWN_GRACE_MINUTES) * 60 * 1_000,
 		maxBuffer: 50 * 1024 * 1024,
 		env: {
 			...process.env,
@@ -439,17 +560,17 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 	const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
 	if (result.error?.code === "ETIMEDOUT") {
 		throw new Error(
-			`${packageEntry.id} mutation run exceeded 12 minutes. Split the PR or obtain a maintainer-reviewed narrow exclusion.`,
+			`${packageEntry.id} mutation run exceeded the ${runMinutes + SPAWN_GRACE_MINUTES} minute outer kill while running under an ${dryRunBudgetLabel(runMinutes)}. Split the PR or obtain a maintainer-reviewed narrow exclusion.`,
 		)
 	}
 	if (result.error) {
 		throw new Error(
-			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} could not start: ${result.error.message}`,
+			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} could not start via ${path.relative(repoRoot, strykerBinary)} under an ${dryRunBudgetLabel(runMinutes)}: ${result.error.message}`,
 		)
 	}
 	if (result.status !== 0) {
 		throw new Error(
-			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} failed:\n${stripAnsi(output).trim()}`,
+			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} failed via ${path.relative(repoRoot, strykerBinary)} under an ${dryRunBudgetLabel(runMinutes)} (exit ${result.status}, which is not a mutant verdict on its own):\n${stripAnsi(output).trim()}`,
 		)
 	}
 
@@ -707,6 +828,39 @@ export function appendSummary(rows, advisories, manifest, commentFile) {
 	}
 }
 
+export function formatRejection(baseSha, headSha, error) {
+	return [
+		"## Changed-code mutation testing",
+
+		"The gate rejected the run before it produced a mutation report.",
+
+		`- Base: \`${baseSha.slice(0, 12)}\``,
+		`- Head: \`${headSha.slice(0, 12)}\``,
+
+		`Mutation gate rejected: ${error.message}`,
+	].join("\n")
+}
+
+export function recordRejection(reportRoot, baseSha, headSha, error) {
+	const body = formatRejection(baseSha, headSha, error)
+	try {
+		fs.mkdirSync(reportRoot, { recursive: true })
+		fs.writeFileSync(path.join(reportRoot, REJECTION_FILENAME), body)
+	} catch (error) {
+		console.warn(
+			`::warning title=Mutation test advisory::Could not write the mutation gate rejection file: ${escapeWorkflowData(error.message)}`,
+		)
+	}
+	if (!process.env.GITHUB_STEP_SUMMARY) return
+	try {
+		fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, body)
+	} catch (error) {
+		console.warn(
+			`::warning title=Mutation test advisory::Could not write the job summary: ${escapeWorkflowData(error.message)}`,
+		)
+	}
+}
+
 export function evaluateReport(report, packageEntry) {
 	const counts = mutantCounts(report)
 	const advisories = []
@@ -732,11 +886,21 @@ export function runManifest(
 	{
 		runMutation = runStryker,
 		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+		discoverTests = discoverRelatedTestFiles,
+		now = () => Date.now(),
+		budgetMinutes = MANIFEST_BUDGET_MINUTES,
 	} = {},
 ) {
 	const rows = []
 	const advisories = [...(manifest.advisories ?? [])]
 	const annotationState = { total: 0, perFile: new Map() }
+	const manifestStartMs = now()
+	const launchBudgetMinutes = (packageEntry, phase) => {
+		const spentMinutes = (now() - manifestStartMs) / 60_000
+		const minutes = manifestRunBudgetMinutes(spentMinutes, budgetMinutes)
+		if (minutes === 0) throw manifestBudgetError(packageEntry, phase, spentMinutes, budgetMinutes)
+		return minutes
+	}
 
 	for (const packageEntry of manifest.packages) {
 		let counts
@@ -747,9 +911,21 @@ export function runManifest(
 			const reportDirectory = path.join(reportRoot, packageEntry.id)
 			fs.mkdirSync(reportDirectory, { recursive: true })
 			if (packageEntry.discoverRelatedTests) {
-				packageEntry.testFiles = discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory)
+				const spentBeforeDiscovery = (now() - manifestStartMs) / 60_000
+				const discoveryMs = discoveryTimeoutMs(spentBeforeDiscovery, budgetMinutes)
+				if (discoveryMs === 0) {
+					throw manifestBudgetError(
+						packageEntry,
+						"related-test discovery",
+						spentBeforeDiscovery,
+						budgetMinutes,
+					)
+				}
+				packageEntry.testFiles = discoverTests(repoRoot, packageEntry, reportDirectory, discoveryMs)
 			}
-			const preflightOutput = stripAnsi(runMutation(repoRoot, packageEntry, reportRoot, true))
+			const preflightOutput = stripAnsi(
+				runMutation(repoRoot, packageEntry, reportRoot, true, launchBudgetMinutes(packageEntry, "preflight")),
+			)
 			const mutantMatch = /Instrumented \d+ source file\(s\) with (\d+) mutant\(s\)/.exec(preflightOutput)
 			if (!mutantMatch) throw new Error(`${packageEntry.id} preflight did not report a mutant count`)
 			const generatedMutants = Number(mutantMatch[1])
@@ -779,7 +955,7 @@ export function runManifest(
 				continue
 			}
 
-			runMutation(repoRoot, packageEntry, reportRoot, false)
+			runMutation(repoRoot, packageEntry, reportRoot, false, launchBudgetMinutes(packageEntry, "mutation run"))
 			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
 			const report = readMutationReport(jsonReportPath)
 			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
@@ -804,6 +980,13 @@ export function runManifest(
 				result: counts.blocking.length > 0 || counts.advisories.length > 0 ? "Advisory findings" : "Passed",
 			})
 		} catch (error) {
+			if (error?.manifestBudgetStop === true) {
+				// The budget stop ends the run itself, so the summary has to carry the packages that did
+				// finish before the rejection travels to main; main keeps writing the rejection record as a
+				// separate outcome in its own catch.
+				appendSummary(rows, advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
+				throw error
+			}
 			advisories.push(error.message)
 			rows.push({
 				id: packageEntry.id,
@@ -844,18 +1027,24 @@ function main() {
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
-	const manifest = selectFromGit(repoRoot, baseSha, headSha)
-	if (manifest.packages.length === 0) {
-		appendSummary([], manifest.advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
-		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
-		return
-	}
+	try {
+		const manifest = selectFromGit(repoRoot, baseSha, headSha)
+		if (manifest.packages.length === 0) {
+			appendSummary([], manifest.advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
+			console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
+			return
+		}
 
-	console.log(
-		`Mutation-testing ${manifest.packages.length} package(s) from merge base ${manifest.mergeBase.slice(0, 12)}: ` +
-			manifest.packages.map((entry) => `${entry.id} (${entry.changedExecutableLines} lines)`).join(", "),
-	)
-	runManifest(repoRoot, manifest, reportRoot)
+		console.log(
+			`Mutation-testing ${manifest.packages.length} package(s) from merge base ${manifest.mergeBase.slice(0, 12)}: ` +
+				manifest.packages.map((entry) => `${entry.id} (${entry.changedExecutableLines} lines)`).join(", "),
+		)
+		runManifest(repoRoot, manifest, reportRoot)
+	} catch (error) {
+		// The rejection writer never throws, so the attempt to record cannot replace the rejection.
+		recordRejection(reportRoot, baseSha, headSha, error)
+		throw error
+	}
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
