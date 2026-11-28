@@ -1,5 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-tool-usage-attribution.spec.ts
 
+import { buildMcpToolName } from "../../../utils/mcp-name"
+import { NativeToolCallParser } from "../NativeToolCallParser"
 import { DispatchState, type PendingWork } from "../../task/dispatchState"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { TelemetryEventName } from "@roo-code/types"
@@ -342,6 +344,130 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 	})
 
 	describe("native mcp_tool_use block", () => {
+		it.each([55, 57, 58, 59, 70].flatMap((length) => [false, true].map((alias) => ({ length, alias }))))(
+			"resolves generated names truncated within a $length-character server (alias: $alias)",
+			async ({ length, alias }) => {
+				const serverName = "s".repeat(length)
+				const toolName = "original_tool"
+				const name = buildMcpToolName(serverName, toolName)
+				mockTask.providerRef = {
+					deref: () => ({
+						getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
+						getMcpHub: () => ({
+							findServerNameBySanitizedName: () => undefined,
+							getServers: () => [
+								{ name: serverName, tools: [{ name: toolName, enabledForPrompt: true }] },
+							],
+						}),
+					}),
+				}
+				const parsed = NativeToolCallParser.parseDynamicMcpTool({
+					id: "truncated",
+					name: alias ? name.replace(/-/g, "_") : name,
+					arguments: "{}",
+				})
+				expect(parsed).not.toBeNull()
+				mockTask.assistantMessageContent = [parsed]
+				const handle = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+				// The structural task double provides the dispatch state, provider, API and callbacks used here.
+				await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
+				expect(handle).toHaveBeenCalledWith(
+					expect.anything(),
+					expect.objectContaining({
+						params: expect.objectContaining({ server_name: serverName, tool_name: toolName }),
+					}),
+					expect.anything(),
+				)
+				handle.mockRestore()
+			},
+		)
+
+		it.each([false, true])(
+			"uses the scoped first catalog entry for a truncated collision (allowed: %s)",
+			async (allowed) => {
+				const serverName = "s".repeat(70)
+				const getAllServers = vi.fn(() => [{ name: serverName, tools: [{ name: "global" }] }])
+				mockTask.getTaskMode = vi.fn().mockResolvedValue("scoped")
+				mockTask.providerRef = {
+					deref: () => ({
+						getState: vi.fn().mockResolvedValue({ mode: "scoped" }),
+						getMcpHub: () => ({
+							findServerNameBySanitizedName: () => undefined,
+							getServers: () => [
+								{
+									name: serverName,
+									tools: [
+										{ name: "hidden", enabledForPrompt: false },
+										{ name: "first" },
+										{ name: "collision" },
+									],
+								},
+							],
+							getAllServers,
+						}),
+					}),
+				}
+				const name = buildMcpToolName(serverName, "first")
+				const parsed = NativeToolCallParser.parseDynamicMcpTool({ id: "collision", name, arguments: "{}" })
+				if (!parsed) throw new Error("Expected the generated MCP name to parse")
+				mockTask.assistantMessageContent = [parsed]
+				const handle = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+				// The task double provides the request state and presenter callbacks.
+				const task = mockTask as unknown as Task
+				const snapshot: RequestPolicySnapshot = {
+					...baseSnapshot,
+					customModes: [
+						{
+							slug: "scoped",
+							name: "Scoped",
+							roleDefinition: "Scoped",
+							groups: ["mcp"],
+							allowedMcpServers: allowed ? [serverName] : [],
+						},
+					],
+				}
+				if (!allowed) {
+					parsed.partial = true
+					await presentAssistantMessage(task, snapshot)
+					expect(handle).not.toHaveBeenCalled()
+					expect(mockTask.pushToolResultToUserContent).not.toHaveBeenCalled()
+					expect(mockTask.userMessageContent).toEqual([])
+					expect(mockTask.recordToolError).not.toHaveBeenCalled()
+					parsed.partial = false
+				}
+				await presentAssistantMessage(task, snapshot)
+				if (allowed) {
+					expect(handle).toHaveBeenCalledWith(
+						expect.anything(),
+						expect.objectContaining({
+							params: expect.objectContaining({ server_name: serverName, tool_name: "first" }),
+						}),
+						expect.anything(),
+					)
+				} else {
+					expect(handle).not.toHaveBeenCalled()
+					expect(mockTask.recordToolError).toHaveBeenCalledTimes(1)
+					expect(mockTask.recordToolError).toHaveBeenCalledWith(
+						"use_mcp_tool",
+						"MCP tool is unavailable in the current catalog.",
+					)
+					const result = {
+						type: "tool_result",
+						tool_use_id: "collision",
+						content: JSON.stringify({
+							status: "error",
+							message: "The tool execution failed",
+							error: "MCP tool is unavailable in the current catalog.",
+						}),
+					}
+					expect(mockTask.pushToolResultToUserContent).toHaveBeenCalledExactlyOnceWith(result)
+					expect(mockTask.userMessageContent).toEqual([result])
+				}
+				expect(getAllServers).not.toHaveBeenCalled()
+				handle.mockRestore()
+			},
+		)
+
 		it("records exactly one attempt once the MCP tool's own validation passes", async () => {
 			mockTask.providerRef = {
 				deref: () => ({

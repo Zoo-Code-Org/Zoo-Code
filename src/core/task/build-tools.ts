@@ -3,9 +3,12 @@ import path from "path"
 import type OpenAI from "openai"
 
 import type { ProviderSettings, ModeConfig, ModelInfo } from "@roo-code/types"
+import { resolveMcpDynamicLoadSettings } from "@roo-code/types"
 import { customToolRegistry, formatNative } from "@roo-code/core"
 
 import type { ClineProvider } from "../webview/ClineProvider"
+import type { Task } from "./Task"
+import { getMcpToolCatalog } from "../prompts/tools/native-tools/mcp_server"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
 import { getModeBySlug, defaultModeSlug } from "../../shared/modes"
 
@@ -17,6 +20,10 @@ import {
 } from "../prompts/tools/filter-tools-for-mode"
 
 interface BuildToolsOptions {
+	task?: Pick<Task, "attachedMcpToolNames" | "initializeAttachedMcpTools">
+	mcpDynamicLoadThreshold?: number
+	mcpDynamicLoadInitialK?: number
+	mcpDynamicLoadSearchTurns?: number
 	provider: ClineProvider
 	cwd: string
 	mode: string | undefined
@@ -134,10 +141,29 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	// the same disabledTools/modelInfo the native filter consumes also gate the
 	// dynamic mcp--* declarations, which all represent use_mcp_tool.
 	const mcpTools = getMcpServerTools(mcpHub, allowedMcpServers)
-	const filteredMcpTools = filterMcpToolsForMode(mcpTools, mode, customModes, experiments, {
+	let filteredMcpTools = filterMcpToolsForMode(mcpTools, mode, customModes, experiments, {
 		disabledTools,
 		modelInfo,
 	})
+	let advertisedMcpTools = mcpTools
+	const { threshold, initialK, searchTurns } = resolveMcpDynamicLoadSettings(
+		options.mcpDynamicLoadThreshold,
+		options.mcpDynamicLoadInitialK,
+		options.mcpDynamicLoadSearchTurns,
+	)
+	if (options.task && searchTurns > 0 && filteredMcpTools.length > threshold) {
+		const scopedNames = new Set(filteredMcpTools.map(getToolName))
+		const scopedTools = getMcpToolCatalog(mcpHub, allowedMcpServers)
+			.filter(({ name }) => scopedNames.has(name))
+			.map(({ serverName, tool }) => ({ serverName, toolName: tool.name, description: tool.description ?? "" }))
+		await options.task.initializeAttachedMcpTools(scopedTools, { initialK, searchTurns })
+		// This gate limits advertised definitions. Existing execution authorization
+		// still decides whether a requested tool call is permitted.
+		const attached = options.task.attachedMcpToolNames
+		filteredMcpTools = filteredMcpTools.filter((tool) => attached.has(getToolName(tool)))
+		// Gemini also receives only attached MCP definitions, not the full catalog.
+		advertisedMcpTools = mcpTools.filter((tool) => attached.has(getToolName(tool)))
+	}
 
 	// Add custom tools if they are available and the experiment is enabled.
 	let nativeCustomTools: OpenAI.Chat.ChatCompletionFunctionTool[] = []
@@ -159,7 +185,7 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	// allowed names based on mode filtering
 	if (includeAllToolsWithRestrictions) {
 		// Combine ALL tools (unfiltered native + all MCP + custom)
-		const allTools = [...nativeTools, ...mcpTools, ...nativeCustomTools]
+		const allTools = [...nativeTools, ...advertisedMcpTools, ...nativeCustomTools]
 
 		// Extract names of tools that are allowed based on mode filtering.
 		// Resolve any alias names to canonical names to ensure consistency with allTools

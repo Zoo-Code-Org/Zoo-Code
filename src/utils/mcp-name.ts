@@ -1,3 +1,5 @@
+import { isCanonicalMcpToolName } from "@roo-code/types"
+
 /**
  * Utilities for sanitizing MCP server and tool names to conform to
  * API function name requirements across all providers.
@@ -53,6 +55,11 @@ export function normalizeMcpToolName(toolName: string): string {
 		// Prefer the canonical separator when present: a raw "--" can only be a
 		// separator, while "__" may be part of a legal server or tool name
 		const parts = toolName.includes(MCP_TOOL_SEPARATOR) ? toolName.split(MCP_TOOL_SEPARATOR) : toolName.split("__")
+
+		// A truncated server can consume the tool separator. Normalize its lone prefix.
+		if (toolName.length === 64 && parts.length === 2 && parts[0] === MCP_TOOL_PREFIX) {
+			return `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${parts[1]}`
+		}
 
 		if (parts.length >= 3 && parts[0].toLowerCase() === "mcp") {
 			// Reconstruct with proper -- separators
@@ -161,13 +168,18 @@ export function parseMcpToolName(mcpToolName: string): { serverName: string; too
 	// Split on the separator to get server and tool names
 	const separatorIndex = remainder.indexOf(MCP_TOOL_SEPARATOR)
 	if (separatorIndex === -1) {
+		// A long server name can consume the entire generated name. Dispatch
+		// resolves these prefixes against the advertised catalog before execution.
+		if (normalizedName.length === 64 && isCanonicalMcpToolName(normalizedName)) {
+			return { serverName: remainder, toolName: "" }
+		}
 		return null
 	}
 
 	const serverName = remainder.slice(0, separatorIndex)
 	const toolName = remainder.slice(separatorIndex + MCP_TOOL_SEPARATOR.length)
 
-	if (!serverName || !toolName) {
+	if ((!serverName || !toolName) && !(normalizedName.length === 64 && isCanonicalMcpToolName(normalizedName))) {
 		return null
 	}
 

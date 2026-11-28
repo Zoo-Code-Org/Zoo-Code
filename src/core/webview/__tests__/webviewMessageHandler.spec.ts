@@ -1929,6 +1929,33 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 	})
 })
 
+describe.each(["mcp.dynamicLoad.threshold", "mcp.dynamicLoad.initialK", "mcp.dynamicLoad.searchTurns"] as const)(
+	"webviewMessageHandler - %s",
+	(key) => {
+		beforeEach(() => vi.clearAllMocks())
+		it.each([undefined, 1, 30, 100])("persists valid value %s", async (value) => {
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { [key]: value },
+			})
+			expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, value)
+		})
+		it.each([-1, 1.5, NaN, Infinity])("rejects invalid value %s", async (value) => {
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { [key]: value },
+			})
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		})
+		it("accepts zero except for initialK", async () => {
+			await webviewMessageHandler(mockClineProvider, { type: "updateSettings", updatedSettings: { [key]: 0 } })
+			if (key !== "mcp.dynamicLoad.initialK")
+				expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, 0)
+			else expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		})
+	},
+)
+
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

@@ -1,10 +1,33 @@
 import { z } from "zod"
 
-/**
- * Maximum number of MCP tools that can be enabled before showing a warning.
- * LLMs tend to perform poorly when given too many tools to choose from.
- */
+/** Canonical generated names, including prefixes cut off at the provider's 64-character limit. */
+export function isCanonicalMcpToolName(name: string): boolean {
+	if (name.length > 64 || !/^mcp--[A-Za-z_][\w-]*$/.test(name)) return false
+	// Check the separator separately so two overlapping repetitions cannot backtrack.
+	return name.length === 64 || /--[A-Za-z_]/.test(name.slice(6))
+}
+
+export const DEFAULT_MCP_DYNAMIC_LOAD_THRESHOLD = 50
+export const DEFAULT_MCP_DYNAMIC_LOAD_INITIAL_K = 30
+export const DEFAULT_MCP_DYNAMIC_LOAD_SEARCH_TURNS = 7
+export const MAX_ATTACHED_DURING_ROLLING = 60
+
+/** @deprecated Legacy catalog advisory. Runtime routing uses the dynamic-load settings. */
 export const MAX_MCP_TOOLS_THRESHOLD = 60
+
+export const mcpDynamicLoadThresholdSchema = z.number().int().min(0)
+export const mcpDynamicLoadInitialKSchema = z.number().int().min(1)
+export const mcpDynamicLoadSearchTurnsSchema = z.number().int().min(0)
+
+/** Apply the same validation to persisted values and direct runtime callers. */
+export function resolveMcpDynamicLoadSettings(threshold: unknown, initialK: unknown, searchTurns?: unknown) {
+	return {
+		threshold: mcpDynamicLoadThresholdSchema.safeParse(threshold).data ?? DEFAULT_MCP_DYNAMIC_LOAD_THRESHOLD,
+		initialK: mcpDynamicLoadInitialKSchema.safeParse(initialK).data ?? DEFAULT_MCP_DYNAMIC_LOAD_INITIAL_K,
+		searchTurns:
+			mcpDynamicLoadSearchTurnsSchema.safeParse(searchTurns).data ?? DEFAULT_MCP_DYNAMIC_LOAD_SEARCH_TURNS,
+	}
+}
 
 /**
  * McpServerUse
@@ -155,7 +178,7 @@ export interface EnabledMcpToolsCount {
  * @example
  * const { enabledToolCount, enabledServerCount } = countEnabledMcpTools(mcpServers)
  * if (enabledToolCount > MAX_MCP_TOOLS_THRESHOLD) {
- *   // Show warning
+ *   // Show the legacy catalog advisory, separate from task-scoped routing.
  * }
  */
 export function countEnabledMcpTools(servers: McpServer[]): EnabledMcpToolsCount {

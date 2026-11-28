@@ -415,6 +415,9 @@ export type ExtensionState = Pick<
 	experiments: Experiments // Map of experiment IDs to their enabled state
 
 	mcpEnabled: boolean
+	"mcp.dynamicLoad.threshold"?: number
+	"mcp.dynamicLoad.initialK"?: number
+	"mcp.dynamicLoad.searchTurns"?: number
 
 	mode: string
 	customModes: ModeConfig[]

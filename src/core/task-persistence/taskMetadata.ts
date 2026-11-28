@@ -23,6 +23,8 @@ export type TaskMetadataOptions = {
 	mode?: string
 	/** Provider profile name for the task (sticky profile feature) */
 	apiConfigName?: string
+	attachedMcpToolNames?: string[]
+	mcpToolSelectionEpoch?: number
 	/** Initial status for the task (e.g., "active" for child tasks) */
 	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 }
@@ -38,6 +40,8 @@ export async function taskMetadata({
 	mode,
 	apiConfigName,
 	initialStatus,
+	attachedMcpToolNames,
+	mcpToolSelectionEpoch,
 }: TaskMetadataOptions) {
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, id)
 
@@ -112,6 +116,8 @@ export async function taskMetadata({
 		mode,
 		...(typeof apiConfigName === "string" && apiConfigName.length > 0 ? { apiConfigName } : {}),
 		...(initialStatus && { status: initialStatus }),
+		...(attachedMcpToolNames !== undefined && { attachedMcpToolNames }),
+		...(mcpToolSelectionEpoch !== undefined && { mcpToolSelectionEpoch }),
 	}
 
 	return { historyItem, tokenUsage }

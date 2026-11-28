@@ -16,6 +16,10 @@ const hosts = ["A", "B"] as const
 type Host = (typeof hosts)[number]
 type TaskId = "parent" | "child-a" | "child-b"
 type OperationId =
+	| "mcp-attach-a"
+	| "mcp-attach-b"
+	| "mcp-empty-a"
+	| "mcp-reset-a"
 	| "metadata-a"
 	| "metadata-b"
 	| "distinct-a"
@@ -81,6 +85,7 @@ interface OperationSpec {
 
 interface Scenario {
 	name: string
+	initialRecords?: RecordMap
 	operations: OperationSpec[]
 	targetViolation?: { issue: "#1469" | "#1021"; message: string; expectedActions: string[] }
 	check(state: ModelState): string[]
@@ -98,6 +103,8 @@ const commonInvariantNames = [
 	"file lock ownership",
 	"disk field preservation",
 	"childIds union",
+	"MCP attachments union within a generation",
+	"MCP generation ownership",
 	"pair write order",
 	"whole-delta rejection",
 ] as const
@@ -110,6 +117,29 @@ const semanticLandmarks = {
 				(taskId) => canonical(state.caches[host][taskId]) !== canonical(state.disk[taskId]),
 			),
 		),
+	"mcp-reset-survives-stale-save": (state: ModelState) => {
+		const reset = state.commits.findIndex((entry) => entry.operationId === "mcp-reset-a")
+		const stale = state.commits.findIndex((entry) => entry.operationId === "mcp-attach-b")
+		return (
+			reset >= 0 &&
+			stale > reset &&
+			state.disk.parent?.mcpToolSelectionEpoch === 1 &&
+			state.disk.parent.attachedMcpToolNames === undefined
+		)
+	},
+	"mcp-attachments-merged": (state: ModelState) =>
+		state.operations["mcp-attach-a"]?.phase === "done" &&
+		state.operations["mcp-attach-b"]?.phase === "done" &&
+		["mcp--catalog--a", "mcp--catalog--b"].every((name) => state.disk.parent?.attachedMcpToolNames?.includes(name)),
+	"mcp-empty-snapshot-after-attachment": (state: ModelState) => {
+		const attached = state.commits.findIndex((entry) => entry.operationId === "mcp-attach-b")
+		const empty = state.commits.findIndex((entry) => entry.operationId === "mcp-empty-a")
+		return (
+			attached >= 0 &&
+			empty > attached &&
+			Boolean(state.disk.parent?.attachedMcpToolNames?.includes("mcp--catalog--b"))
+		)
+	},
 	"pair-first-commit-second-pending": (state: ModelState) =>
 		(["complete-a", "abandon-b"] as OperationId[]).some((operationId) => {
 			const operation = state.operations[operationId]
@@ -183,6 +213,36 @@ function getRequired(records: RecordMap, taskId: TaskId): HistoryItem {
 }
 
 const operationSpecs: Record<OperationId, OperationSpec> = {
+	"mcp-attach-a": {
+		id: "mcp-attach-a",
+		host: "A",
+		externalSnapshot: true,
+		allowRefreshAfterRead: true,
+		buildWrites: (snapshot) => [{ ...getRequired(snapshot, "parent"), attachedMcpToolNames: ["mcp--catalog--a"] }],
+	},
+	"mcp-attach-b": {
+		id: "mcp-attach-b",
+		host: "B",
+		externalSnapshot: true,
+		allowRefreshAfterRead: true,
+		buildWrites: (snapshot) => [{ ...getRequired(snapshot, "parent"), attachedMcpToolNames: ["mcp--catalog--b"] }],
+	},
+	"mcp-reset-a": {
+		id: "mcp-reset-a",
+		host: "A",
+		externalSnapshot: true,
+		allowRefreshAfterRead: true,
+		buildWrites: (snapshot) => [
+			{ ...getRequired(snapshot, "parent"), mcpToolSelectionEpoch: 1, attachedMcpToolNames: undefined },
+		],
+	},
+	"mcp-empty-a": {
+		id: "mcp-empty-a",
+		host: "A",
+		externalSnapshot: true,
+		allowRefreshAfterRead: true,
+		buildWrites: (snapshot) => [{ ...getRequired(snapshot, "parent"), attachedMcpToolNames: [] }],
+	},
 	"metadata-a": {
 		id: "metadata-a",
 		host: "A",
@@ -493,6 +553,30 @@ function commonViolations(state: ModelState, scenario: Scenario): string[] {
 					violations.push(`${commit.operationId} lost disk field ${key} absent from its delta`)
 				}
 			}
+			if (
+				commit.delta.attachedMcpToolNames &&
+				commit.previous.attachedMcpToolNames &&
+				(commit.delta.mcpToolSelectionEpoch ?? 0) === (commit.previous.mcpToolSelectionEpoch ?? 0)
+			) {
+				const expected = new Set([
+					...commit.previous.attachedMcpToolNames,
+					...commit.delta.attachedMcpToolNames,
+				])
+				if ([...expected].some((name) => !commit.next.attachedMcpToolNames?.includes(name))) {
+					violations.push(`${commit.operationId} lost a concurrent MCP attachment`)
+				}
+			}
+			const previousEpoch = commit.previous.mcpToolSelectionEpoch ?? 0
+			const snapshotEpoch = commit.delta.mcpToolSelectionEpoch ?? 0
+			if ((commit.next.mcpToolSelectionEpoch ?? 0) < previousEpoch) {
+				violations.push(`${commit.operationId} decreased the MCP selection generation`)
+			}
+			if (
+				snapshotEpoch < previousEpoch &&
+				!deepEqual(commit.next.attachedMcpToolNames, commit.previous.attachedMcpToolNames)
+			) {
+				violations.push(`${commit.operationId} changed names from a newer MCP generation`)
+			}
 			if (commit.delta.childIds && commit.previous.childIds) {
 				const expected = new Set([...commit.previous.childIds, ...commit.delta.childIds])
 				if ([...expected].some((id) => !commit.next.childIds?.includes(id))) {
@@ -597,9 +681,10 @@ function runScenario(scenario: Scenario): {
 	landmarks: Set<string>
 } {
 	const startDisk =
-		scenario.name === "status rejection"
+		scenario.initialRecords ??
+		(scenario.name === "status rejection"
 			? { parent: item("parent", { status: "completed", mode: "stable" }) }
-			: baseRecords()
+			: baseRecords())
 	const start = initialState(
 		scenario.operations.map((operation) => operation.id),
 		startDisk,
@@ -651,6 +736,52 @@ function runScenario(scenario: Scenario): {
 }
 
 const scenarios: Scenario[] = [
+	{
+		name: "MCP reset vs old generation snapshot",
+		operations: [
+			operationSpecs["mcp-reset-a"],
+			{
+				...operationSpecs["mcp-attach-b"],
+				buildWrites: (snapshot) => [
+					{
+						...getRequired(snapshot, "parent"),
+						mcpToolSelectionEpoch: 0,
+						attachedMcpToolNames: ["mcp--catalog--b"],
+					},
+				],
+			},
+		],
+		check: (state) =>
+			state.operations["mcp-reset-a"]?.phase === "done" &&
+			(state.disk.parent?.mcpToolSelectionEpoch !== 1 || state.disk.parent.attachedMcpToolNames !== undefined)
+				? ["MCP reset lost to an old generation snapshot"]
+				: [],
+	},
+	...([false, true] as const).flatMap((sameHost) =>
+		(["mcp-attach-a", "mcp-empty-a"] as const).map((first) => ({
+			name: `MCP ${first} vs attachment (${sameHost ? "same" : "separate"} host)`,
+			initialRecords: {
+				...baseRecords(),
+				parent: { ...getRequired(baseRecords(), "parent"), attachedMcpToolNames: ["mcp--catalog--saved"] },
+			},
+			operations: [
+				operationSpecs[first],
+				{ ...operationSpecs["mcp-attach-b"], host: sameHost ? ("A" as const) : ("B" as const) },
+			],
+			check: (state: ModelState) => {
+				if (state.operations[first]?.phase !== "done" || state.operations["mcp-attach-b"]?.phase !== "done")
+					return []
+				const expected = [
+					"mcp--catalog--saved",
+					"mcp--catalog--b",
+					...(first === "mcp-attach-a" ? ["mcp--catalog--a"] : []),
+				]
+				return expected.every((name) => state.disk.parent?.attachedMcpToolNames?.includes(name))
+					? []
+					: ["MCP attachment snapshot removed a saved name"]
+			},
+		})),
+	),
 	{
 		name: "peer field merge",
 		operations: [operationSpecs["metadata-a"], operationSpecs["metadata-b"]],

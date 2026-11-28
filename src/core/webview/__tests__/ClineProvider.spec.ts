@@ -4558,6 +4558,34 @@ describe("ClineProvider", () => {
 		expect(state.allowedWriteFiles).toEqual([])
 	})
 
+	test.each([
+		{
+			threshold: undefined,
+			initialK: undefined,
+			turns: undefined,
+			expectedThreshold: 50,
+			expectedK: 30,
+			expectedTurns: 7,
+		},
+		{ threshold: 0, initialK: 7, turns: 0, expectedThreshold: 0, expectedK: 7, expectedTurns: 0 },
+		{ threshold: 100, initialK: 20, turns: 3, expectedThreshold: 100, expectedK: 20, expectedTurns: 3 },
+		{ threshold: -1, initialK: NaN, turns: -1, expectedThreshold: 50, expectedK: 30, expectedTurns: 7 },
+		{ threshold: Infinity, initialK: 0, turns: NaN, expectedThreshold: 50, expectedK: 30, expectedTurns: 7 },
+	])(
+		"round-trips MCP routing settings ($threshold, $initialK, $turns)",
+		async ({ threshold, initialK, turns, expectedThreshold, expectedK, expectedTurns }) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("mcp.dynamicLoad.threshold", threshold)
+			await provider.contextProxy.setValue("mcp.dynamicLoad.initialK", initialK)
+			await provider.contextProxy.setValue("mcp.dynamicLoad.searchTurns", turns)
+			for (const state of [await provider.getState(), await provider.getStateToPostToWebview()]) {
+				expect(state["mcp.dynamicLoad.threshold"]).toBe(expectedThreshold)
+				expect(state["mcp.dynamicLoad.initialK"]).toBe(expectedK)
+				expect(state["mcp.dynamicLoad.searchTurns"]).toBe(expectedTurns)
+			}
+		},
+	)
+
 	test("getStateToPostToWebview returns the saved destructive command guard setting", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
