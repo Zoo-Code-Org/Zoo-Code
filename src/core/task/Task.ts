@@ -1707,6 +1707,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async addToClineMessages(message: ClineMessage) {
 		message.messageId ??= crypto.randomUUID()
+		// A delegated task can restart before its first update_todo_list call. Keep
+		// the supplied list in the same durable history as subsequent accepted edits.
+		if (this.clineMessages.length === 0 && this.todoList?.length) {
+			message.initialTodos = this.todoList.map((todo) => ({ ...todo }))
+		}
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
 		// Unanswered asks must reach the webview before Message listeners can respond against its state.
@@ -3116,7 +3121,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.apiConversationHistory = []
 
 			// The todo list is already set in the constructor if initialTodos were provided
-			// No need to add any messages - the todoList property is already set
+			// addToClineMessages saves it with the first message below.
 
 			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
 

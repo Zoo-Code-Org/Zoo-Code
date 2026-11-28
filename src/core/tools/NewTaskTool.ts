@@ -5,7 +5,7 @@ import type { PendingTaskAction, TodoItem } from "@roo-code/types"
 import { Task } from "../task/Task"
 import { getModeBySlug } from "../../shared/modes"
 import { formatResponse } from "../prompts/responses"
-import { parseMarkdownChecklist } from "./UpdateTodoListTool"
+import { parseTodoListInput } from "../../shared/todoChecklist"
 import { Package } from "../../shared/package"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
@@ -59,7 +59,7 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 
 			// Check if todos are required based on VSCode setting.
 			// Note: `undefined` means not provided, empty string is valid.
-			if (requireTodos && todos === undefined) {
+			if (requireTodos && todos == null) {
 				task.consecutiveMistakeCount++
 				task.recordToolError("new_task")
 				task.didToolFailInCurrentTurn = true
@@ -69,14 +69,14 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 
 			// Parse todos if provided, otherwise use empty array
 			let todoItems: TodoItem[] = []
-			if (todos) {
+			if (todos != null) {
 				try {
-					todoItems = parseMarkdownChecklist(todos)
-				} catch {
+					todoItems = parseTodoListInput(todos)
+				} catch (error) {
 					task.consecutiveMistakeCount++
 					task.recordToolError("new_task")
 					task.didToolFailInCurrentTurn = true
-					pushToolResult(formatResponse.toolError("Invalid todos format: must be a markdown checklist"))
+					pushToolResult(formatResponse.toolError(error instanceof Error ? error.message : String(error)))
 					return
 				}
 			}

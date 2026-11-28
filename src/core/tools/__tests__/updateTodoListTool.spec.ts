@@ -5,6 +5,27 @@ import type { Task } from "../../task/Task"
 import type { ToolCallbacks } from "../BaseTool"
 
 describe("UpdateTodoListTool", () => {
+	it("rejects non-checklist text instead of clearing a saved list and reporting success", async () => {
+		const existing: TodoItem[] = [{ id: "existing", content: "Continue work", status: "in_progress" }]
+		const task = {
+			consecutiveMistakeCount: 0,
+			recordToolError: vi.fn(),
+			didToolFailInCurrentTurn: false,
+			todoList: existing,
+		} as unknown as Task
+		const callbacks = {
+			pushToolResult: vi.fn(),
+			handleError: vi.fn(),
+			askApproval: vi.fn(),
+		} as unknown as ToolCallbacks
+
+		await updateTodoListTool.execute({ todos: "I updated the plan" }, task, callbacks)
+
+		expect(task.todoList).toEqual(existing)
+		expect(callbacks.askApproval).not.toHaveBeenCalled()
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Checklist line 1"))
+	})
+
 	it("persists the edited todo list even if the say notification fails", async () => {
 		const editedTodos: TodoItem[] = [{ id: "edited", content: "Edited task", status: "in_progress" }]
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
@@ -19,7 +40,7 @@ describe("UpdateTodoListTool", () => {
 			pushToolResult: vi.fn(),
 			handleError: vi.fn(),
 			askApproval: vi.fn().mockImplementation(async () => {
-				setPendingTodoList(editedTodos)
+				setPendingTodoList(task, editedTodos)
 				return true
 			}),
 		} as unknown as ToolCallbacks
@@ -192,12 +213,12 @@ describe("parseMarkdownChecklist", () => {
 		})
 
 		it("should handle non-string input", () => {
-			const result = parseMarkdownChecklist(null as any)
+			const result = parseMarkdownChecklist(null)
 			expect(result).toEqual([])
 		})
 
 		it("should handle undefined input", () => {
-			const result = parseMarkdownChecklist(undefined as any)
+			const result = parseMarkdownChecklist(undefined)
 			expect(result).toEqual([])
 		})
 

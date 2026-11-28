@@ -2,68 +2,56 @@ import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
-import cloneDeep from "clone-deep"
-import crypto from "crypto"
-import { TodoItem, TodoStatus, todoStatusSchema } from "@roo-code/types"
+import { TodoItem } from "@roo-code/types"
+import { parseMarkdownChecklist, parseTodoListInput } from "../../shared/todoChecklist"
 import { getLatestTodo } from "../../shared/todo"
 
+export { parseMarkdownChecklist } from "../../shared/todoChecklist"
+
 interface UpdateTodoListParams {
-	todos: string
+	todos: unknown
 }
 
-let approvedTodoList: TodoItem[] | undefined = undefined
+interface PendingTodoApproval {
+	todos: TodoItem[]
+}
+const pendingTodoLists = new WeakMap<Task, PendingTodoApproval>()
 
 export class UpdateTodoListTool extends BaseTool<"update_todo_list"> {
 	readonly name = "update_todo_list" as const
 
 	async execute(params: UpdateTodoListParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { pushToolResult, handleError, askApproval } = callbacks
+		let pending: PendingTodoApproval | undefined
 
 		try {
-			const todosRaw = params.todos
-
-			let todos: TodoItem[]
+			let normalizedTodos: TodoItem[]
 			try {
-				todos = parseMarkdownChecklist(todosRaw || "")
-			} catch {
+				normalizedTodos = parseTodoListInput(params?.todos)
+			} catch (error) {
 				task.consecutiveMistakeCount++
 				task.recordToolError("update_todo_list")
 				task.didToolFailInCurrentTurn = true
-				pushToolResult(formatResponse.toolError("The todos parameter is not valid markdown checklist or JSON"))
+				pushToolResult(formatResponse.toolError(error instanceof Error ? error.message : String(error)))
 				return
 			}
-
-			const { valid, error } = validateTodos(todos)
-			if (!valid) {
-				task.consecutiveMistakeCount++
-				task.recordToolError("update_todo_list")
-				task.didToolFailInCurrentTurn = true
-				pushToolResult(formatResponse.toolError(error || "todos parameter validation failed"))
-				return
-			}
-
-			let normalizedTodos: TodoItem[] = todos.map((t) => ({
-				id: t.id,
-				content: t.content,
-				status: normalizeStatus(t.status),
-			}))
 
 			const approvalMsg = JSON.stringify({
 				tool: "updateTodoList",
 				todos: normalizedTodos,
 			})
 
-			approvedTodoList = cloneDeep(normalizedTodos)
+			pending = { todos: normalizedTodos.map((todo) => ({ ...todo })) }
+			pendingTodoLists.set(task, pending)
 			const didApprove = await askApproval("tool", approvalMsg)
 			if (!didApprove) {
 				pushToolResult("User declined to update the todoList.")
 				return
 			}
 
-			const isTodoListChanged =
-				approvedTodoList !== undefined && JSON.stringify(normalizedTodos) !== JSON.stringify(approvedTodoList)
+			const isTodoListChanged = JSON.stringify(normalizedTodos) !== JSON.stringify(pending.todos)
 			if (isTodoListChanged) {
-				normalizedTodos = approvedTodoList ?? []
+				normalizedTodos = pending.todos
 				// Non-blocking: a failed notification must not abort persisting the edited list.
 				void task
 					.say(
@@ -79,6 +67,7 @@ export class UpdateTodoListTool extends BaseTool<"update_todo_list"> {
 			}
 
 			await setTodoListForTask(task, normalizedTodos)
+			task.consecutiveMistakeCount = 0
 
 			if (isTodoListChanged) {
 				const md = todoListToMarkdown(normalizedTodos)
@@ -87,20 +76,22 @@ export class UpdateTodoListTool extends BaseTool<"update_todo_list"> {
 				pushToolResult(formatResponse.toolResult("Todo list updated successfully."))
 			}
 		} catch (error) {
-			await handleError("update todo list", error as Error)
+			await handleError("update todo list", error instanceof Error ? error : new Error(String(error)))
+		} finally {
+			if (pending && pendingTodoLists.get(task) === pending) pendingTodoLists.delete(task)
 		}
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"update_todo_list">): Promise<void> {
-		const todosRaw = block.params.todos
+		const todosRaw = block.nativeArgs?.todos ?? block.params.todos
 
 		// Parse the markdown checklist to maintain consistent format with execute()
 		let todos: TodoItem[]
 		try {
-			todos = parseMarkdownChecklist(todosRaw || "")
+			todos = parseTodoListInput(todosRaw)
 		} catch {
-			// If parsing fails during partial, send empty array
-			todos = []
+			// An incomplete streamed checklist may still contain completed lines.
+			todos = parseMarkdownChecklist(todosRaw)
 		}
 
 		const approvalMsg = JSON.stringify({
@@ -135,53 +126,16 @@ function todoListToMarkdown(todos: TodoItem[]): string {
 		.join("\n")
 }
 
-function normalizeStatus(status: string | undefined): TodoStatus {
-	if (status === "completed") return "completed"
-	if (status === "in_progress") return "in_progress"
-	return "pending"
-}
-
-export function parseMarkdownChecklist(md: string): TodoItem[] {
-	if (typeof md !== "string") return []
-	const lines = md
-		.split(/\r?\n/)
-		.map((l) => l.trim())
-		.filter(Boolean)
-	const todos: TodoItem[] = []
-	for (const line of lines) {
-		const match = line.match(/^(?:-\s*)?\[\s*([ xX\-~])\s*\]\s+(.+)$/)
-		if (!match) continue
-		let status: TodoStatus = "pending"
-		if (match[1] === "x" || match[1] === "X") status = "completed"
-		else if (match[1] === "-" || match[1] === "~") status = "in_progress"
-		const id = crypto
-			.createHash("md5")
-			.update(match[2] + status)
-			.digest("hex")
-		todos.push({
-			id,
-			content: match[2],
-			status,
-		})
+/** Apply edits only to this Task's currently pending approval. */
+export function setPendingTodoList(task: Task, todos: unknown): boolean {
+	const pending = pendingTodoLists.get(task)
+	if (!pending || !Array.isArray(todos)) return false
+	try {
+		pending.todos = parseTodoListInput(todos)
+		return true
+	} catch {
+		return false
 	}
-	return todos
-}
-
-export function setPendingTodoList(todos: TodoItem[]) {
-	approvedTodoList = todos
-}
-
-function validateTodos(todos: any[]): { valid: boolean; error?: string } {
-	if (!Array.isArray(todos)) return { valid: false, error: "todos must be an array" }
-	for (const [i, t] of todos.entries()) {
-		if (!t || typeof t !== "object") return { valid: false, error: `Item ${i + 1} is not an object` }
-		if (!t.id || typeof t.id !== "string") return { valid: false, error: `Item ${i + 1} is missing id` }
-		if (!t.content || typeof t.content !== "string")
-			return { valid: false, error: `Item ${i + 1} is missing content` }
-		if (t.status && !todoStatusSchema.options.includes(t.status as TodoStatus))
-			return { valid: false, error: `Item ${i + 1} has invalid status` }
-	}
-	return { valid: true }
 }
 
 export const updateTodoListTool = new UpdateTodoListTool()

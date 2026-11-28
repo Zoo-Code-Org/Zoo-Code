@@ -335,6 +335,18 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 		})
 
+		it("preserves the active task's to-do list and posts it after a mode switch", async () => {
+			const todos = [{ id: "todo-1", content: "Continue this task", status: "in_progress" as const }]
+			const task = new Task({ provider, apiConfiguration: { apiProvider: providerIdentifiers.openrouter } })
+			task.todoList = todos
+			await provider.addClineToStack(task)
+
+			await provider.handleModeSwitch("architect")
+
+			expect(task.todoList).toBe(todos)
+			expect((await provider.getStateToPostToWebview()).currentTaskTodos).toEqual(todos)
+		})
+
 		it("should save mode to task metadata when switching modes", async () => {
 			// Create a mock task
 			const mockTask = new Task({

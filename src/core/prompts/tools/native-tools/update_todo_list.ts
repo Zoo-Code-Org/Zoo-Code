@@ -1,37 +1,20 @@
 import type OpenAI from "openai"
+import { TODO_ARGUMENT_EXAMPLE } from "../../../../shared/todoChecklist"
 
-const UPDATE_TODO_LIST_DESCRIPTION = `Replace the entire TODO list with an updated checklist reflecting the current state. Always provide the full list; the system will overwrite the previous one. This tool is designed for step-by-step task tracking, allowing you to confirm completion of each step before updating, update multiple task statuses at once (e.g., mark one as completed and start the next), and dynamically add new todos discovered during long or complex tasks.
+const UPDATE_TODO_LIST_DESCRIPTION = `Replace the entire task TODO list. Include all unfinished tasks and any completed tasks you want to retain; this is a replacement, not an append.
 
-Checklist Format:
-- Use a single-level markdown checklist (no nesting or subtasks)
-- List todos in the intended execution order
-- Status options: [ ] (pending), [x] (completed), [-] (in progress)
+Call this native tool with JSON arguments. The todos field is a STRING containing a single-level Markdown checklist. Escape line breaks as \\n inside the JSON string.
+- [ ] means pending, [-] means in progress, [x] means completed.
+- Put tasks in execution order. Mark completed only when fully accomplished.
+- Add newly discovered work and update several statuses in one call when useful.
+- Use an empty string only to intentionally clear the entire list.
 
-Core Principles:
-- Before updating, always confirm which todos have been completed
-- You may update multiple statuses in a single update
-- Add new actionable items as they're discovered
-- Only mark a task as completed when fully accomplished
-- Keep all unfinished tasks unless explicitly instructed to remove
+Example JSON arguments:
+${TODO_ARGUMENT_EXAMPLE}
 
-Example: Initial task list
-{ "todos": "[x] Analyze requirements\\n[x] Design architecture\\n[-] Implement core logic\\n[ ] Write tests\\n[ ] Update documentation" }
+Use this for multi-step work that needs progress tracking; skip it for trivial tasks or purely conversational replies.`
 
-Example: After completing implementation
-{ "todos": "[x] Analyze requirements\\n[x] Design architecture\\n[x] Implement core logic\\n[-] Write tests\\n[ ] Update documentation\\n[ ] Add performance benchmarks" }
-
-When to Use:
-- Task involves multiple steps or requires ongoing tracking
-- Need to update status of several todos at once
-- New actionable items are discovered during execution
-- Task is complex and benefits from stepwise progress tracking
-
-When NOT to Use:
-- Only a single, trivial task
-- Task can be completed in one or two simple steps
-- Request is purely conversational or informational`
-
-const TODOS_PARAMETER_DESCRIPTION = `Full markdown checklist in execution order, using [ ] for pending, [x] for completed, and [-] for in progress`
+const TODOS_PARAMETER_DESCRIPTION = `String containing the full checklist in execution order, using [ ] for pending, [x] for completed, and [-] for in progress. JSON arguments example: ${TODO_ARGUMENT_EXAMPLE}`
 
 export default {
 	type: "function",

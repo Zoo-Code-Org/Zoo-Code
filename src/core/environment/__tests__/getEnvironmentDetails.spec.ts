@@ -368,14 +368,57 @@ describe("getEnvironmentDetails", () => {
 		expect(result).toContain("REMINDERS")
 	})
 
-	it("should NOT include REMINDERS section when todoListEnabled is false", async () => {
+	it("does not advertise the update tool when todoListEnabled is false", async () => {
 		mockProvider.getState.mockResolvedValue({
 			...mockState,
 			apiConfiguration: { todoListEnabled: false },
 		})
 		const cline = { ...mockCline, todoList: [{ content: "test", status: "pending" }] }
 		const result = await getEnvironmentDetails(cline as Task)
+		expect(result).toContain("REMINDERS")
+		expect(result).not.toContain("call the `update_todo_list` tool")
+	})
+
+	it("omits empty-list instructions when the update tool is disabled", async () => {
+		mockProvider.getState.mockResolvedValue({
+			...mockState,
+			apiConfiguration: { todoListEnabled: false },
+		})
+		const cline = { ...mockCline, todoList: [] as NonNullable<Task["todoList"]> }
+		const result = await getEnvironmentDetails(cline as Task)
 		expect(result).not.toContain("REMINDERS")
+		expect(result).not.toContain("update_todo_list")
+	})
+
+	it("keeps an existing task list visible after switching to a profile without the update tool", async () => {
+		mockProvider.getState.mockResolvedValue({
+			...mockState,
+			apiConfiguration: { todoListEnabled: false },
+		})
+		const cline = {
+			...mockCline,
+			apiConfiguration: { todoListEnabled: false },
+			todoList: [{ content: "Finish the active task", status: "in_progress" }],
+		}
+		const result = await getEnvironmentDetails(cline as Task)
+		expect(result).toContain("Finish the active task")
+		expect(result).toContain("In Progress")
+		expect(result).not.toContain("call the `update_todo_list` tool")
+	})
+
+	it("uses task-local tool availability when another profile is selected globally", async () => {
+		mockProvider.getState.mockResolvedValue({
+			...mockState,
+			apiConfiguration: { todoListEnabled: false },
+		})
+		const cline = {
+			...mockCline,
+			apiConfiguration: { todoListEnabled: true },
+			todoList: [{ content: "Keep task progress", status: "pending" }],
+		}
+		const result = await getEnvironmentDetails(cline as Task)
+		expect(result).toContain("Keep task progress")
+		expect(result).toContain("call the `update_todo_list` tool")
 	})
 
 	it("should include REMINDERS section when todoListEnabled is undefined", async () => {

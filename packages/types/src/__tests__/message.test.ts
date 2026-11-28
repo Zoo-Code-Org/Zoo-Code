@@ -23,6 +23,12 @@ describe("ask messages", () => {
 })
 
 describe("clineMessageSchema autoApprovalDecision", () => {
+	it("preserves initial task todos through persisted message validation", () => {
+		const initialTodos = [{ id: "first", content: "Initial task", status: "pending" }]
+		expect(clineMessageSchema.parse({ ts: 1, type: "say", say: "text", initialTodos }).initialTodos).toEqual(
+			initialTodos,
+		)
+	})
 	it.each(["approve", "deny"] as const)("accepts %s", (autoApprovalDecision) => {
 		expect(clineMessageSchema.safeParse({ ts: 1, type: "ask", ask: "command", autoApprovalDecision }).success).toBe(
 			true,
