@@ -27,8 +27,8 @@
 \* Simplified: `initialized` equals phase # "idle". Resume was never enabled, so it and `persisted` are removed.
 \*   PersistenceRetained held in every state by construction, so it and the SaveFail config are removed.
 \*   SelectionBounded follows from PrunedSinceCondense.
-\* Not modeled: reload. Each condensation path calls reset before say("condense_context"), which saves
-\*   attachedMcpToolNames as absent. A reload after it ranks again.
+\* Reload and identical-message rank deduplication are checked in McpSelectionEpoch.tla.
+\* Review found that an absent snapshot did not clear the unioned disk names. Generation rules now clear them.
 \* Finding: Condense first required model_ready. attemptApiRequest condenses between UserMessage and the tool build.
 \* False alarm: FrozenAfterWindow first said selection' = selection. A Condense outside the window shrinks it.
 \* Not modeled: tool order. Any change to the tools array ends the prompt cache, an append too.
@@ -40,6 +40,14 @@
 \* Replay: a reader with `|| default` in resolveMcpDynamicLoadSettings fails mcp-dynamic-load.property.test.ts.
 \* Cost: each config under 1 second.
 
+\* Refactor expectation: null result. One history read derives query, message position, and window count.
+\* Failures to prevent: a summary becomes the query, pre-summary turns close the window, or an empty first rank is not saved.
+\* TopicReachable, FrozenAfterWindow, and MessageRanked in McpSelectionEpoch remain unchanged.
+\* Refactor result: null result. Fixed and all six fault configs keep their verdicts. The fixed run has 43 states.
+\* Replay: bypassing the summary guard fails three tests, including the new bounded-history property test.
+\* A counter-guard mutation survives windows 1 and 2. Early stop limits its extra count to one older message.
+\* Cost: 52 focused tests run in 1 second. No new model states or stored runtime variables were added.
+\* Basis: https://refactoring.com/index.html recommends small steps with tests and unchanged observable behavior.
 EXTENDS Integers, FiniteSets
 
 CONSTANTS

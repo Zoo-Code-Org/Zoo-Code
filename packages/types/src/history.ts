@@ -63,6 +63,8 @@ export const historyItemSchema = z.object({
 	pendingAction: pendingTaskActionSchema.optional(),
 	// Absent means routing has not run; an empty array is an initialized selection.
 	attachedMcpToolNames: attachedMcpToolNamesSchema,
+	// A newer generation replaces names. Older snapshots cannot restore them.
+	mcpToolSelectionEpoch: z.number().int().nonnegative().optional(),
 })
 
 export type HistoryItem = z.infer<typeof historyItemSchema>

@@ -26,11 +26,12 @@ export class McpToolSelection {
 	readonly names: Set<string>
 	initialized: boolean
 	private pending?: Promise<void>
-	private lastRankedQuery = ""
+	private lastRankedMessage = -1
 
 	constructor(
 		savedNames?: string[],
 		private readonly rank: RankFn = (query, scope, k) => ToolRouter.getInstance().attachInitial(query, scope, k),
+		public epoch = 0,
 	) {
 		this.names = new Set(savedNames)
 		this.initialized = savedNames !== undefined
@@ -38,6 +39,8 @@ export class McpToolSelection {
 
 	/** Spec: Condense. The next select runs a full rank. */
 	reset(): void {
+		this.epoch++
+		this.lastRankedMessage = -1
 		this.names.clear()
 		this.initialized = false
 	}
@@ -74,24 +77,21 @@ export class McpToolSelection {
 
 		const scopeOverlaps = this.names.size === 0 || [...this.names].some((n) => available.has(n))
 		const fullRank = !this.initialized || !scopeOverlaps
-		const query = latestUserText(history) || (fullRank ? taskText : "")
+		const { messageIndex, text, turnsSinceSummary } = readUserHistory(history)
+		const query = text || (fullRank ? taskText : "")
 		const { initialK, searchTurns } = resolveMcpDynamicLoadSettings(undefined, limits.initialK, limits.searchTurns)
 		const supplement =
-			!fullRank &&
-			query !== "" &&
-			query !== this.lastRankedQuery &&
-			userTurnsSinceLastSummary(history) <= searchTurns
+			!fullRank && query !== "" && messageIndex !== this.lastRankedMessage && turnsSinceSummary <= searchTurns
 		if (fullRank || supplement) {
 			const k = fullRank ? initialK : this.supplementalK()
 			const candidates = fullRank ? scope : scope.filter((tool) => !this.names.has(toolName(tool)))
 			if (k > 0) for (const name of await this.rankCandidates(candidates, query, k)) additions.add(name)
-			this.lastRankedQuery = query
+			this.lastRankedMessage = messageIndex
 		}
 
-		const hasNewAdditions = [...additions].some((name) => !this.names.has(name))
-		if (!hasNewAdditions && this.initialized) return
-
+		const previousSize = this.names.size
 		for (const name of additions) this.names.add(name)
+		if (this.names.size === previousSize && this.initialized) return
 		this.initialized = true
 		await persist()
 	}
@@ -139,22 +139,28 @@ function recoverSinceLastSummary(additions: Set<string>, catalog: CatalogEntry[]
 	}
 }
 
-/** userInputContent tags user-typed text. Tool results and environment details do not carry the tag. */
-function latestUserText(history: ApiMessage[]): string {
+/** Spec: InWindow. Count turns after the summary, but allow an earlier user message to supply the query. */
+function readUserHistory(history: ApiMessage[]): { messageIndex: number; text: string; turnsSinceSummary: number } {
+	let messageIndex = -1
+	let text = ""
+	let turnsSinceSummary = 0
+	let seenSummary = false
 	for (let i = history.length - 1; i >= 0; i--) {
-		const text = history[i].isSummary ? undefined : userText(history[i])
-		if (text) return text
+		if (history[i].isSummary) {
+			seenSummary = true
+		} else {
+			const candidate = userText(history[i])
+			if (candidate) {
+				if (messageIndex === -1) {
+					messageIndex = i
+					text = candidate
+				}
+				if (!seenSummary) turnsSinceSummary++
+			}
+		}
+		if (seenSummary && messageIndex !== -1) break
 	}
-	return ""
-}
-
-/** Spec: InWindow. The task message counts as turn 1. No counter is stored, so a reload keeps the count. */
-function userTurnsSinceLastSummary(history: ApiMessage[]): number {
-	let turns = 0
-	for (let i = history.length - 1; i >= 0 && !history[i].isSummary; i--) {
-		if (userText(history[i])) turns++
-	}
-	return turns
+	return { messageIndex, text, turnsSinceSummary }
 }
 
 function userText(message: ApiMessage): string | undefined {

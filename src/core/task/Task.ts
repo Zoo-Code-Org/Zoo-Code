@@ -784,7 +784,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this._isHistoryTask = !!historyItem && !task && !images
 		const savedMcpToolNames = attachedMcpToolNamesSchema.parse(historyItem?.attachedMcpToolNames)
-		this.mcpToolSelection = new McpToolSelection(savedMcpToolNames)
+		this.mcpToolSelection = new McpToolSelection(savedMcpToolNames, undefined, historyItem?.mcpToolSelectionEpoch)
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -1883,6 +1883,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiConfigName: this._taskApiConfigName, // Use the task's own provider profile, not the current provider profile.
 				initialStatus: this.initialStatus,
 				attachedMcpToolNames: this.mcpToolSelection.initialized ? [...this.attachedMcpToolNames] : undefined,
+				mcpToolSelectionEpoch: this.mcpToolSelection.epoch,
 			})
 
 			// Emit token/tool usage updates using debounced function

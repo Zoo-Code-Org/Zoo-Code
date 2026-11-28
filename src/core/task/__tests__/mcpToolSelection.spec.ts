@@ -152,6 +152,49 @@ describe("ranking on the latest user message", () => {
 		return { rank, selection, select }
 	}
 
+	it("derives the query and search window independently across bounded histories", async () => {
+		const inputs = ["jira", "slack", "summary", "tool"] as const
+		const histories = [
+			[],
+			...inputs.map((a) => [a]),
+			...inputs.flatMap((a) => inputs.flatMap((b) => inputs.map((c) => [a, b, c]))),
+		]
+		for (const entries of histories) {
+			const history = entries.map((entry) =>
+				entry === "summary" ? summary : entry === "tool" ? toolTurn("result") : userTurn(entry),
+			)
+			const users = entries.filter((entry) => entry === "jira" || entry === "slack")
+			const latest = users.at(-1)
+			const turns = entries
+				.slice(entries.lastIndexOf("summary") + 1)
+				.filter((entry) => entry === "jira" || entry === "slack").length
+			for (const saved of [undefined, jiraNames])
+				for (const searchTurns of [1, 2]) {
+					const { rank, select } = setup(saved, searchTurns)
+					rank.mockResolvedValue([])
+					await select(history)
+					const expectedQuery = latest ? tagged(latest) : "search jira tickets"
+					const expected =
+						saved === undefined
+							? [[expectedQuery, allTools, 5]]
+							: latest && turns <= searchTurns
+								? [[expectedQuery, slackTools, 7]]
+								: []
+					expect(rank.mock.calls).toEqual(expected)
+				}
+		}
+	})
+
+	it.each([undefined, []])("saves an empty initial rank only when selection is absent (%s)", async (saved) => {
+		const persist = vi.fn(async () => {})
+		const rank = vi.fn(async () => [])
+		const selection = new McpToolSelection(saved, rank)
+		await selection.initialize(allTools, limits(5), "jira", [], persist)
+		expect(selection.initialized).toBe(true)
+		expect([...selection.names]).toEqual([])
+		expect(persist).toHaveBeenCalledTimes(saved === undefined ? 1 : 0)
+	})
+
 	it("supplements once per new user message and ignores tool-result turns", async () => {
 		const { rank, selection, select } = setup()
 		rank.mockResolvedValueOnce(jiraNames).mockResolvedValueOnce(slackNames)
@@ -165,6 +208,22 @@ describe("ranking on the latest user message", () => {
 			[tagged("check slack messages"), slackTools, 7],
 		])
 		expect([...selection.names]).toEqual([...jiraNames, ...slackNames])
+	})
+
+	it.each([2, 3, 7])("ranks identical text once per message across %s turns", async (count) => {
+		const scope = Array.from({ length: 60 }, (_, i) => ({ ...tools[0], toolName: `tool_${i}` }))
+		const rank = vi.fn(async (_query: string, candidates: ToolDoc[], k: number) =>
+			candidates.slice(0, k).map((tool) => buildMcpToolName(tool.serverName, tool.toolName)),
+		)
+		const selection = new McpToolSelection(undefined, rank)
+		const history: ApiMessage[] = []
+		for (let turn = 1; turn <= count; turn++) {
+			history.push(userTurn("continue"))
+			await selection.initialize(scope, limits(1), "continue", history, async () => {})
+			await selection.initialize(scope, limits(1), "continue", [...history, toolTurn(`${turn}`)], async () => {})
+			expect(rank).toHaveBeenCalledTimes(turn)
+			expect(selection.names.size).toBe(1 + 7 * (turn - 1))
+		}
 	})
 
 	it("uses the task text only for the first rank of a history without user text", async () => {

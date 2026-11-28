@@ -16,14 +16,15 @@ declarations. Current server, mode, and tool-policy restrictions still apply.
 
 The first rank uses the latest text tagged `<user_message>`, or the task text when
 no user text exists. Each new user message gets a supplemental rank of up to 7
-unselected tools. Tool results and environment details do not count as user
+unselected tools. Distinct messages with the same text each get a rank. Repeated
+builds use the message position to skip a second rank. Tool results and environment details do not count as user
 messages. Supplemental ranks stop after `mcp.dynamicLoad.searchTurns` (default 7)
 user messages since the last summary. A value of 0 turns dynamic loading off.
 Supplemental ranks also stop at 60 attached tools (`MAX_ATTACHED_DURING_ROLLING`).
 
 Condensation resets the selection. The next tool build ranks the full scope
-again. The condensation save writes the selection as absent, so a reload after
-condensation also ranks again. Names used before the summary are not retained,
+again. Each reset increments `mcpToolSelectionEpoch`. The save replaces the
+previous generation with an absent selection, so a reload also ranks again. Names used before the summary are not retained,
 because the fresh-start history no longer sends their `tool_use` blocks.
 
 Any change to the tools array, an append too, ends the provider prompt cache. The
@@ -31,8 +32,9 @@ search window limits that cost to one cache rewrite for each searched turn.
 `docs/architecture/tla/McpToolSelectionLifecycle.tla` models these rules.
 
 If saving fails, the task retains its in-memory selection and continues. Later
-normal history saves retry persistence. History writes union attached names under
-the disk lock, preserving newer historical names when an older save arrives late.
+normal history saves retry persistence. Under the disk lock, a newer generation
+replaces the old selection. Saves within a generation union their names. Saves
+from an older generation cannot restore names after condensation.
 Storage errors do not trigger API
 stream retries.
 
@@ -115,8 +117,10 @@ handler, parser-to-presenter, and real-filesystem tests cover their boundaries.
 The [scope review](https://github.com/Zoo-Code-Org/Zoo-Code/pull/2323#discussion_r4520330057)
 and [catalog review](https://github.com/Zoo-Code-Org/Zoo-Code/pull/2323#discussion_r4520330067)
 are represented by production regressions. They fail on the old code, including
-a waiting caller whose scope differs from the first caller's scope. No new
-default-value or persistence defect was found. Deliberately removing the
+a waiting caller whose scope differs from the first caller's scope. The initial review found no new
+default-value or persistence defect. A later review found a lost condensation
+reset. `McpSelectionEpoch.tla` records that failure and the identical-message
+ranking failure. The real-store restart test replays the persistence failure. Deliberately removing the
 persistence union, changing a fallback, or removing cancellation guards fails
 the corresponding production checks.
 
