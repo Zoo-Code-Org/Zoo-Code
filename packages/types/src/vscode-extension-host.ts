@@ -971,6 +971,14 @@ export interface ClineSayTool {
 	totalBytes?: number
 	searchPattern?: string
 	matchCount?: number
+	/** Presentation-only grouping of adjacent command-output reads. */
+	batchCommandOutputReads?: Array<{
+		readStart?: number
+		readEnd?: number
+		totalBytes?: number
+		searchPattern?: string
+		matchCount?: number
+	}>
 	diff?: string
 	content?: string
 	// Original file content before first edit (for merged diff display in FileChangesPanel)
