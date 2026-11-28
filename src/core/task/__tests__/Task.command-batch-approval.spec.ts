@@ -202,6 +202,9 @@ type BatchTaskAccess = {
 	addToClineMessages: (msg: unknown, beforeEmit?: () => void) => Promise<unknown>
 	attemptApiRequest: () => AsyncIterable<ApiStreamChunk>
 	userMessageContent: Array<{ type: string; tool_use_id?: string }>
+	// The ask arm writes the waiting ask's row ts after its publication
+	// boundary; the readiness gates below read it as the live-wait signal.
+	awaitingAskTargetRowTs?: number
 }
 
 describe("Task - multi-command approval in one request (issue 998)", () => {
@@ -365,6 +368,7 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 	it("shows a separate prompt for each command and runs only the approved one", async () => {
 		const task = createTask()
 		const { settled } = runThreeCommandRequest(task)
+		const access = task as unknown as BatchTaskAccess
 
 		await vi.waitFor(
 			() => {
@@ -376,10 +380,12 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 			{ timeout: 5000, interval: 50 },
 		)
 		task.approveAsk()
-		// Readiness gate (review r9 4724196978): a result absence plus a
-		// pending loop cannot distinguish a live approval wait from a request
-		// that stalled before publishing command 2. Command 2's exact
-		// unanswered prompt is the readiness evidence, not elapsed time.
+		// Readiness gate (review r9 4724196978, r10 4724737729): a result
+		// absence plus a pending loop cannot distinguish a live approval wait
+		// from a request that stalled before publishing command 2. The row
+		// lands in memory before its publication awaits settle, so the gate
+		// also requires the armed slot: it carries the row's own ts only
+		// after the publication boundary and the arm ran.
 		await vi.waitFor(
 			() => {
 				const second = task.clineMessages.find(
@@ -393,13 +399,29 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 				if (!second) {
 					throw new Error("command 2 prompt not published yet")
 				}
+				if (access.awaitingAskTargetRowTs !== second.ts) {
+					throw new Error("command 2 ask target not armed yet")
+				}
 			},
 			{ timeout: 5000, interval: 50 },
 		)
 		await settleWindow()
+		// Entry into the approval wait (review r10 4724737729): the arm
+		// survived the settle window with no response recorded, so the wait
+		// loop is live on command 2's token, not stalled before publication.
+		const liveAsk = task.clineMessages.find(
+			(m) =>
+				m.type === "ask" &&
+				m.ask === "command" &&
+				!m.partial &&
+				!m.isAnswered &&
+				(m.text ?? "").includes("cmd2"),
+		)
+		if (!liveAsk || access.awaitingAskTargetRowTs !== liveAsk.ts) {
+			throw new Error("command 2 approval wait not live")
+		}
 
 		const commandAsks = task.clineMessages.filter((m) => m.type === "ask" && m.ask === "command" && !m.partial)
-		const access = task as unknown as BatchTaskAccess
 		const toolResults = access.userMessageContent.filter((b) => b.type === "tool_result")
 		const resultIds = toolResults.map((r) => r.tool_use_id)
 
@@ -451,9 +473,11 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 			{ timeout: 5000, interval: 50 },
 		)
 		task.approveAsk()
-		// The same readiness gate (review r9 4724196978): the orphan verdict
-		// needs command 2's prompt on the record, so a stalled request cannot
-		// read as a live approval wait.
+		// The same readiness gate (review r9 4724196978, r10 4724737729): the
+		// orphan verdict needs command 2's prompt on the record, so a stalled
+		// request cannot read as a live approval wait. The armed slot is the
+		// publication evidence: it holds the row's ts only after the
+		// publication boundary and the arm ran.
 		await vi.waitFor(
 			() => {
 				const second = task.clineMessages.find(
@@ -467,10 +491,27 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 				if (!second) {
 					throw new Error("command 2 prompt not published yet")
 				}
+				if (access.awaitingAskTargetRowTs !== second.ts) {
+					throw new Error("command 2 ask target not armed yet")
+				}
 			},
 			{ timeout: 5000, interval: 50 },
 		)
 		await settleWindow()
+		// Entry into the approval wait (review r10 4724737729): the arm
+		// survived the settle window with no response recorded, so the wait
+		// loop is live on command 2's token, not stalled before publication.
+		const liveAsk = task.clineMessages.find(
+			(m) =>
+				m.type === "ask" &&
+				m.ask === "command" &&
+				!m.partial &&
+				!m.isAnswered &&
+				(m.text ?? "").includes("cmd2"),
+		)
+		if (!liveAsk || access.awaitingAskTargetRowTs !== liveAsk.ts) {
+			throw new Error("command 2 approval wait not live")
+		}
 
 		const toolResults = access.userMessageContent.filter((b) => b.type === "tool_result")
 		const resultIds = toolResults.map((r) => r.tool_use_id)

@@ -296,5 +296,14 @@ NoHiddenPendingCaTail ==
 \* snapshot, matching Task.handleWebviewAskResponse's ownedRowTs match.
 \* NoHiddenPendingCaTail (F8) pins the preserve case; the StampClears
 \* sabotage (owned stamp that wipes the derivation) fails it on [ca, ca].
+\* Review round 10 (review 6094781307, finding 4724761110): covered 1,
+\* added 0, gap 0. The ScanAnywhere.cfg expected-failure comment named
+\* NoHiddenPendingCaTail beside NoRoutePastNewestRow; the sabotage
+\* changes only RouteMatchCa, so F7 is its one reachable failure and the
+\* comment now names that alone. The batch-approval readiness finding
+\* (4724737729) is test side: the publish-then-arm ordering it asks the
+\* test to observe is the existing OnlyOwnPublishedResponse phase model
+\* here and the Entry/Published phases of AskResponseTargeting.tla, so
+\* no new invariant.
 
 ====
