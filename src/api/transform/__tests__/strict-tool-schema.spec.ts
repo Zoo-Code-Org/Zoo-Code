@@ -45,27 +45,32 @@ function accepts(schema: unknown, value: unknown): boolean {
 		return true
 	}
 	const s = schema as Schema
+	// Combinators and siblings apply TOGETHER (Draft 2020-12): each result
+	// combines with the remaining keyword checks instead of returning early,
+	// so a schema like {type:"string", anyOf:[{}]} still rejects a number.
+	let accepted = true
 	if (Array.isArray(s.oneOf)) {
-		return s.oneOf.filter((branch) => accepts(branch, value)).length === 1
+		accepted = accepted && s.oneOf.filter((branch) => accepts(branch, value)).length === 1
 	}
 	if (Array.isArray(s.anyOf)) {
-		return s.anyOf.some((branch) => accepts(branch, value))
+		accepted = accepted && s.anyOf.some((branch) => accepts(branch, value))
 	}
 	if (Array.isArray(s.allOf)) {
-		return s.allOf.every((branch) => accepts(branch, value))
+		accepted = accepted && s.allOf.every((branch) => accepts(branch, value))
 	}
 	if (s.not !== undefined) {
-		if (accepts(s.not, value)) {
-			return false
-		}
+		accepted = accepted && !accepts(s.not, value)
 	}
 	if (typeof s.type === "string" && !matchesType(s.type, value)) {
-		return false
+		accepted = false
 	}
 	if (typeof s.pattern === "string") {
 		if (typeof value !== "string" || !new RegExp(s.pattern).test(value)) {
-			return false
+			accepted = false
 		}
+	}
+	if (!accepted) {
+		return false
 	}
 	if (s.properties === undefined) {
 		return true
@@ -202,70 +207,64 @@ describe("stripUnsupportedStrictKeywords", () => {
 		})
 	})
 
-	it("keeps a oneOf under not in place so the negated set keeps accepting (review 4719419437)", () => {
-		const stripped = strip({
-			type: "object",
-			properties: { v: { not: { oneOf: [{ type: "string", minLength: 1 }, { type: "string" }] } } },
-			required: ["v"],
-		})
-		const negated = ((stripped.properties as Schema).v as Schema).not as Schema
-		// The oneOf keeps its position with the hint on the branch that lost
-		// a constraint: moved under anyOf, the negated predicate would match
-		// every string and the negation would reject values the original
-		// accepted ("a" matches both original branches, so the oneOf refuses
-		// it and the not accepts it).
-		expect(negated.oneOf).toStrictEqual([
-			{ type: "string", description: constraintNote({ minLength: 1 }) },
-			{ type: "string" },
-		])
-		expect(negated).not.toHaveProperty("anyOf")
-		// accepts() encodes the combinator semantics, not the stripper's
-		// rules: the kept exactly-one rule still refuses the overlapping
-		// branch pair, so the enclosing not keeps accepting "a".
-		expect(accepts(negated, "a")).toBe(false)
+	it("drops a changed negation whose stripped oneOf branches tightened it (review 4725679664)", () => {
+		const schema: Schema = { not: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "number" }] } }
+		// Ground truth on the declared schema: "b" matches NEITHER original
+		// branch, the exactly-one rule fails, and the negation accepts it.
+		expect(accepts(schema, "b")).toBe(true)
+		const stripped = strip(schema)
+		// Stripping the pattern makes branch zero match every string, so a
+		// retained negation would reject "b" (a value the original
+		// accepted). The negation drops and the whole subtree stays in the
+		// hint - the strictly relaxing direction.
+		expect(stripped).not.toHaveProperty("not")
+		expect(stripped).toEqual({ description: constraintNote({ not: schema.not }) })
+		expect(accepts(stripped, "b")).toBe(true)
+	})
+
+	it("keeps an unchanged negation and its oneOf in place (review 4719419437)", () => {
+		const not = { oneOf: [{ type: "string" }, { type: "number" }] }
+		const stripped = strip({ not })
+		// Nothing was stripped, so the negation did not change and keeps
+		// its oneOf at its own position.
+		expect(stripped).toEqual({ not })
 	})
 
 	it("still moves a stripped oneOf beside a not-toggling double negation (review 4719419437)", () => {
-		// not (not (changed oneOf)) is the oneOf's own position again: the
-		// relaxation applies there, only the directly negated subtree keeps
-		// the oneOf.
-		const stripped = strip({ not: { not: { oneOf: [{ type: "integer", minimum: 0 }, { type: "null" }] } } })
-		const inner = (stripped.not as Schema).not as Schema
-		expect(inner.anyOf).toStrictEqual([
-			{ type: "integer", description: constraintNote({ minimum: 0 }) },
-			{ type: "null" },
-		])
-		expect(inner).not.toHaveProperty("oneOf")
+		// The inner negation sits in a negation context, so it stays (its
+		// stripped subtree only widens the negated set, which relaxes the
+		// enclosing negation); the OUTER negation's subtree lost keywords,
+		// and a retained outer negation would reject values the original
+		// accepted (review 4725679664) - it drops.
+		const schema: Schema = { not: { not: { oneOf: [{ type: "integer", minimum: 0 }, { type: "null" }] } } }
+		const stripped = strip(schema)
+		expect(stripped).not.toHaveProperty("not")
+		expect(stripped).toEqual({ description: constraintNote({ not: schema.not }) })
 	})
 
-	it("keeps a oneOf under properties inside a not in place (round 7, schema-map context)", () => {
-		// The negation context must survive the schema-map keywords: the
-		// map callback resets it to false otherwise, and a oneOf under
-		// properties inside a `not` would still move under anyOf. Ground
-		// truth on the declared schema: "a" matches both branches, the
-		// oneOf refuses it, the inner schema fails, and the negation
-		// accepts the value.
+	it("drops a negation reached through a schema map when its subtree changed (round 7 context, review 4725679664)", () => {
+		// The negation context survives the schema-map keywords for the
+		// oneOf position; the negation's own subtree still lost a keyword
+		// (the branch's pattern), so the retained negation would reject a
+		// value the original accepted and the negation drops.
 		const schema: Schema = {
-			not: {
-				type: "object",
-				properties: { v: { oneOf: [{ type: "string", minLength: 1 }, { type: "string" }] } },
-				required: ["v"],
+			type: "object",
+			properties: {
+				v: { not: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "number" }] } },
 			},
+			required: ["v"],
 		}
-		expect(accepts(schema, { v: "a" })).toBe(true)
-
-		const compiled = strip(schema)
-		const inner = compiled.not as Schema
-		const v = (inner.properties as Schema).v as Schema
-		expect(v.oneOf).toStrictEqual([
-			{ type: "string", description: constraintNote({ minLength: 1 }) },
-			{ type: "string" },
-		])
-		expect(v).not.toHaveProperty("anyOf")
-		// The emitted negation still accepts the value the original
-		// accepted: the retained exactly-one rule refuses "a", the inner
-		// schema fails, and the not accepts it.
-		expect(accepts(compiled, { v: "a" })).toBe(true)
+		// Ground truth: "b" matches zero original branches, the negation
+		// accepts it.
+		const vOriginal = (schema.properties as Schema).v as Schema
+		expect(accepts(vOriginal, "b")).toBe(true)
+		const stripped = strip(schema)
+		const v = (stripped.properties as Schema).v as Schema
+		expect(v).not.toHaveProperty("not")
+		expect(v.description).toBe(
+			constraintNote({ not: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "number" }] } }),
+		)
+		expect(accepts(v, "b")).toBe(true)
 	})
 
 	it("still relaxes a stripped oneOf under properties outside a not (map-context control)", () => {
@@ -286,20 +285,62 @@ describe("stripUnsupportedStrictKeywords", () => {
 		])
 	})
 
-	it.each([
-		"items",
-		"additionalItems",
-		"unevaluatedItems",
-		"unevaluatedProperties",
-		"propertyNames",
-		"not",
-		"if",
-		"then",
-		"else",
-	])("strips the %s subschema", (keyword) => {
-		expect(strip({ [keyword]: { type: "string", minLength: 1 } })).toEqual({
-			[keyword]: { type: "string", description: constraintNote({ minLength: 1 }) },
+	it.each(["items", "additionalItems", "unevaluatedItems", "unevaluatedProperties", "propertyNames", "then", "else"])(
+		"strips the %s subschema",
+		(keyword) => {
+			expect(strip({ [keyword]: { type: "string", minLength: 1 } })).toEqual({
+				[keyword]: { type: "string", description: constraintNote({ minLength: 1 }) },
+			})
+		},
+	)
+
+	it("strips the if subschema and keeps the bare predicate in place", () => {
+		// A bare if asserts nothing, so the stripped predicate stays; the
+		// original predicate is recorded in the hint (review 4725679729).
+		expect(strip({ if: { type: "string", minLength: 1 } })).toEqual({
+			if: { type: "string", description: constraintNote({ minLength: 1 }) },
+			description: constraintNote({ if: { type: "string", minLength: 1 } }),
 		})
+	})
+
+	it("drops the not subschema when stripping changed it", () => {
+		// A retained negation over stripped branches would reject values
+		// the original accepted (review 4725679664), so the negation drops
+		// into the hint.
+		expect(strip({ not: { type: "string", minLength: 1 } })).toEqual({
+			description: constraintNote({ not: { type: "string", minLength: 1 } }),
+		})
+	})
+
+	it("keeps the branches of a conditional whose predicate strips unchanged", () => {
+		const conditional = { if: { type: "string" }, then: { type: "string" } }
+		expect(strip(conditional)).toEqual(conditional)
+	})
+
+	it("drops the branches of a conditional whose stripped predicate flips branch selection (review 4725679729)", () => {
+		const schema: Schema = {
+			type: "string",
+			if: { pattern: "^a$" },
+			then: { enum: ["a"] },
+			else: { enum: ["b"] },
+		}
+		// Ground truth on the declared schema: "a" selects then and passes,
+		// "b" selects else and passes.
+		expect(accepts(schema, "a")).toBe(true)
+		expect(accepts(schema, "b")).toBe(true)
+		const stripped = strip(schema)
+		// The stripped predicate matches every string, so "b" would select
+		// then and fail its enum. The branches travel into the hint beside
+		// the original predicate; the bare predicate stays - it asserts
+		// nothing, so both values stay accepted.
+		expect(stripped.if).toStrictEqual({ description: constraintNote({ pattern: "^a$" }) })
+		expect(stripped).not.toHaveProperty("then")
+		expect(stripped).not.toHaveProperty("else")
+		expect(stripped.description).toBe(
+			constraintNote({ if: { pattern: "^a$" }, then: { enum: ["a"] }, else: { enum: ["b"] } }),
+		)
+		expect(accepts(stripped, "a")).toBe(true)
+		expect(accepts(stripped, "b")).toBe(true)
 	})
 
 	it("strips each subschema in tuple-form items", () => {
@@ -451,5 +492,84 @@ describe("stripUnsupportedStrictKeywords", () => {
 		expect(str.allOf).toHaveLength(2)
 		expect(str.allOf?.[0]).toStrictEqual({ type: "string" })
 		expect(str.allOf?.[1]?.anyOf).toHaveLength(2)
+	})
+
+	it("rewrites references that name a relocated oneOf (review 4725679725)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { choice: { $ref: "#/$defs/Choice/oneOf/0" } },
+			required: ["choice"],
+			$defs: { Choice: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "integer" }] } },
+		}
+		const stripped = strip(schema)
+		// The pattern leaves branch zero, the branches relax under anyOf,
+		// and the reference must name the branch's new location - the old
+		// oneOf position no longer exists in the emitted document.
+		const choice = (stripped.properties as Schema).choice as Schema
+		expect(choice.$ref).toBe("#/$defs/Choice/anyOf/0")
+	})
+
+	it("rewrites references when the relocated oneOf joins an allOf conjunct (review 4725679725)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { choice: { $ref: "#/$defs/Choice/oneOf/1" } },
+			required: ["choice"],
+			$defs: {
+				Choice: {
+					allOf: [{ type: "string" }],
+					oneOf: [
+						{ type: "string", pattern: "^a$" },
+						{ type: "integer", minimum: 1 },
+					],
+				},
+			},
+		}
+		const stripped = strip(schema)
+		// With an allOf sibling the relaxed branches become the second
+		// conjunct's anyOf; the reference follows that path and keeps the
+		// branch index.
+		const choice = (stripped.properties as Schema).choice as Schema
+		expect(choice.$ref).toBe("#/$defs/Choice/allOf/1/anyOf/1")
+	})
+
+	it("rewrites a nested reference while keeping unrelated pointers untouched (review 4725679725)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: {
+				choice: {
+					allOf: [{ $ref: "#/$defs/Choice/oneOf/0/properties/inner" }],
+				},
+				other: { $ref: "#/$defs/Plain" },
+			},
+			required: ["choice", "other"],
+			$defs: {
+				Choice: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "integer" }] },
+				Plain: { type: "string" },
+			},
+		}
+		const stripped = strip(schema)
+		const choice = (stripped.properties as Schema).choice as Schema
+		const inner = (choice.allOf as Schema[])[0] as Schema
+		// The pointer's suffix below the relocated position survives; a
+		// pointer naming an unrelocated position stays verbatim.
+		expect(inner.$ref).toBe("#/$defs/Choice/anyOf/0/properties/inner")
+		const other = (stripped.properties as Schema).other as Schema
+		expect(other.$ref).toBe("#/$defs/Plain")
+	})
+
+	it.each([
+		["anyOf with a failing sibling type", { type: "string", anyOf: [{}] }, 1, false],
+		["anyOf with a passing sibling type", { type: "string", anyOf: [{}] }, "ok", true],
+		["oneOf with a failing sibling pattern", { oneOf: [{}], pattern: "^a$" }, "bb", false],
+		["oneOf with a passing sibling pattern", { oneOf: [{}], pattern: "^a$" }, "a", true],
+		["allOf with a failing sibling type", { allOf: [{}], type: "number" }, "x", false],
+		["allOf with a passing sibling type", { allOf: [{}], type: "number" }, 3, true],
+		["an empty negation rejects every value", { not: {}, type: "number" }, 5, false],
+		["not combines with a passing sibling type", { not: { type: "string" }, type: "number" }, 5, true],
+	])("accepts: %s", (_name, schema, value, expected) => {
+		// Sibling constraints apply together with the combinator result
+		// (Draft 2020-12): the acceptance oracle must never let a
+		// combinator's early verdict skip the sibling keywords.
+		expect(accepts(schema, value)).toBe(expected)
 	})
 })

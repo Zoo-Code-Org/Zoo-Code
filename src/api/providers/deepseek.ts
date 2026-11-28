@@ -131,9 +131,14 @@ export class DeepSeekHandler extends OpenAiHandler {
 		}
 	}
 
-	// Issue #547: DeepSeek rejects strict-mode tool compilation (Draft 2020-12
-	// forbids pattern/minLength, and the forced all-required rule makes the
-	// model emit values for optional parameters). Send strict: false for every
+	// Issue #547: DeepSeek rejects strict-mode tool compilation (the
+	// DeepSeek strict-mode guide does not support minLength, and the forced
+	// all-required rule makes the model emit values for optional
+	// parameters; pattern is listed as supported in that guide, and the
+	// schema-compilation rejections in the field (HTTP 422) come from the
+	// gateways in front of the API - the issue names OpenRouter and
+	// Cerebras proxies - not from the JSON Schema standard, which defines
+	// both keywords). Send strict: false for every
 	// function tool and compile parameters through the DeepSeek dialect, which
 	// re-encodes gateway-rejected keywords as description hints while
 	// preserving the declared required arrays. Applies to MCP tools too: their

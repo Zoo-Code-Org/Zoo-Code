@@ -1241,11 +1241,18 @@ describe("DeepSeekHandler", () => {
 			const tools = convert([tool])
 			const params = tools[0].function.parameters as unknown as ObjectSchema
 			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
-			// The compiled if accepts every string, so a retained then: false
-			// would reject values ("report") the original schema accepted.
-			expect(name).not.toHaveProperty("if")
-			expect(name).not.toHaveProperty("then")
-			expect(name).not.toHaveProperty("else")
+			// The compiled predicate stays as an annotation-only applicator:
+			// a bare if asserts nothing, so a changed predicate cannot
+			// tighten the emitted schema, and its property evaluations keep
+			// reaching a retained unevaluatedProperties rule (review
+			// 4725679712 - dropping the whole conditional would strand a
+			// required key the original if evaluated). The branches travel
+			// into the hint with the original predicate.
+			expect(name.then).toBeUndefined()
+			expect(name.else).toBeUndefined()
+			expect(name.if).toStrictEqual({
+				description: "DeepSeek compatibility (constraint kept for the caller): value must match /^tmp/",
+			})
 			// The original conditional stays visible as a hint.
 			expect(String(name.description)).toContain("^tmp")
 			expect(String(name.description)).toContain("then")
@@ -1280,11 +1287,13 @@ describe("DeepSeekHandler", () => {
 			expect(name).not.toHaveProperty("description")
 		})
 
-		it("compiles a chain of unchanged conditionals in linear work (review 4714821172)", () => {
+		it("compiles a chain of unchanged conditionals in bounded work (review 4714821172)", () => {
 			// 24 nested unchanged if predicates: compiling the predicate a
 			// second time in the key loop doubles the work at every level
 			// (2^24 node compiles, seconds of blocked extension host), so the
-			// single-compile rule keeps this run far below one second.
+			// single-compile rule keeps the work linear. The memo hit count is
+			// a deterministic work count - wall-clock timing would flake on a
+			// busy worker (review 4725679675).
 			let predicate: Record<string, unknown> = { type: "string" }
 			for (let level = 0; level < 24; level++) {
 				predicate = { if: predicate, then: { type: "string" } }
@@ -1304,16 +1313,24 @@ describe("DeepSeekHandler", () => {
 				},
 			} satisfies Record<string, unknown>
 
-			const startedAt = Date.now()
-			const tools = convert([tool])
-			const elapsedMs = Date.now() - startedAt
+			const memoGetSpy = vi.spyOn(WeakMap.prototype, "get")
+			try {
+				const tools = convert([tool])
 
-			// The unchanged chain must still compile to itself, key order included.
-			expect(JSON.stringify(tools[0].function.parameters)).toStrictEqual(JSON.stringify(expected))
-			expect(elapsedMs).toBeLessThan(1000)
+				// The unchanged chain must still compile to itself, key order
+				// included.
+				expect(JSON.stringify(tools[0].function.parameters)).toStrictEqual(JSON.stringify(expected))
+				// Deterministic work count: every compileSchemaNode entry
+				// consults the memo once. With the single-compile rule the
+				// count stays linear in the schema size; the doubled
+				// recompilation would need 2^24 entries.
+				expect(memoGetSpy.mock.calls.length).toBeLessThan(2000)
+			} finally {
+				memoGetSpy.mockRestore()
+			}
 		}, 2500)
 
-		it("compiles a repeated-reference chain in bounded time (review 4719419419)", () => {
+		it("compiles a repeated-reference chain in bounded work (review 4719419419)", () => {
 			// 18 definitions chained through if/not predicates that carry
 			// only a $ref: the reference-target checks recompile the shared
 			// target once per predicate, so without the per-document memo
@@ -1342,14 +1359,20 @@ describe("DeepSeekHandler", () => {
 				},
 			} satisfies Record<string, unknown>
 
-			const startedAt = Date.now()
-			const tools = convert([tool])
-			const elapsedMs = Date.now() - startedAt
+			const memoGetSpy = vi.spyOn(WeakMap.prototype, "get")
+			try {
+				const tools = convert([tool])
 
-			// Every target compiles unchanged, so every predicate survives
-			// verbatim, key order included.
-			expect(JSON.stringify(tools[0].function.parameters)).toStrictEqual(JSON.stringify(expected))
-			expect(elapsedMs).toBeLessThan(1000)
+				// Every target compiles unchanged, so every predicate survives
+				// verbatim, key order included.
+				expect(JSON.stringify(tools[0].function.parameters)).toStrictEqual(JSON.stringify(expected))
+				// Deterministic work count: with the memo the repeated targets
+				// compile once per depth; the unmemoized chain recompiles the
+				// shared target 2^18 times.
+				expect(memoGetSpy.mock.calls.length).toBeLessThan(2000)
+			} finally {
+				memoGetSpy.mockRestore()
+			}
 		}, 2500)
 
 		it("passes nodes deeper than the schema depth cap through uncompiled (round-4 pre-merge check)", () => {
@@ -1551,11 +1574,14 @@ describe("DeepSeekHandler", () => {
 			const tools = convert([tool])
 			const params = tools[0].function.parameters as unknown as ObjectSchema
 			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
-			// The compiled predicate accepts every string, so a retained
-			// then branch would fire on values the original rejected.
-			expect(name).not.toHaveProperty("if")
-			expect(name).not.toHaveProperty("then")
-			expect(name).not.toHaveProperty("else")
+			// The compiled predicate stays as an annotation-only applicator
+			// (review 4725679712): a bare if asserts nothing, so the
+			// changed-target predicate cannot tighten the emitted schema,
+			// and a retained then branch would still fire on values the
+			// original rejected.
+			expect(name.then).toBeUndefined()
+			expect(name.else).toBeUndefined()
+			expect(name.if).toStrictEqual({ $ref: "#/$defs/tmp" })
 			expect(String(name.description)).toContain("then")
 		})
 
@@ -2361,6 +2387,354 @@ describe("DeepSeekHandler", () => {
 			// retained closed rule relaxes instead.
 			expect(params.additionalProperties).toBe(true)
 		})
+
+		it("keeps a not whose const carries a ref-shaped literal (review 4725679699)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							not: { const: { $ref: "#/not-in-the-document" } },
+							required: ["x"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The "$ref" inside const is the asserted VALUE, not a schema
+			// reference: collecting it would report the predicate as
+			// reference-unstable and drop a not that compiles unchanged.
+			expect(params.not).toStrictEqual({ const: { $ref: "#/not-in-the-document" } })
+			expect(params).not.toHaveProperty("description")
+		})
+
+		it("resolves a percent-encoded pointer segment (review 4725679702)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							$defs: { "a b": { type: "string" } },
+							properties: {
+								name: { if: { $ref: "#/$defs/a%20b" }, then: { type: "string" } },
+							},
+							required: ["name"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			const name = (params.properties as Record<string, Record<string, unknown>>).name
+			// The URI fragment decodes before resolution: the target named
+			// "a b" compiles unchanged, so the conditional keeps every part
+			// of itself instead of being relaxed as reference-unstable.
+			expect(name).toStrictEqual({ if: { $ref: "#/$defs/a%20b" }, then: { type: "string" } })
+			expect(name).not.toHaveProperty("description")
+		})
+
+		it("resolves an array index in a local pointer and inlines the retained reference (reviews 4725679704, 4725679720)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: { "^a": { allOf: [{ type: "string", pattern: "^q$" }] } },
+							properties: { x: { $ref: "#/patternProperties/^a/allOf/0" } },
+							required: ["x"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The canonical array index resolves before compilation, so the
+			// RETAINED property's reference through the removed
+			// patternProperties location is inlined with its compiled
+			// target - compilation deletes that location and an unrewritten
+			// pointer would dangle. The inlined target carries the compiled
+			// pattern hint.
+			expect(params.properties).toStrictEqual({
+				x: {
+					type: "string",
+					description: "DeepSeek compatibility (constraint kept for the caller): value must match /^q$/",
+				},
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("inlines a retained property reference whose target location compilation removes (review 4725679720)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							patternProperties: { y: { type: "string" } },
+							properties: { x: { $ref: "#/patternProperties/y" } },
+							required: ["x"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The reference sits OUTSIDE the moved rules, so the relocation
+			// walk never saw it; compilation removes the patternProperties
+			// location and the pointer would dangle. The repair pass inlines
+			// it with its compiled target.
+			expect(params.properties).toStrictEqual({ x: { type: "string" } })
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("drops a not whose reference target probe passes the depth limit (review 4725679706)", () => {
+			// The negation sits 32 properties levels deep: its target probe
+			// compiles past MAX_SCHEMA_DEPTH and returns unchanged, while
+			// the SAME target emits from the root $defs at depth 1 with its
+			// pattern stripped - a retained not would negate a schema
+			// without the pattern and reject strings the original accepted.
+			let node: Record<string, unknown> = { not: { $ref: "#/$defs/tmp" } }
+			for (let level = 0; level < 32; level++) {
+				node = { type: "object", properties: { k: node }, required: ["k"] }
+			}
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: { ...node, $defs: { tmp: { type: "string", pattern: "^tmp" } } },
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			let cursor: Record<string, unknown> = params
+			for (let level = 0; level < 32; level++) {
+				cursor = (cursor.properties as Record<string, Record<string, unknown>>).k as Record<string, unknown>
+			}
+			expect(cursor).not.toHaveProperty("not")
+			expect(String(cursor.description)).toContain("not")
+		})
+
+		it("relaxes a moved rule that follows an over-budget acyclic chain (review 4725679710)", () => {
+			// A chain of 120000 links through a removed location: each link
+			// consumes budget BEFORE the next descent fires, so relocation
+			// stops at the budget instead of blowing the call stack with a
+			// RangeError - the retained rule relaxes exactly like an
+			// oversized graph.
+			const links: Record<string, unknown> = {}
+			const CHAIN_LENGTH = 120000
+			for (let level = 1; level < CHAIN_LENGTH; level++) {
+				links[`l${level}`] = { $ref: `#/not/l${level + 1}` }
+			}
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: { "^a": { $ref: "#/not/l1" } },
+						not: { ...links, [`l${CHAIN_LENGTH}`]: { type: "string" } },
+						required: ["x"],
+						additionalProperties: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// Graceful relaxation, not a stack overflow: the abandoned
+			// relocation leaves the retained rule widened.
+			expect(params.additionalProperties).toBe(true)
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("keeps a changed conditional predicate as an annotation (review 4725679712)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							required: ["x"],
+							if: { properties: { x: { pattern: "^a" } } },
+							unevaluatedProperties: false,
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// Dropping the whole conditional would strand the required key:
+			// the original if EVALUATED x, and the retained
+			// unevaluatedProperties: false only accepts evaluated keys. The
+			// bare predicate stays - it asserts nothing - so x stays
+			// evaluated and accepted; the branches disappear.
+			expect(params.if).toStrictEqual({
+				properties: {
+					x: {
+						description: "DeepSeek compatibility (constraint kept for the caller): value must match /^a/",
+					},
+				},
+			})
+			expect(params.unevaluatedProperties).toBe(false)
+			expect(params).not.toHaveProperty("then")
+			expect(params).not.toHaveProperty("else")
+			expect(String(params.description)).toContain("if")
+		})
+
+		it("compiles a schema-valued unevaluatedProperties rule (review 4725679716)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							unevaluatedProperties: { type: "string", minLength: 2 },
+							required: ["x"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// A schema-valued unevaluated* rule is a schema: its rejected
+			// keywords must compile, or the request ships minLength verbatim.
+			expect(params.unevaluatedProperties).toStrictEqual({
+				type: "string",
+				description: "DeepSeek compatibility (constraint kept for the caller): minLength: 2",
+			})
+		})
+
+		it("compiles a schema-valued unevaluatedItems rule (review 4725679716)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "array",
+							unevaluatedItems: { type: "string", maxLength: 4 },
+							minItems: 1,
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			expect(params.unevaluatedItems).toStrictEqual({
+				type: "string",
+				description: "DeepSeek compatibility (constraint kept for the caller): maxLength: 4",
+			})
+		})
+
+		it("keeps a boolean unevaluatedProperties rule untouched (review 4725679716)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							properties: { x: { type: "string" } },
+							unevaluatedProperties: false,
+							required: ["x"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			expect(params.unevaluatedProperties).toBe(false)
+			expect(params).not.toHaveProperty("description")
+		})
+
+		it("relaxes unevaluatedProperties when a child applicator loses patternProperties (review 4725679723)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							required: ["x"],
+							allOf: [{ patternProperties: { "^x$": { type: "string" } } }],
+							unevaluatedProperties: false,
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The allOf branch evaluated x through its patternProperties rule;
+			// compilation removes the rule, the outer removed record never
+			// saw it, and a retained unevaluatedProperties: false would make
+			// the required property forbidden - the compiled schema would
+			// accept nothing. The rule relaxes instead.
+			expect(params.unevaluatedProperties).toBe(true)
+			// The removed patternProperties rule is the CHILD branch's
+			// removal: its hint lands on the compiled branch, the
+			// relaxation on the enclosing rule.
+			const branch = (params.allOf as Record<string, unknown>[])[0] as Record<string, unknown>
+			expect(String(branch.description)).toContain("patternProperties")
+		})
+
+		it("keeps unevaluatedItems when items and prefixItems are both present (review 4725679660)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							properties: {
+								items: {
+									type: "array",
+									items: { type: "string" },
+									prefixItems: [{ type: "string" }],
+									contains: { const: "b" },
+									unevaluatedItems: false,
+								},
+							},
+							required: ["items"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as {
+				properties?: Record<string, Record<string, unknown>>
+			}
+			const arr = (params.properties ?? {}).items as Record<string, unknown>
+			// A retained items evaluates every index, whether or not a
+			// prefixItems sits beside it: the restriction is an ordinary one
+			// and stays; only the removed contains moves into the hint.
+			expect(arr.unevaluatedItems).toBe(false)
+			expect(arr.items).toStrictEqual({ type: "string" })
+			expect(arr.prefixItems).toStrictEqual([{ type: "string" }])
+			expect(String(arr.description)).toContain("contains")
+		})
 	})
 })
 
@@ -2427,5 +2801,10 @@ describe("DeepSeekHandler lone surrogate sanitization (#461)", () => {
 		expect(toolMessage.content).toBe(sanitized)
 		expect(JSON.parse(toolCalls[0].function.arguments)).toEqual({ path: sanitized })
 		expect(request.tools[0].function.description).toBe(sanitized)
+		// Request-level strict assertion: the converter-level test pins
+		// the converter output, and this pins the value that actually
+		// leaves on the outgoing request after conversion (review
+		// 4725679670).
+		expect(request.tools[0].function.strict).toBe(false)
 	})
 })

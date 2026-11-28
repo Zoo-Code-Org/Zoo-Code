@@ -1,9 +1,12 @@
 /**
  * DeepSeek tool dialect compiler (issue #547, defects 1 and 2).
  *
- * DeepSeek's function-calling gateway cannot compile strict-mode tool schemas:
- * Draft 2020-12 strict compilation rejects constraint keywords such as
- * "pattern" and "minLength" (HTTP 422 at schema compilation time), and strict
+ * DeepSeek's function-calling gateway cannot compile strict-mode tool
+ * schemas: the DeepSeek strict-mode subset rejects constraint keywords such
+ * as "pattern" and "minLength" at schema compilation time (HTTP 422; the
+ * gateways in front of the API enforce the subset - the issue names
+ * OpenRouter and Cerebras proxies - and Draft 2020-12 itself defines both
+ * keywords), and strict
  * mode's forced all-properties-required rule makes the model emit values for
  * parameters the tool treats as optional (endless "missing required
  * parameter" retries on read_file's limit/offset).
@@ -28,7 +31,11 @@
  *   #547 review 6089521528), a relocation that would grow past the
  *   expansion budget relaxes the retained rule instead (issue #547 review
  *   4723722021), literal values under const, enum, default and examples are
- *   never rewritten (issue #547 review 4723722038), a moved reference's
+ *   never rewritten (issue #547 review 4723722038), and a reference that
+ *   survives outside the moved rules - a retained property's pointer
+ *   through the removed location - is inlined the same way, because
+ *   compilation deletes the location the pointer names (issue #547 review
+ *   4725679720), a moved reference's
  *   sibling keywords stay on the outer schema beside the inlined target so
  *   Draft 2020-12 annotation visibility survives (issue #547 review
  *   4723722028), a surviving reference's literal-valued siblings stay
@@ -36,14 +43,31 @@
  *   4725307765), removing contains relaxes a
  *   retained unevaluatedItems restriction the same way, and a retained
  *   prefixItems is no complete evaluator: only a retained items keeps the
- *   array restriction (issue #547 review 4719935091), a oneOf whose branches - or
+ *   array restriction, whether or not a prefixItems sits beside it (issue
+ *   #547 review 4719935091, review 4725679660), a oneOf whose branches - or
  *   whose branches'
  *   reference targets - changed moves under anyOf as its own allOf conjunct
  *   (an unchanged sibling anyOf keeps applying on its own), a not whose
- *   predicate changed is dropped, and a conditional whose if predicate changed
- *   loses its then/else branches. A predicate that only references schemas
+ *   predicate changed is dropped, and a conditional whose if predicate
+ *   changed loses its then/else branches: the predicate itself stays,
+ *   because a bare if asserts nothing and its property evaluations must
+ *   keep reaching a retained unevaluatedProperties rule (issue #547 review
+ *   4725679712), a schema-valued unevaluatedProperties or unevaluatedItems
+ *   rule compiles like any other subschema (issue #547 review 4725679716),
+ *   and an evaluation lost inside a child applicator relaxes a retained
+ *   unevaluatedProperties rule like a removal at the same level (issue #547
+ *   review 4725679723). A predicate that only references schemas
  *   ($ref) counts as changed when a referenced target itself compiles
- *   differently (each original rule stays in the hint);
+ *   differently (each original rule stays in the hint): the pointer
+ *   collection visits schema positions only, because a "$ref" inside const
+ *   is the asserted value (issue #547 review 4725679699), and a target
+ *   whose compilation probe runs past the depth limit counts as changed,
+ *   never unchanged (issue #547 review 4725679706). Local pointers resolve
+ *   with URI-fragment decoding and canonical array indices (issue #547
+ *   review 4725679702, review 4725679704), and a moved reference charges
+ *   the relocation budget before it descends, so a long acyclic chain
+ *   stops at the budget instead of the call stack (issue #547 review
+ *   4725679710);
  * - compilation is pure: the caller-owned schema object is never mutated;
  * - finished node compilations are memoized per document, because predicate
  *   checks recompile shared reference targets and an unmemoized chain of
@@ -90,6 +114,14 @@ const MAX_SCHEMA_DEPTH = 32
 // and abandons past this budget; the caller relaxes the retained rule
 // instead of moving it (issue #547 review 4723722021).
 const MAX_RELOCATION_NODES = 4096
+
+// The relocation descent follows REFERENCE targets, not the schema tree, so
+// an acyclic reference chain has no structural depth bound: the budget alone
+// counts nodes, and 4096 stacked calls still outrun the JS stack before the
+// budget fires. The active descent depth is capped at a level far inside the
+// stack and far above any legitimate reference chain; hitting it abandons
+// the relocation exactly like the budget (issue #547 review 4725679710).
+const MAX_RELOCATION_ACTIVE_DEPTH = 512
 
 // Literal-valued keywords carry instance data, not schemas: a "$ref"-shaped
 // object inside them is a value a caller asserts against, never a reference
@@ -138,12 +170,17 @@ function deepEqualJson(a: unknown, b: unknown): boolean {
  * Collects every local "$ref" JSON pointer mentioned anywhere inside a
  * predicate subtree. A reference applies its target schema at validation
  * time, so a predicate whose own object is unchanged can still behave
- * differently when one of its targets compiles differently.
+ * differently when one of its targets compiles differently. Only schema
+ * positions are visited: a "$ref" inside a literal-valued keyword (const,
+ * enum, default, examples) is the asserted value, not a reference, and
+ * collecting it would report a stable predicate as changed (issue #547
+ * review 4725679699). Inside a name-to-schema map the keys are names, and
+ * an entry named after a literal keyword still carries a schema.
  */
-function collectRefPointers(value: unknown, seen: Set<unknown>, out: string[]): void {
+function collectRefPointers(value: unknown, seen: Set<unknown>, out: string[], insideSchemaMap = false): void {
 	if (Array.isArray(value)) {
 		for (const entry of value) {
-			collectRefPointers(entry, seen, out)
+			collectRefPointers(entry, seen, out, insideSchemaMap)
 		}
 		return
 	}
@@ -154,23 +191,62 @@ function collectRefPointers(value: unknown, seen: Set<unknown>, out: string[]): 
 	if (typeof value.$ref === "string") {
 		out.push(value.$ref)
 	}
-	for (const entry of Object.values(value)) {
-		collectRefPointers(entry, seen, out)
+	for (const [key, entry] of Object.entries(value)) {
+		if (!insideSchemaMap && LITERAL_VALUE_KEYWORDS.has(key)) {
+			continue
+		}
+		collectRefPointers(entry, seen, out, insideSchemaMap ? false : entersSchemaMap(key, entry))
 	}
+}
+
+/**
+ * Splits a "#/..." pointer into its decoded segments. The fragment is a URI
+ * fragment: percent-escapes decode first, then the JSON Pointer "~" escapes
+ * (RFC 6901 section 6), so a target named "a b" matches the pointer
+ * segment "a%20b" (issue #547 review 4725679702). Both resolution and
+ * lost-key classification share this parser. A malformed percent-escape
+ * keeps the raw segment, which preserves the previous behavior for
+ * pointers that were never valid.
+ */
+function decodePointerSegments(ref: string): string[] | undefined {
+	if (!ref.startsWith("#/")) {
+		return undefined
+	}
+	const segments: string[] = []
+	for (const rawSegment of ref.slice(2).split("/")) {
+		let decoded = rawSegment
+		try {
+			decoded = decodeURIComponent(rawSegment)
+		} catch {
+			decoded = rawSegment
+		}
+		segments.push(decoded.replace(/~1/g, "/").replace(/~0/g, "~"))
+	}
+	return segments
 }
 
 /**
  * Resolves a "#/..." JSON pointer against the original root schema. Anything
  * else (external URIs, the whole-document "#" form, dangling pointers) is
- * reported unresolved.
+ * reported unresolved. A segment that names an array index resolves into
+ * the array when it is canonical (no leading zero): a moved rule can
+ * reference "#/patternProperties/x/allOf/0", and the pointer is valid
+ * before compilation (issue #547 review 4725679704).
  */
 function resolveLocalRef(root: unknown, ref: string): { resolved: boolean; target: unknown } {
-	if (!ref.startsWith("#/")) {
+	const segments = decodePointerSegments(ref)
+	if (!segments) {
 		return { resolved: false, target: undefined }
 	}
 	let node: unknown = root
-	for (const rawSegment of ref.slice(2).split("/")) {
-		const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~")
+	for (const segment of segments) {
+		if (Array.isArray(node)) {
+			if (!/^(0|[1-9][0-9]*)$/.test(segment) || Number(segment) >= node.length) {
+				return { resolved: false, target: undefined }
+			}
+			node = node[Number(segment)]
+			continue
+		}
 		if (!isRecord(node) || !Object.prototype.hasOwnProperty.call(node, segment)) {
 			return { resolved: false, target: undefined }
 		}
@@ -191,6 +267,15 @@ function referencesUnchangedTargets(refs: string[], root: unknown, depth: number
 	for (const ref of refs) {
 		const resolved = resolveLocalRef(root, ref)
 		if (!resolved.resolved) {
+			return false
+		}
+		if (depth + 1 > MAX_SCHEMA_DEPTH) {
+			// The probe compiles to its input unchanged past the depth
+			// limit, but the same target emits from the root $defs at
+			// depth 1, where its rejected keywords ARE stripped: treating
+			// the probe as unchanged would keep a negation whose target
+			// tightens the schema (issue #547 review 4725679706). The
+			// caller drops the predicate instead.
 			return false
 		}
 		if (!deepEqualJson(compileSchemaNode(resolved.target, depth + 1, root, memo), resolved.target)) {
@@ -221,18 +306,13 @@ const POINTER_KEYS_LOST_IN_COMPILATION = new Set([
 ])
 
 function pointerTraversesLostKey(ref: string): boolean {
-	if (!ref.startsWith("#/")) {
+	const segments = decodePointerSegments(ref)
+	if (!segments) {
 		// External URIs and the whole-document "#" form never depended on a
 		// local document location.
 		return false
 	}
-	return ref
-		.slice(2)
-		.split("/")
-		.some((rawSegment) => {
-			const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~")
-			return POINTER_KEYS_LOST_IN_COMPILATION.has(segment)
-		})
+	return segments.some((segment) => POINTER_KEYS_LOST_IN_COMPILATION.has(segment))
 }
 
 /**
@@ -276,6 +356,7 @@ function relocateMovedRefs(
 	chain: Set<unknown>,
 	abandon: { hit: boolean },
 	budget: { remaining: number },
+	activeDepth: { count: number },
 	insideSchemaMap: boolean,
 ): unknown {
 	if (abandon.hit) {
@@ -289,7 +370,7 @@ function relocateMovedRefs(
 		}
 		const out: unknown[] = []
 		for (const entry of node) {
-			out.push(relocateMovedRefs(entry, root, depth, memo, chain, abandon, budget, insideSchemaMap))
+			out.push(relocateMovedRefs(entry, root, depth, memo, chain, abandon, budget, activeDepth, insideSchemaMap))
 		}
 		return out
 	}
@@ -320,7 +401,17 @@ function relocateMovedRefs(
 				defineOwnKey(
 					out,
 					key,
-					relocateMovedRefs(value, root, depth, memo, chain, abandon, budget, entersSchemaMap(key, value)),
+					relocateMovedRefs(
+						value,
+						root,
+						depth,
+						memo,
+						chain,
+						abandon,
+						budget,
+						activeDepth,
+						entersSchemaMap(key, value),
+					),
 				)
 			}
 			if (abandon.hit) {
@@ -339,23 +430,31 @@ function relocateMovedRefs(
 			return node
 		}
 		chain.add(resolved.target)
-		const inlined = relocateMovedRefs(
-			compileSchemaNode(resolved.target, depth + 1, root, memo),
-			root,
-			depth,
-			memo,
-			chain,
-			abandon,
-			budget,
-			false,
-		)
-		chain.delete(resolved.target)
-		if (abandon.hit) {
+		// The budget is charged BEFORE the descent, and the active descent
+		// depth is bounded beside it: every link of a long acyclic chain
+		// consumes one unit and one active frame before the next recursion
+		// fires, so a chain stops at the bounds instead of outrunning the
+		// call stack (issue #547 review 4725679710). The existing fallback
+		// for oversized moves is the same abandon the budget already
+		// triggers.
+		budget.remaining -= 1
+		activeDepth.count += 1
+		if (budget.remaining <= 0 || activeDepth.count > MAX_RELOCATION_ACTIVE_DEPTH) {
+			chain.delete(resolved.target)
+			activeDepth.count -= 1
+			abandon.hit = true
 			return node
 		}
-		budget.remaining -= 1
-		if (budget.remaining <= 0) {
-			abandon.hit = true
+		// A canonical array index can point at an array member (review
+		// 4725679704): compileSchemaNode passes arrays through unchanged,
+		// so the members compile here.
+		const compiledTarget = Array.isArray(resolved.target)
+			? resolved.target.map((entry) => compileSchemaNode(entry, depth + 1, root, memo))
+			: compileSchemaNode(resolved.target, depth + 1, root, memo)
+		const inlined = relocateMovedRefs(compiledTarget, root, depth, memo, chain, abandon, budget, activeDepth, false)
+		activeDepth.count -= 1
+		chain.delete(resolved.target)
+		if (abandon.hit) {
 			return node
 		}
 		const conjuncts: unknown[] = [inlined]
@@ -372,7 +471,9 @@ function relocateMovedRefs(
 				// location, and the pointer would dangle in the compiled
 				// document (issue #547 review 4724111350).
 				for (const conjunct of value) {
-					conjuncts.push(relocateMovedRefs(conjunct, root, depth, memo, chain, abandon, budget, false))
+					conjuncts.push(
+						relocateMovedRefs(conjunct, root, depth, memo, chain, abandon, budget, activeDepth, false),
+					)
 				}
 				continue
 			}
@@ -383,7 +484,17 @@ function relocateMovedRefs(
 			defineOwnKey(
 				rest,
 				key,
-				relocateMovedRefs(value, root, depth, memo, chain, abandon, budget, entersSchemaMap(key, value)),
+				relocateMovedRefs(
+					value,
+					root,
+					depth,
+					memo,
+					chain,
+					abandon,
+					budget,
+					activeDepth,
+					entersSchemaMap(key, value),
+				),
 			)
 		}
 		if (abandon.hit) {
@@ -424,11 +535,33 @@ function relocateMovedRefs(
 				chain,
 				abandon,
 				budget,
+				activeDepth,
 				insideSchemaMap ? false : entersSchemaMap(key, value),
 			),
 		)
 	}
 	return out
+}
+
+/**
+ * Whether a patternProperties rule sits anywhere inside a subtree. A child
+ * applicator (allOf) that carried one loses the property evaluations the
+ * rule performed when compilation removes it, and a retained
+ * unevaluatedProperties rule at the ENCLOSING level then forbids the keys
+ * the child evaluated (issue #547 review 4725679723).
+ */
+function containsPatternProperties(value: unknown, seen: Set<unknown>): boolean {
+	if (Array.isArray(value)) {
+		return value.some((entry) => containsPatternProperties(entry, seen))
+	}
+	if (!isRecord(value) || seen.has(value)) {
+		return false
+	}
+	seen.add(value)
+	if ("patternProperties" in value) {
+		return true
+	}
+	return Object.values(value).some((entry) => containsPatternProperties(entry, seen))
 }
 
 /**
@@ -477,6 +610,10 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 	const result: Record<string, unknown> = {}
 	const removed: Record<string, unknown> = {}
 	let relaxedOneOf: unknown[] | undefined
+	// A child applicator branch lost patternProperties and with it the
+	// property evaluations the enclosing unevaluatedProperties rule relies
+	// on (issue #547 review 4725679723).
+	let childEvaluationLost = false
 
 	// A conditional whose `if` predicate compilation changes cannot keep its
 	// branches: the compiled predicate selects then/else for values the
@@ -529,6 +666,20 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 			if (Array.isArray(value)) {
 				const compiledBranches = value.map((entry) => compileSchemaNode(entry, depth + 1, root, memo))
 				const branchesChanged = compiledBranches.some((branch, index) => !deepEqualJson(branch, value[index]))
+				if (branchesChanged) {
+					// A changed branch that carried patternProperties lost the
+					// property evaluations that rule performed; the enclosing
+					// unevaluatedProperties rule relaxes below (review
+					// 4725679723).
+					childEvaluationLost =
+						childEvaluationLost ||
+						compiledBranches.some((branch, index) => {
+							if (deepEqualJson(branch, value[index])) {
+								return false
+							}
+							return containsPatternProperties(value[index], new Set())
+						})
+				}
 				let relaxed = key === "oneOf" && branchesChanged
 				if (!relaxed && key === "oneOf") {
 					// Branch objects unchanged, but branches that only
@@ -581,15 +732,20 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 			}
 		} else if (key === "if") {
 			if (isRecord(value)) {
+				// The compiled predicate stays in every case: a bare if
+				// asserts nothing, so a changed predicate cannot tighten the
+				// emitted schema, and the property evaluations it performs
+				// keep reaching a retained unevaluatedProperties rule
+				// (review 4725679712 - dropping the whole conditional
+				// stranded a required key the original if evaluated). A
+				// changed predicate puts the ORIGINAL conditional into the
+				// hint, and the then/else branch below moves the branches
+				// into the hint with it.
+				defineOwnKey(result, key, compiledIf)
 				if (conditionalRelaxed) {
-					// The compiled predicate changed: the whole original
-					// conditional moves into the hint, so then/else cannot
-					// fire on values the original schema accepted.
+					// value is schema.if and compiled above; the original
+					// predicate travels into the hint beside its branches.
 					defineOwnKey(removed, key, value)
-				} else {
-					// value is schema.if and compiled unchanged above; reuse
-					// the already-compiled copy instead of compiling again.
-					defineOwnKey(result, key, compiledIf)
 				}
 				continue
 			}
@@ -606,6 +762,16 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 			}
 		} else if (key === "additionalProperties" || key === "propertyNames") {
 			if (isRecord(value)) {
+				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root, memo))
+				continue
+			}
+		} else if (key === "unevaluatedProperties" || key === "unevaluatedItems") {
+			if (isRecord(value)) {
+				// A schema-valued unevaluated* rule is a schema: its rejected
+				// keywords must compile like any other subschema, or the rule
+				// ships them verbatim to the gateway (review 4725679716).
+				// Boolean rules keep their place, and the relaxation blocks
+				// below still see the compiled rule.
 				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root, memo))
 				continue
 			}
@@ -644,6 +810,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 		for (const rule of Object.values(removed.patternProperties)) {
 			const abandon = { hit: false }
 			const budget = { remaining: MAX_RELOCATION_NODES }
+			const activeDepth = { count: 0 }
 			const relocated = relocateMovedRefs(
 				compileSchemaNode(rule, depth + 1, root, memo),
 				root,
@@ -652,6 +819,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 				new Set(),
 				abandon,
 				budget,
+				activeDepth,
 				false,
 			)
 			if (abandon.hit) {
@@ -696,6 +864,20 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 	// evaluates only its listed positions, so the contains-evaluated trailing
 	// indices stay stranded and the restriction relaxes (issue #547 review
 	// 4719935091).
+	// Property evaluations can also be lost one level down: an allOf
+	// branch that carried patternProperties loses the keys that rule
+	// evaluated, and a retained unevaluatedProperties restriction at this
+	// level then forbids a required property the original accepted (issue
+	// #547 review 4725679723). The rule relaxes exactly like the
+	// removed-rule case above.
+	if (childEvaluationLost) {
+		if (result.unevaluatedProperties === false) {
+			defineOwnKey(result, "unevaluatedProperties", true)
+		} else if (isRecord(result.unevaluatedProperties)) {
+			defineOwnKey(result, "unevaluatedProperties", true)
+		}
+	}
+
 	if ("contains" in removed && !("items" in result)) {
 		if (result.unevaluatedItems === false) {
 			defineOwnKey(result, "unevaluatedItems", true)
@@ -708,6 +890,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 			// (issue #547 review 6089521528).
 			const abandon = { hit: false }
 			const budget = { remaining: MAX_RELOCATION_NODES }
+			const activeDepth = { count: 0 }
 			const relaxed = isRecord(removed.contains)
 				? relocateMovedRefs(
 						compileSchemaNode(removed.contains, depth + 1, root, memo),
@@ -717,6 +900,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 						new Set(),
 						abandon,
 						budget,
+						activeDepth,
 						false,
 					)
 				: {}
@@ -755,5 +939,22 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
  * Pure: the input schema is left untouched.
  */
 export function compileToolParametersForDeepSeek(schema: unknown): unknown {
-	return compileSchemaNode(schema, 0, schema, new WeakMap())
+	// Finished compilations are shared with the repair walk below, so the
+	// predicate checks and the retained-reference inlining compile each
+	// target once per depth (issue #547 review 4719419419).
+	const memo = new WeakMap()
+	const compiled = compileSchemaNode(schema, 0, schema, memo)
+	// References OUTSIDE the moved rules - a retained property's pointer
+	// through the removed patternProperties location, for example - do not
+	// pass through the relocation walk: compilation deletes that location
+	// and the pointer dangles (issue #547 review 4725679720). The same
+	// relocation walk repairs them: a pointer that only resolves through a
+	// removed location is inlined with its compiled target, and pointers
+	// whose targets still resolve stay verbatim. Past the expansion budget
+	// the walk returns the compiled document unchanged - the moved rules
+	// above are already repaired by their own relocations.
+	const abandon = { hit: false }
+	const budget = { remaining: MAX_RELOCATION_NODES }
+	const activeDepth = { count: 0 }
+	return relocateMovedRefs(compiled, schema, 0, memo, new Set(), abandon, budget, activeDepth, false)
 }

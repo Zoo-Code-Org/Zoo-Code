@@ -34,7 +34,8 @@
 \* Failure 13: a retained prefixItems is no complete evaluator - it evaluates
 \*             only the positions it lists, so the contains-evaluated trailing
 \*             indices stay stranded behind unevaluatedItems: false
-\*             (review 4719935091).
+\*             (review 4719935091). A retained items beside it evaluates
+\*             every index and keeps the restriction (review 4725679660).
 \* Failure 14: removing patternProperties strands a retained schema-valued
 \*             additionalProperties or unevaluatedProperties rule - the keys
 \*             the pattern rules evaluated were exempt from it, and the
@@ -105,6 +106,12 @@
 \* to DeepSeekRefRelocation.tla (failures 15 to 21 with their 7 invariants
 \* and inputs); 1 added there (a surviving reference's literal sibling stays
 \* verbatim, SurvivingRefLiteralPreserved), 0 covered, 0 gap.
+\* Round 13 (review 4725679660): 1 added (items and prefixItems modeled
+\* together: a retained items evaluates every index and keeps the
+\* unevaluatedItems restriction, so the ArraySatKept antecedent narrows to
+\* contains-removed with no retained items; the KeepPrefixEvaluator
+\* sabotage skips relaxation only where a lone partial prefixItems
+\* remains), 0 covered, 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
@@ -151,9 +158,11 @@ Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 \* patternProperties (a false rule becomes true; a schema-valued rule
 \* re-admits the removed pattern rules as alternatives), relaxes a retained
 \* unevaluatedItems restriction only under a removed contains with no
-\* remaining complete items evaluator (a partial prefixItems is no complete
-\* evaluator), drops a conditional
-\* only when its if predicate (or a referenced predicate target) changed,
+\* retained items (a retained items evaluates every index whether or not a
+\* prefixItems sits beside it - review 4725679660 - and only a lone partial
+\* prefixItems is incomplete), drops the branches of a conditional whose if
+\* predicate (or a referenced predicate target) changed while the bare
+\* predicate stays as an annotation (review 4725679712),
 \* and always keeps an anyOf sibling as its own constraint.
 \* ForceRequired is the all-required rewrite the strict path used before.
 \* KeepPattern leaves every keyword in place. DropSilently removes without a
@@ -162,8 +171,9 @@ Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 \* dependentSchemas traversal. KeepRefPredicate keeps the reference-blind
 \* retention decisions. KeepUnevaluated keeps the stranded
 \* unevaluatedProperties: false rule. KeepContainsUneval keeps the stranded
-\* array restriction. KeepPrefixEvaluator keeps treating a partial prefixItems
-\* as a complete evaluator. KeepUepSchema keeps a schema-valued closed rule
+\* array restriction. KeepPrefixEvaluator keeps treating a lone partial
+\* prefixItems as a complete evaluator, so a contains-evaluated trailing
+\* index stays stranded. KeepUepSchema keeps a schema-valued closed rule
 \* unmerged, so it rejects the keys the pattern rules evaluated.
 Decisions(i) ==
     LET refChanged == i.ref2 /\ i.kw2 # {}
@@ -176,7 +186,7 @@ Decisions(i) ==
          uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
          siblingKept |-> TRUE,
-         uiRelaxed |-> i.containsClosed2 /\ (~i.arrEvaluator2 \/ i.partialPrefix2)]
+         uiRelaxed |-> i.containsClosed2 /\ ~i.arrEvaluator2]
     IN CASE Variant = "ForceRequired" ->
         [fixed EXCEPT !["required"] = {1, 2}]
     [] Variant = "KeepPattern" ->
@@ -207,7 +217,7 @@ Decisions(i) ==
     [] Variant = "KeepContainsUneval" ->
         [fixed EXCEPT !["uiRelaxed"] = FALSE]
     [] Variant = "KeepPrefixEvaluator" ->
-        [fixed EXCEPT !["uiRelaxed"] = i.containsClosed2 /\ ~i.arrEvaluator2]
+        [fixed EXCEPT !["uiRelaxed"] = i.containsClosed2 /\ ~i.arrEvaluator2 /\ ~i.partialPrefix2]
     [] Variant = "KeepUepSchema" ->
         [fixed EXCEPT !["uepSchemaKept"] = FALSE]
     [] OTHER -> fixed
@@ -283,15 +293,16 @@ SiblingConjunctKept ==
     IF Decisions(in).overlapSafe /\ in.anyOf2 THEN Decisions(in).siblingKept
     ELSE TRUE
 
-\* Safety (review 4719419428): a removed contains with no remaining items
+\* Safety (review 4719419428): a removed contains with no retained items
 \* evaluator relaxes the stranded unevaluatedItems: false, so the array
-\* keeps accepting the items the original accepted. With a remaining
-\* evaluator the restriction is ordinary and stays - but a partial
-\* prefixItems evaluates only its listed positions, so the contains-evaluated
-\* trailing indices stay unevaluated and the restriction relaxes anyway
-\* (review 4719935091).
+\* keeps accepting the items the original accepted. A retained items
+\* evaluates every index - whether or not a prefixItems sits beside it -
+\* so with one the restriction is ordinary and stays (review 4725679660);
+\* a lone partial prefixItems evaluates only its listed positions, so the
+\* contains-evaluated trailing indices stay unevaluated and the
+\* restriction relaxes (review 4719935091).
 ArraySatKept ==
-    (in.containsClosed2 /\ ((~in.arrEvaluator2) \/ in.partialPrefix2)) => Decisions(in).uiRelaxed
+    (in.containsClosed2 /\ ~in.arrEvaluator2) => Decisions(in).uiRelaxed
 
 
 ====

@@ -11,6 +11,51 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { detachOnAbort } from "./utils/abort-signal"
 import { getApiRequestTimeout } from "./utils/timeout-config"
 
+// Literal-valued keywords carry instance data: a "$ref"-shaped string inside
+// them is a value a caller asserts against, never a document location, so
+// the wrapped-property reference rewrite leaves them verbatim.
+const WRAP_LITERAL_KEYWORDS = new Set(["const", "enum", "default", "examples"])
+
+/**
+ * Rewrites local pointers that name a wrapped property's pre-wrap location.
+ * When an optional property moves under `anyOf/0`, every sibling reference
+ * like "#/properties/value/properties/limit" must follow the subtree to
+ * "#/properties/value/anyOf/0/properties/limit", or the pointer would name
+ * a location the emitted schema does not have (review 4725679688). Matching
+ * is segment-boundary exact, so a property named "value" does not rewrite a
+ * pointer into "valueMeta", and pointers to unrelocated properties stay
+ * verbatim.
+ */
+function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: Map<string, string>): unknown {
+	if (Array.isArray(node)) {
+		return node.map((entry) => rewriteWrappedPropertyRefs(entry, wrappedKeys))
+	}
+	if (!node || typeof node !== "object") {
+		return node
+	}
+	const record = node as Record<string, unknown>
+	const result: Record<string, unknown> = {}
+	for (const [key, value] of Object.entries(record)) {
+		if (WRAP_LITERAL_KEYWORDS.has(key)) {
+			result[key] = value
+			continue
+		}
+		if (key === "$ref" && typeof value === "string") {
+			let ref = value
+			const sorted = [...wrappedKeys.entries()].sort((a, b) => b[1].length - a[1].length)
+			for (const [wrappedKey, oldPrefix] of sorted) {
+				if (ref === oldPrefix || ref.startsWith(`${oldPrefix}/`)) {
+					ref = `#/properties/${wrappedKey}/anyOf/0${ref.slice(oldPrefix.length)}`
+				}
+			}
+			result[key] = ref
+			continue
+		}
+		result[key] = rewriteWrappedPropertyRefs(value, wrappedKeys)
+	}
+	return result
+}
+
 /**
  * Base class for API providers that implements common functionality.
  */
@@ -166,6 +211,11 @@ export abstract class BaseProvider implements ApiHandler {
 
 			// Recursively process nested objects and convert nullable types
 			const newProps = { ...result.properties }
+			// Optional properties that were wrapped in an outer anyOf (a
+			// multi-match oneOf or an allOf conjunct beside a nullable type):
+			// their subtree moved under anyOf/0, and sibling references that
+			// name the pre-wrap location must follow (review 4725679688).
+			const wrappedKeys = new Map<string, string>()
 			for (const key of allKeys) {
 				const prop = newProps[key]
 
@@ -244,6 +294,7 @@ export abstract class BaseProvider implements ApiHandler {
 									// nullable) type.
 									converted.type = original.type
 									normalizedProp = { anyOf: [converted, { type: "null" }] }
+									wrappedKeys.set(key, `#/properties/${key}`)
 								} else if (
 									originalTypes.includes("array") &&
 									(original as { items?: { type?: unknown } }).items?.type === "object"
@@ -266,6 +317,7 @@ export abstract class BaseProvider implements ApiHandler {
 											{ type: "null" },
 										],
 									}
+									wrappedKeys.set(key, `#/properties/${key}`)
 								} else {
 									normalizedProp = { anyOf: [original, { type: "null" }] }
 								}
@@ -276,6 +328,51 @@ export abstract class BaseProvider implements ApiHandler {
 							// nothing is appended: for oneOf, a second null
 							// alternative would make null match twice and fail
 							// the exactly-one rule.
+						}
+						// An optional property can also carry an allOf conjunct:
+						// null must satisfy the COMPLETE normalized property,
+						// and sibling constraints apply together - a nullable
+						// type beside a string-only allOf still rejects null
+						// (review 4725679687). The wrap mirrors the oneOf
+						// route: the original's inner object or array shape
+						// is normalized BEFORE the wrap, because the wrapper
+						// hides the effective type from the recursion below
+						// (reviews 4675158952, 4675584064). A wrapped property
+						// skips the enum append below: the original keeps its
+						// declared enum and null is accepted through the
+						// outer alternative.
+						if (
+							!wrappedForOneOf &&
+							Array.isArray(normalizedProp.allOf) &&
+							normalizedProp.allOf.length > 0
+						) {
+							const declaredType: unknown[] = Array.isArray(normalizedProp.type)
+								? normalizedProp.type
+								: [normalizedProp.type]
+							if (declaredType.includes("object")) {
+								const converted = this.convertToolSchemaForOpenAI({ ...normalizedProp, type: "object" })
+								converted.type = normalizedProp.type
+								normalizedProp = { anyOf: [converted, { type: "null" }] }
+							} else if (
+								declaredType.includes("array") &&
+								(normalizedProp as { items?: { type?: unknown } }).items?.type === "object"
+							) {
+								normalizedProp = {
+									anyOf: [
+										{
+											...normalizedProp,
+											items: this.convertToolSchemaForOpenAI(
+												(normalizedProp as { items: unknown }).items,
+											),
+										},
+										{ type: "null" },
+									],
+								}
+							} else {
+								normalizedProp = { anyOf: [normalizedProp, { type: "null" }] }
+							}
+							wrappedForOneOf = true
+							wrappedKeys.set(key, `#/properties/${key}`)
 						}
 						// An enum rejects every value outside its list, so a
 						// "null" type alone still rejects null. Include null in
@@ -327,6 +424,16 @@ export abstract class BaseProvider implements ApiHandler {
 					} else {
 						newProps[key] = normalizedProp
 					}
+				}
+			}
+			// A wrapped property's subtree moved under anyOf/0: a pointer
+			// from a sibling property that names the pre-wrap location
+			// would dangle (review 4725679688). The pointers follow the
+			// subtree to its new location; every pointer that does not
+			// name a wrapped property stays verbatim.
+			if (wrappedKeys.size > 0) {
+				for (const [propKey, propSchema] of Object.entries(newProps)) {
+					newProps[propKey] = rewriteWrappedPropertyRefs(propSchema, wrappedKeys)
 				}
 			}
 			result.properties = newProps

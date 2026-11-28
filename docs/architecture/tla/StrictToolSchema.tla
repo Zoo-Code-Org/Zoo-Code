@@ -89,6 +89,16 @@
 \* red-verified unit test in strict-tool-schema.spec.ts. The findings
 \* 4719419445 and 4719419450 are unit-test harness coverage and live
 \* outside this spec.
+\* Review round 13 (PR #2653, threads 4725679664 and 4725679729): the
+\* negation invariant compared a POSITION hook, not acceptance - both hooks
+\* returned TRUE, so a stripped oneOf under a `not` could reject a value the
+\* original accepted and the invariant still passed. The invariant now
+\* derives the acceptance of a zero-branch value from the drop decision and
+\* the strip facts (review 4725679664), and a second invariant covers the
+\* conditional branch flip (review 4725679729). Code fix: a `not` whose
+\* subtree lost a keyword drops outside a negation context, and a changed
+\* conditional keeps the bare predicate without its branches. 1 added
+\* (CondValuesKept) and 1 rewritten (NotOneOfValueKept), 0 covered, 0 gap.
 \* Review round 10 (PR #2653, round-7 outside-diff comment on the schema-map
 \* callback): the negation context must survive the schema-map keywords -
 \* a callback that resets it to false lets a oneOf under properties inside
@@ -103,7 +113,7 @@ EXTENDS Naturals, TLC
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat
 
 Props == {q}
 Types == {"str", "null"}
@@ -151,20 +161,32 @@ RelaxesChangedOneOf(oneOf) == oneOf
 \* Sabotage: the stripped oneOf keeps exactly-one semantics and accepts
 \* nothing.
 NeverRelaxesOneOf(oneOf) == FALSE
-\* Fixed code: a oneOf reached through a `not` keeps its position - the
-\* negated predicate can only widen, so the values the original accepted
-\* stay accepted (review 4719419437).
-KeepsOneOfPosition(underNot) == TRUE
-\* Sabotage: the changed oneOf still moves under anyOf inside the negation,
-\* the negated predicate matches every value, and the negation rejects "a".
-OneOfMovedUnderNot(underNot) == FALSE
-\* Fixed code (round 7, schema-map callback): the negation context survives
-\* the schema-map keywords, so a oneOf under properties inside a `not` keeps
-\* its position exactly like a directly negated one.
-KeepsOneOfPositionViaMap(underNot) == TRUE
-\* Sabotage: the map callback resets the negation context, so the nested
-\* oneOf still moves under anyOf and the negation rejects the value.
-OneOfMovedUnderNotViaMap(underNot) == FALSE
+\* Fixed code (round 13): a `not` whose subtree lost a keyword is dropped
+\* outside a negation context - the stripped branches match values the
+\* original branches did not, and a retained negation would reject a value
+\* the original accepted (review 4725679664). An unchanged negation stays.
+\* The oneOf-reached-through-a-not shape therefore never keeps a stripped
+\* negation: the keep-position decision of rounds 9 and 10 governs only an
+\* unchanged subtree, whose acceptance is trivially preserved.
+DropsChangedNot(changed) == changed
+\* Sabotage: the changed negation is kept in place; the stripped branch
+\* then matches a value the original branch did not, and the negation
+\* rejects it.
+KeepsChangedNot(changed) == FALSE
+\* Fixed code (round 13): the negation decision is the same when the oneOf
+\* is reached through a schema-map keyword (round 10 context).
+DropsChangedNotViaMap(changed) == changed
+\* Sabotage: the map callback loses the strip fact, so the changed negation
+\* is kept there too and rejects the zero-branch value.
+KeepsChangedNotViaMap(changed) == FALSE
+\* Fixed code (round 13): a conditional whose if predicate lost a keyword
+\* keeps the bare stripped predicate (it asserts nothing) and drops its
+\* then/else branches, so the values both original branches accepted stay
+\* accepted (review 4725679729).
+DropsChangedConditional(changed) == changed
+\* Sabotage: the branches stay; the stripped predicate selects then for
+\* values the original routed to else, and the retained then rejects them.
+KeepsChangedConditional(changed) == FALSE
 
 DeclaredType == {"str"} \cup (IF qNullable THEN {"null"} ELSE {})
 
@@ -234,6 +256,11 @@ TypeOK ==
     /\ patOneOf \in BOOLEAN
     /\ notOneOf \in BOOLEAN
     /\ notOneOfViaMap \in BOOLEAN
+    /\ notBranchPat \in BOOLEAN
+    /\ notBranchPatViaMap \in BOOLEAN
+    /\ condPat \in BOOLEAN
+    /\ (notBranchPat => notOneOf)
+    /\ (notBranchPatViaMap => notOneOfViaMap)
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
@@ -250,12 +277,17 @@ Init ==
     /\ patOneOf \in BOOLEAN
     /\ notOneOf \in BOOLEAN
     /\ notOneOfViaMap \in BOOLEAN
+    /\ notBranchPat \in BOOLEAN
+    /\ notBranchPatViaMap \in BOOLEAN
+    /\ condPat \in BOOLEAN
+    /\ (notBranchPat => notOneOf)
+    /\ (notBranchPatViaMap => notOneOfViaMap)
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -286,14 +318,35 @@ WrappedInnerStrict == (oneOfMultiNull /\ wrappedInner # "none") => EmittedInnerS
 \* nothing.
 OneOfValuesKept == patOneOf => RelaxesChangedOneOf(patOneOf)
 
-\* Review round 9 (4719419437): a oneOf under a `not` keeps its position,
-\* so the values the negated original accepted stay accepted. Under the
-\* sabotage the moved anyOf matches every value and the negation rejects
-\* them all. Round 10 extends the invariant to a oneOf reached through a
-\* `not` via a schema-map keyword (properties): the map callback must carry
-\* the negation context through.
+\* Review round 13 (4725679664): the negation acceptance check REPLACES the
+\* round-9/10 position hooks, which returned TRUE regardless of the strip
+\* facts. The value b matches ZERO declared branches - the pattern keeps it
+\* out of the string branch and the other branch's type excludes it. After
+\* stripping, the branch whose pattern is gone matches b by type alone, the
+\* retained exactly-one rule sees one match, and the negation rejects b.
+\* b stays accepted exactly when the negation dropped or no branch lost a
+\* pattern; an unchanged negation is the passing control. The via-map
+\* conjunct models the same shape under a schema-map keyword (round 10).
+\* Null stays a passing control through OptionalNullable in every config.
+NotOneOfAcceptsB(changed) ==
+    IF DropsChangedNot(changed) THEN TRUE
+    ELSE ~changed
+NotOneOfAcceptsBViaMap(changed) ==
+    IF DropsChangedNotViaMap(changed) THEN TRUE
+    ELSE ~changed
 NotOneOfValueKept ==
-    /\ (notOneOf => KeepsOneOfPosition(notOneOf))
-    /\ (notOneOfViaMap => KeepsOneOfPositionViaMap(notOneOfViaMap))
+    /\ (notOneOf => NotOneOfAcceptsB(notBranchPat))
+    /\ (notOneOfViaMap => NotOneOfAcceptsBViaMap(notBranchPatViaMap))
+
+\* Review round 13 (4725679729): the ELSE-branch value. The stripped
+\* predicate selects then for values the original routed to else, and the
+\* retained then rejects the enum - the else value stays accepted only when
+\* the branches dropped or the predicate never lost a keyword. The then
+\* value stays accepted through the same derivation: it selected then
+\* originally, and the dropped branches accept everything.
+CondAcceptsElseValue(changed) ==
+    IF DropsChangedConditional(changed) THEN TRUE
+    ELSE ~changed
+CondValuesKept == condPat => CondAcceptsElseValue(condPat)
 
 ====

@@ -477,6 +477,14 @@ describe("LiteLLMHandler", () => {
 								parameters: { type: "object", properties: { path: { type: "string" } } },
 							},
 						},
+						{
+							type: "function",
+							function: {
+								name: "mcp--vibe--search",
+								description: "MCP search",
+								parameters: { type: "object", properties: { query: { type: "string" } } },
+							},
+						},
 					],
 				}),
 			)
@@ -486,9 +494,17 @@ describe("LiteLLMHandler", () => {
 				model: "gpt-6-astra",
 				max_completion_tokens: 128_000,
 				reasoning_effort: "medium",
-				tools: [{ type: "function", function: { name: "read_file" } }],
+				tools: [
+					{ type: "function", function: { name: "read_file" } },
+					{ type: "function", function: { name: "mcp--vibe--search" } },
+				],
 			})
+			// Both tool kinds omit strict: the non-MCP function tool and the
+			// MCP function tool (review 4725679684 - a regression that left
+			// strict set on only one kind would still pass a single-tool
+			// test).
 			expect(request.tools[0].function.strict).toBeUndefined()
+			expect(request.tools[1].function.strict).toBeUndefined()
 			expect(request.max_tokens).toBeUndefined()
 			expect(request.temperature).toBeUndefined()
 		})

@@ -70,6 +70,14 @@
 \* there continue as failures 1 to 7), 1 added (a surviving reference's
 \* literal sibling stays verbatim, SurvivingRefLiteralPreserved),
 \* 0 covered, 0 gap.
+\* Round 13 (review 4725679658): 1 gap - the finding asks the Fixed record
+\* to derive its outcomes from modeled schema facts (reference resolution,
+\* retained location, literal value, expansion size). This module is a
+\* decision-rule model per the binding AGENTS.md source/sink rule: the
+\* decision record IS the modeled sink, the failure polarity is carried by
+\* the eight sabotage runs each failing exactly its own invariant, and a
+\* transformation-level rebuild of the reviewed subsystem is out of scope
+\* for a fix round. 0 covered, 0 added, 1 gap.
 
 CONSTANT Variant
 \* "Fixed", "KeepMovedRef", "RewriteLiteral", "UnboundedDiamond",

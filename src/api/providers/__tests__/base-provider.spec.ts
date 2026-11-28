@@ -1213,10 +1213,25 @@ describe("BaseProvider", () => {
 			expect(parameters.properties.values.items[0].maxLength).toBeUndefined()
 			expect(parameters.properties.values.items[1].minimum).toBeUndefined()
 			expect(parameters.additionalProperties).toBe(false)
-			expect(parameters.not.maximum).toBeUndefined()
-			expect(parameters.if.minimum).toBeUndefined()
-			expect(parameters.then.maxLength).toBeUndefined()
-			expect(parameters.else.minLength).toBeUndefined()
+			// The negation's subtree lost a keyword: a retained not would
+			// reject values the original accepted, so the negation drops
+			// into the hint (review 4725679664).
+			expect(parameters).not.toHaveProperty("not")
+			// The stripped predicate stays as a bare annotation applicator
+			// and the branches travel into the hint (review 4725679729): a
+			// stripped predicate selects then for values the original
+			// routed to else.
+			expect(parameters.if).toStrictEqual({
+				type: "number",
+				description: 'Constraints: {"minimum":1}',
+			})
+			expect(parameters).not.toHaveProperty("then")
+			expect(parameters).not.toHaveProperty("else")
+			const description = String(parameters.description)
+			expect(description).toContain("maximum")
+			expect(description).toContain("minimum")
+			expect(description).toContain("maxLength")
+			expect(description).toContain("minLength")
 		})
 
 		it("replaces additionalProperties values other than false in nested schemas", () => {
@@ -1502,6 +1517,104 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 
 			expect(result?.[0]).toEqual(tools[0])
+		})
+
+		it("makes an optional string property with an allOf conjunct nullable across the whole property (review 4725679687)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "all_of_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								label: { type: "string", allOf: [{ type: "string" }] },
+							},
+							required: [],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const label = result?.[0].function.parameters.properties.label
+
+			// Sibling constraints apply together: a nullable type beside a
+			// string-only allOf still rejects null. The complete normalized
+			// property wraps with an outer null alternative, so the optional
+			// property accepts null again; the declared optionality stays.
+			expect(label).toStrictEqual({
+				anyOf: [{ type: ["string", "null"], allOf: [{ type: "string" }] }, { type: "null" }],
+			})
+		})
+
+		it("keeps a declared-required allOf property a value property (review 4725679687)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "all_of_required_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								label: { type: "string", allOf: [{ type: "string" }] },
+							},
+							required: ["label"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// A declared required key keeps its value type: no null
+			// alternative, no wrap.
+			expect(parameters.required).toStrictEqual(["label"])
+			expect(parameters.properties.label).toStrictEqual({ type: "string", allOf: [{ type: "string" }] })
+		})
+
+		it("rewrites sibling references into a wrapped property (review 4725679688)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "wrapped_ref_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								value: {
+									type: ["object", "null"],
+									oneOf: [
+										{ type: ["object", "null"], properties: { limit: { type: "number" } } },
+										{ type: ["object", "null"] },
+									],
+									properties: { limit: { type: "number" } },
+								},
+								other: { $ref: "#/properties/value/properties/limit" },
+							},
+							required: ["other"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// The multi-null-match wrap moves value's subtree under
+			// anyOf/0: the sibling pointer that names the pre-wrap location
+			// follows it, or it would name a location the emitted schema
+			// does not have.
+			expect(parameters.properties.other.$ref).toBe("#/properties/value/anyOf/0/properties/limit")
+			// The wrapped property keeps both original alternatives under
+			// anyOf/0 beside the null alternative.
+			const value = parameters.properties.value
+			expect(value.anyOf).toHaveLength(2)
+			// The inner conversion makes the nested optional property
+			// nullable, exactly like a top-level one.
+			expect(value.anyOf[0].properties.limit.type).toStrictEqual(["number", "null"])
+			expect(value.anyOf[1]).toStrictEqual({ type: "null" })
 		})
 	})
 
