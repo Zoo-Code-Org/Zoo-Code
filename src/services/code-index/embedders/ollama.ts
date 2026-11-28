@@ -4,7 +4,6 @@ import { getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { MAX_ITEM_TOKENS } from "../constants"
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, sanitizeErrorMessage } from "../shared/validation-helpers"
-import { EmbeddingError } from "../shared/indexing-errors"
 import { makeRateLimitScope } from "../provider-pacer"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
@@ -96,13 +95,13 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 				} catch {
 					// Ignore error reading body
 				}
-				// Keep status and headers so a 5xx or 429 is retried or paced instead of failing at once.
-				const message = t("embeddings:ollama.requestFailed", {
-					status: response.status,
-					statusText: response.statusText,
-					errorBody,
-				})
-				throw new EmbeddingError(message, { status: response.status, headers: response.headers })
+				throw new Error(
+					t("embeddings:ollama.requestFailed", {
+						status: response.status,
+						statusText: response.statusText,
+						errorBody,
+					}),
+				)
 			}
 
 			const data = await response.json()
@@ -117,12 +116,12 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 				embeddings: embeddings,
 			}
 		} catch (error: any) {
+			// Capture telemetry before reformatting the error
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
 				stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
 				location: "OllamaEmbedder:createEmbeddings",
 			})
-			if (error instanceof EmbeddingError) throw error
 
 			// Log the original error for debugging purposes
 			console.error("Ollama embedding failed:", error)
