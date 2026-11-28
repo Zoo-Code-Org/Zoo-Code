@@ -39,20 +39,31 @@ function mergeTimestampedSnapshots(
 		return incoming
 	}
 
-	const existingGroups = new Map<number, MessageRecord[]>()
+	type IndexQueue = { indices: number[]; cursor: number }
+	type Group = {
+		messages: MessageRecord[]
+		byId?: Map<string, IndexQueue>
+		legacy?: IndexQueue
+		consumed: Set<number>
+	}
+	const existingGroups = new Map<number, Group>()
 	const existingLegacy: unknown[] = []
 
 	for (const message of existing) {
 		if (isRecord(message) && typeof message.ts === "number") {
-			const group = existingGroups.get(message.ts) ?? []
-			group.push(message)
-			existingGroups.set(message.ts, group)
+			let group = existingGroups.get(message.ts)
+			if (!group) {
+				group = { messages: [], consumed: new Set() }
+				existingGroups.set(message.ts, group)
+			}
+			group.messages.push(message)
 		} else {
 			existingLegacy.push(message)
 		}
 	}
 
-	const consumedByTimestamp = new Map<number, Set<number>>()
+	const takeIndex = (queue?: IndexQueue) =>
+		queue && queue.cursor < queue.indices.length ? queue.indices[queue.cursor++] : undefined
 	let incomingLegacyCount = 0
 	const merged = incoming.map((message) => {
 		if (!isRecord(message) || typeof message.ts !== "number") {
@@ -60,38 +71,49 @@ function mergeTimestampedSnapshots(
 			return message
 		}
 
-		const existingGroup = existingGroups.get(message.ts) ?? []
-		const consumed = consumedByTimestamp.get(message.ts) ?? new Set<number>()
+		const group = existingGroups.get(message.ts)
 		const messageId = typeof message.messageId === "string" ? message.messageId : undefined
-		let diskIndex =
-			messageId === undefined
-				? existingGroup.findIndex(
-						(candidate, index) => !consumed.has(index) && candidate.messageId === undefined,
-					)
-				: existingGroup.findIndex(
-						(candidate, index) => !consumed.has(index) && candidate.messageId === messageId,
-					)
-		if (diskIndex === -1 && messageId !== undefined) {
-			// Match one legacy record while persisted histories are upgraded with identifiers.
-			diskIndex = existingGroup.findIndex(
-				(candidate, index) => !consumed.has(index) && candidate.messageId === undefined,
+		let diskIndex: number | undefined
+		if (group?.messages.length === 1) {
+			const candidateId = group.messages[0].messageId
+			if (
+				!group.consumed.has(0) &&
+				(candidateId === undefined || (messageId !== undefined && candidateId === messageId))
 			)
+				diskIndex = 0
+		} else if (group) {
+			// Only allocate ID queues for collisions. Most timestamps have one message.
+			if (!group.byId) {
+				const byId = new Map<string, IndexQueue>()
+				const legacy: IndexQueue = { indices: [], cursor: 0 }
+				for (const [index, candidate] of group.messages.entries()) {
+					const id = candidate.messageId
+					if (typeof id === "string") {
+						const queue = byId.get(id) ?? { indices: [], cursor: 0 }
+						queue.indices.push(index)
+						byId.set(id, queue)
+					} else if (id === undefined) legacy.indices.push(index)
+				}
+				group.byId = byId
+				group.legacy = legacy
+			}
+			diskIndex = takeIndex(messageId === undefined ? group.legacy : group.byId.get(messageId))
+			if (diskIndex === undefined && messageId !== undefined) diskIndex = takeIndex(group.legacy)
 		}
-		const diskMessage = diskIndex === -1 ? undefined : existingGroup[diskIndex]
-		if (diskIndex !== -1) {
-			consumed.add(diskIndex)
-			consumedByTimestamp.set(message.ts, consumed)
-		}
+		const diskMessage = diskIndex === undefined ? undefined : group?.messages[diskIndex]
+		if (diskIndex !== undefined) group?.consumed.add(diskIndex)
 		if (mergeMatch !== undefined && diskMessage !== undefined) {
 			return mergeMatch(diskMessage, message)
 		}
 		return message
 	})
 
-	const diskOnlyTimestamped = [...existingGroups.entries()].flatMap(([timestamp, messages]) => {
-		const consumed = consumedByTimestamp.get(timestamp)
-		return messages.filter((_message, index) => !consumed?.has(index))
-	})
+	const diskOnlyTimestamped: MessageRecord[] = []
+	for (const group of existingGroups.values()) {
+		for (const [index, message] of group.messages.entries()) {
+			if (!group.consumed.has(index)) diskOnlyTimestamped.push(message)
+		}
+	}
 
 	const timestampMerged: unknown[] = []
 	let diskOnlyIndex = 0
@@ -107,9 +129,11 @@ function mergeTimestampedSnapshots(
 		}
 		timestampMerged.push(incomingMessage)
 	}
-	timestampMerged.push(...diskOnlyTimestamped.slice(diskOnlyIndex))
+	for (; diskOnlyIndex < diskOnlyTimestamped.length; diskOnlyIndex++)
+		timestampMerged.push(diskOnlyTimestamped[diskOnlyIndex])
 
-	timestampMerged.push(...existingLegacy.slice(incomingLegacyCount))
+	for (let index = incomingLegacyCount; index < existingLegacy.length; index++)
+		timestampMerged.push(existingLegacy[index])
 	return timestampMerged
 }
 
