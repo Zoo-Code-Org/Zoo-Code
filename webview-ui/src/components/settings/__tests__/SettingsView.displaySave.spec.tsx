@@ -93,6 +93,66 @@ describe("SettingsView – saving the time and date settings", () => {
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 	})
 
+	it("shows another view's change that came while the save waited, and the next save does not revert it", async () => {
+		const pushHostState = (showRelativeTimes: boolean) =>
+			act(() => {
+				const state = { version: "1.0.0", clineMessages: [], taskHistory: [], showRelativeTimes }
+				window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state } }))
+			})
+		renderTab("language")
+		pushHostState(true)
+		await editDisplaySetting()
+		fireEvent.click(screen.getByTestId("save-button"))
+		pushHostState(false) // the host reports the save
+		pushHostState(true) // another view changes the setting
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+
+		expect(screen.getByTestId("relative-times-checkbox")).toBeChecked()
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+
+		// Save another setting: the time setting goes out with the host's value.
+		fireEvent.click(screen.getByTestId("tab-ui"))
+		fireEvent.click(await screen.findByTestId("collapse-thinking-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				requestId: undefined,
+				updatedSettings: expect.objectContaining({ showRelativeTimes: true }),
+			}),
+		)
+	})
+
+	it.each<[string, Record<string, unknown>]>([
+		["a settings import", { settingsImportedAt: 1 }],
+		["a mode switch", { mode: "ask" }],
+		["a profile switch", { currentApiConfigName: "other" }],
+	])("%s cancels a waiting save, so its late answer does not clear a new edit", async (_name, change) => {
+		const pushHostState = (showRelativeTimes: boolean) =>
+			act(() => {
+				const state = { version: "1.0.0", clineMessages: [], taskHistory: [], showRelativeTimes, ...change }
+				window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state } }))
+			})
+		renderTab("language")
+		await editDisplaySetting()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const id = lastSaveRequestId(postMessage)
+
+		pushHostState(true)
+		expect(screen.getByTestId("relative-times-checkbox")).toBeChecked() // the edit is discarded
+
+		// The user enters the sent value again: it is a new, unsaved edit, and Save does not wait for the old answer.
+		fireEvent.click(screen.getByTestId("relative-times-checkbox"))
+		expect(screen.getByTestId("save-button")).toBeEnabled()
+		answerSave(id, { success: true })
+		expect(screen.getByTestId("save-button")).toBeEnabled()
+
+		// The edit is still protected from a host change.
+		pushHostState(false)
+		pushHostState(true)
+		expect(screen.getByTestId("relative-times-checkbox")).not.toBeChecked()
+	})
+
 	it("treats a save the host never answers as failed after the timeout: the edit stays and Save works again", async () => {
 		renderTab("language")
 		await editDisplaySetting()
