@@ -3025,8 +3025,9 @@ describe("VsCodeLmHandler", () => {
 			)
 
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
-			// The pre-check and the finally each cancel the request token; the
-			// already-aborted signal cannot fire the bridge listener a second time.
+			// The bridge hook cancels once when it observes the already-aborted signal, and the
+			// finally cancels once more. No listener is registered on an already-aborted signal, so
+			// nothing can add a third cancel.
 			expect(tokenSourceInstance().cancel).toHaveBeenCalledTimes(2)
 		})
 
