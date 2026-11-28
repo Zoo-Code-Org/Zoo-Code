@@ -51,7 +51,8 @@ type WrappedKeyRecord = { oldPrefix: string; newPrefix: string }
  * "#/properties/value" never matches a nested wrap (review 4726104157).
  * Matching is segment-boundary exact, so a property named "value" does not
  * rewrite a pointer into "valueMeta", and pointers to unrelocated
- * properties stay verbatim.
+ * properties stay verbatim. wrappedKeys must arrive sorted longest-prefix
+ * first - the sort runs once per rewrite, before the walk.
  */
 function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: WrappedKeyRecord[], insideSchemaMap = false): unknown {
 	if (Array.isArray(node)) {
@@ -69,8 +70,10 @@ function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: WrappedKeyRecord
 		}
 		if (!insideSchemaMap && key === "$ref" && typeof value === "string") {
 			let ref = value
-			const sorted = [...wrappedKeys].sort((a, b) => b.oldPrefix.length - a.oldPrefix.length)
-			for (const wrapped of sorted) {
+			// wrappedKeys arrives sorted once per rewrite (longest prefix
+			// first), so every recursion reuses the same order without
+			// re-sorting per reference (review 4726390984).
+			for (const wrapped of wrappedKeys) {
 				if (ref === wrapped.oldPrefix || ref.startsWith(`${wrapped.oldPrefix}/`)) {
 					ref = `${wrapped.newPrefix}${ref.slice(wrapped.oldPrefix.length)}`
 				}
@@ -202,6 +205,20 @@ export abstract class BaseProvider implements ApiHandler {
 				BaseProvider.schemaAlternativeAcceptsNull(nested),
 			).length
 			accepts = accepts && (combinator === "oneOf" ? acceptingCount === 1 : acceptingCount > 0)
+		}
+
+		// An allOf conjunct applies alongside every other sibling: the
+		// alternative accepts null only when EVERY conjunct does (Draft
+		// 2020-12). An optional {anyOf:[{allOf:[{type:"string"}]}]}
+		// therefore reports rejection even though the alternative itself
+		// carries no type, and the parent anyOf gains a null alternative
+		// (review 4726390986).
+		if (Array.isArray(alternative.allOf)) {
+			accepts =
+				accepts &&
+				(alternative.allOf as unknown[]).every((conjunct) =>
+					BaseProvider.schemaAlternativeAcceptsNull(conjunct),
+				)
 		}
 
 		return accepts
@@ -340,7 +357,6 @@ export abstract class BaseProvider implements ApiHandler {
 									// nullable) type.
 									converted.type = original.type
 									normalizedProp = { anyOf: [converted, { type: "null" }] }
-									wrappedKeys.push({ oldPrefix: propPointer, newPrefix: `${propPointer}/anyOf/0` })
 								} else if (
 									originalTypes.includes("array") &&
 									(original as { items?: { type?: unknown } }).items?.type === "object"
@@ -364,10 +380,15 @@ export abstract class BaseProvider implements ApiHandler {
 											{ type: "null" },
 										],
 									}
-									wrappedKeys.push({ oldPrefix: propPointer, newPrefix: `${propPointer}/anyOf/0` })
 								} else {
 									normalizedProp = { anyOf: [original, { type: "null" }] }
 								}
+								// All three wrap paths relocate the original's
+								// subtree under anyOf/0, so the move record is
+								// shared: a sibling reference naming the scalar
+								// branch's old oneOf location follows the wrap too
+								// (review 4726390989).
+								wrappedKeys.push({ oldPrefix: propPointer, newPrefix: `${propPointer}/anyOf/0` })
 								// Stryker disable next-line BooleanLiteral: after the wrap normalizedProp is a fresh anyOf wrapper without an enum, so the flag never changes the enum decision below
 								wrappedForOneOf = true
 							}
@@ -491,8 +512,11 @@ export abstract class BaseProvider implements ApiHandler {
 			// subtree to its new location; every pointer that does not
 			// name a wrapped property stays verbatim.
 			if (wrappedKeys.length > 0) {
+				// One sort per rewrite: the records keep the longer-prefix-first
+				// rule for every reference the walk rewrites (review 4726390984).
+				const sortedKeys = [...wrappedKeys].sort((a, b) => b.oldPrefix.length - a.oldPrefix.length)
 				for (const [propKey, propSchema] of Object.entries(newProps)) {
-					newProps[propKey] = rewriteWrappedPropertyRefs(propSchema, wrappedKeys)
+					newProps[propKey] = rewriteWrappedPropertyRefs(propSchema, sortedKeys)
 				}
 			}
 			result.properties = newProps

@@ -57,6 +57,11 @@ const acceptsValue = (schema: unknown, value: unknown): boolean => {
 			accepts = false
 		}
 	}
+	if (accepts && Array.isArray(schema.allOf)) {
+		// Sibling conjuncts apply together (Draft 2020-12): every allOf
+		// branch must accept the value (review 4726390986).
+		accepts = accepts && schema.allOf.every((conjunct) => acceptsValue(conjunct, value))
+	}
 	if (accepts && Array.isArray(schema.enum) && !schema.enum.includes(value)) {
 		accepts = false
 	}
@@ -925,6 +930,77 @@ describe("BaseProvider", () => {
 			// string-or-null union rejects 7 even though the oneOf sibling
 			// accepts it (#2653 review 4682419243).
 			expect(acceptsValue(format, 7)).toBe(false)
+		})
+
+		it("evaluates a nested allOf conjunct before deciding on a null alternative (#2653 review 4726390986)", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					// The sole alternative carries no type of its own, but its
+					// allOf conjunct rejects null: the evaluator must not
+					// report acceptance from the bare wrapper alone, or the
+					// parent makes the key required and the model can neither
+					// omit it nor send null.
+					verify: { anyOf: [{ allOf: [{ type: "string" }] }] },
+					// Control: a conjunct that admits null keeps the
+					// alternative null-accepting, so no second null
+					// alternative is appended (oneOf-safe count is untouched
+					// for anyOf with one accepting alternative).
+					nullable: { anyOf: [{ allOf: [{ type: ["string", "null"] }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const verify = result.properties.verify
+			const nullable = result.properties.nullable
+
+			// verify: the conjunct rejects null, so the parent anyOf gains a
+			// null alternative and both siblings accept null again; a string
+			// value still passes the conjunct.
+			expect(verify.anyOf).toEqual([{ allOf: [{ type: "string" }] }, { type: "null" }])
+			expect(acceptsValue(verify, null)).toBe(true)
+			expect(acceptsValue(verify, "read")).toBe(true)
+			expect(acceptsValue(verify, 7)).toBe(false)
+
+			// nullable: the conjunct admits null, so nothing is appended.
+			expect(nullable.anyOf).toEqual([{ allOf: [{ type: ["string", "null"] }] }])
+			expect(acceptsValue(nullable, null)).toBe(true)
+			expect(acceptsValue(nullable, "read")).toBe(true)
+		})
+
+		it("rewrites sibling references into a scalar-wrapped oneOf property (#2653 review 4726390989)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "wrapped_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								// Both alternatives accept null: the wrap takes
+								// the scalar route (no object or array shape),
+								// and the property relocates under anyOf/0.
+								value: { oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+								mirror: { $ref: "#/properties/value/oneOf/0" },
+							},
+							required: [],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// The scalar wrap records the move at the shared point: the
+			// sibling reference follows the branch to its new location
+			// instead of dangling on the removed oneOf position.
+			expect(parameters.properties.value).toStrictEqual({
+				anyOf: [{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }, { type: "null" }],
+			})
+			expect(parameters.properties.mirror).toStrictEqual({ $ref: "#/properties/value/anyOf/0/oneOf/0" })
 		})
 
 		it("treats integers as numbers in the oracle while keeping oneOf exclusive (mock, #547)", () => {

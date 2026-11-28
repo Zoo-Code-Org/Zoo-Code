@@ -1860,10 +1860,24 @@ describe("DeepSeekHandler", () => {
 
 		// Walks a compiled schema and fails on any local "#/..." reference the
 		// compiled document cannot resolve - the gateway would answer with a
-		// compilation error instead of applying the rule.
-		const assertNoDanglingLocalRefs = (node: unknown, root: unknown = node): void => {
+		// compilation error instead of applying the rule. The walk is
+		// schema-aware: a "$ref"-shaped VALUE under const, enum, default or
+		// examples is asserted data a validator compares for equality and
+		// never resolves, so the walk skips it at schema positions; entries
+		// of a name-to-schema map (properties, $defs, ...) are schemas whose
+		// references must resolve even when their NAME is a literal keyword
+		// (review 4725679679).
+		const literalValueKeywords = new Set(["const", "enum", "default", "examples"])
+		const schemaMapKeywords = new Set([
+			"properties",
+			"patternProperties",
+			"$defs",
+			"definitions",
+			"dependentSchemas",
+		])
+		const assertNoDanglingLocalRefs = (node: unknown, root: unknown = node, insideSchemaMap = false): void => {
 			if (Array.isArray(node)) {
-				node.forEach((entry) => assertNoDanglingLocalRefs(entry, root))
+				node.forEach((entry) => assertNoDanglingLocalRefs(entry, root, insideSchemaMap))
 				return
 			}
 			if (typeof node !== "object" || node === null) {
@@ -1884,8 +1898,20 @@ describe("DeepSeekHandler", () => {
 					cursor = (cursor as Record<string, unknown>)[segment]
 				}
 			}
-			for (const value of Object.values(record)) {
-				assertNoDanglingLocalRefs(value, root)
+			for (const [key, value] of Object.entries(record)) {
+				if (!insideSchemaMap && literalValueKeywords.has(key)) {
+					continue
+				}
+				assertNoDanglingLocalRefs(
+					value,
+					root,
+					insideSchemaMap
+						? false
+						: schemaMapKeywords.has(key) &&
+								typeof value === "object" &&
+								value !== null &&
+								!Array.isArray(value),
+				)
 			}
 		}
 
@@ -2278,9 +2304,12 @@ describe("DeepSeekHandler", () => {
 					},
 				],
 			})
-			// assertNoDanglingLocalRefs does not apply here: the literal's
-			// pointer is instance data under const, which a validator compares
-			// for equality and never resolves.
+			// assertNoDanglingLocalRefs now applies: the schema-aware walk
+			// checks the real references (the rule's own pointer to
+			// $defs/base and the relocated schema map) and skips the const
+			// literal, which a validator compares for equality and never
+			// resolves (review 4725679679).
+			assertNoDanglingLocalRefs(params)
 		})
 
 		it("keeps a $ref-shaped const literal unrewritten (review 4723722038)", () => {
@@ -2699,6 +2728,46 @@ describe("DeepSeekHandler", () => {
 			expect(String(branch.description)).toContain("patternProperties")
 		})
 
+		it("relaxes unevaluatedItems when a child branch loses contains through a reference (review 4726390999)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							$defs: { strings: { contains: { type: "string" } } },
+							properties: {
+								values: {
+									type: "array",
+									const: ["a"],
+									allOf: [{ $ref: "#/$defs/strings", minItems: 1 }],
+									unevaluatedItems: false,
+								},
+							},
+							required: ["values"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as {
+				properties?: Record<string, Record<string, unknown>>
+			}
+			const arr = (params.properties ?? {}).values as Record<string, unknown>
+			// The referenced contains annotated the items the conjunct matched.
+			// Compilation strips minItems from the conjunct (so the branch
+			// changed) and contains from the referenced definition itself: the
+			// stranded unevaluatedItems: false would reject the item "a" the
+			// original accepted, so it relaxes exactly like the inline case.
+			expect(arr.unevaluatedItems).toBe(true)
+			// The removed minItems is the conjunct's own removal: its hint
+			// lands on the compiled branch.
+			const conjunct = (arr.allOf as Record<string, unknown>[])[0] as Record<string, unknown>
+			expect(String(conjunct.description)).toContain("minItems")
+		})
+
 		it("keeps unevaluatedItems when items and prefixItems are both present (review 4725679660)", () => {
 			const tools = convert([
 				{
@@ -2788,8 +2857,11 @@ describe("DeepSeekHandler", () => {
 			const params = tools[0].function.parameters as unknown as Record<string, unknown>
 			// No rejected keyword anywhere: the predicate strips unchanged,
 			// the branch stays, and the closed rule is an ordinary one.
+			// The branch is asserted exactly: a conversion that replaced
+			// then with false would still satisfy a bare toBeDefined
+			// (review 4726390983).
 			expect(params.unevaluatedProperties).toBe(false)
-			expect(params.then).toBeDefined()
+			expect(params.then).toStrictEqual({ properties: { x: { type: "string" } } })
 		})
 
 		it("relaxes unevaluatedItems when a child applicator branch loses contains (review 4726104165)", () => {

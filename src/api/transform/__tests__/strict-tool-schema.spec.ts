@@ -25,7 +25,16 @@ function constraintNote(removed: Schema): string {
 function resolveLocalPointer(root: unknown, ref: string): unknown {
 	let node: unknown = root
 	for (const rawSegment of ref.slice(2).split("/")) {
-		const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~")
+		// A URI fragment percent-decodes first, then the JSON Pointer "~"
+		// escapes, so the definition named "A B" matches "A%20B" exactly
+		// like the production parser (review 4726391009).
+		let percentDecoded = rawSegment
+		try {
+			percentDecoded = decodeURIComponent(rawSegment)
+		} catch {
+			percentDecoded = rawSegment
+		}
+		const segment = percentDecoded.replace(/~1/g, "/").replace(/~0/g, "~")
 		if (Array.isArray(node)) {
 			const index = Number(segment)
 			if (!Number.isInteger(index) || index < 0 || index >= node.length) {
@@ -73,16 +82,16 @@ function accepts(schema: unknown, value: unknown, root?: unknown): boolean {
 	// so a schema like {type:"string", anyOf:[{}]} still rejects a number.
 	let accepted = true
 	if (Array.isArray(s.oneOf)) {
-		accepted = accepted && s.oneOf.filter((branch) => accepts(branch, value)).length === 1
+		accepted = accepted && s.oneOf.filter((branch) => accepts(branch, value, scope)).length === 1
 	}
 	if (Array.isArray(s.anyOf)) {
-		accepted = accepted && s.anyOf.some((branch) => accepts(branch, value))
+		accepted = accepted && s.anyOf.some((branch) => accepts(branch, value, scope))
 	}
 	if (Array.isArray(s.allOf)) {
-		accepted = accepted && s.allOf.every((branch) => accepts(branch, value))
+		accepted = accepted && s.allOf.every((branch) => accepts(branch, value, scope))
 	}
 	if (s.not !== undefined) {
-		accepted = accepted && !accepts(s.not, value)
+		accepted = accepted && !accepts(s.not, value, scope)
 	}
 	if (typeof s.type === "string" && !matchesType(s.type, value)) {
 		accepted = false
@@ -119,7 +128,7 @@ function accepts(schema: unknown, value: unknown, root?: unknown): boolean {
 		}
 	}
 	for (const [key, sub] of Object.entries(s.properties as Schema)) {
-		if (key in object && !accepts(sub, object[key])) {
+		if (key in object && !accepts(sub, object[key], scope)) {
 			return false
 		}
 	}
@@ -612,18 +621,22 @@ describe("stripUnsupportedStrictKeywords", () => {
 		expect((props.ordinary as Schema).$ref).toBe("#/$defs/Choice/anyOf/0")
 	})
 
-	it("keeps a $ref-shaped literal inside a const keyword verbatim (review 4726104168)", () => {
+	it("keeps a $ref-shaped literal object inside a const keyword verbatim (review 4726104168)", () => {
 		const schema: Schema = {
 			type: "object",
-			properties: { pick: { const: "#/$defs/Choice/oneOf/0" } },
+			properties: { pick: { const: { $ref: "#/$defs/Choice/oneOf/0" } } },
 			required: ["pick"],
 			$defs: { Choice: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "integer" }] } },
 		}
 		const stripped = strip(schema)
 		const pick = (stripped.properties as Schema).pick as Schema
 		// A const value is asserted data, not a document location: the
-		// string survives byte for byte even though the location moved.
-		expect(pick.const).toBe("#/$defs/Choice/oneOf/0")
+		// whole literal object survives byte for byte even though the
+		// location moved. The object shape is what exercises the literal
+		// guard - a bare string would come back unchanged even with the
+		// guard removed, because the walker never rewrites strings
+		// (review 4726390993).
+		expect(pick.const).toStrictEqual({ $ref: "#/$defs/Choice/oneOf/0" })
 	})
 
 	it("escapes a map name when recording the relocation prefix (review 4726104169)", () => {
@@ -650,8 +663,12 @@ describe("stripUnsupportedStrictKeywords", () => {
 			$defs: { P: { type: "string", pattern: "^a$" } },
 		}
 		// Ground truth on the declared schema: P rejects "b", so the
-		// negation accepts it.
+		// negation accepts it - and P matches "a", so the negation
+		// rejects it. The rejection half needs the document root in the
+		// recursive oracle call, or the reference could not resolve
+		// (review 4726390991).
 		expect(accepts((schema.properties as Schema).v, "b", schema)).toBe(true)
+		expect(accepts((schema.properties as Schema).v, "a", schema)).toBe(false)
 		const stripped = strip(schema)
 		const v = (stripped.properties as Schema).v as Schema
 		// The pattern leaves P where it is declared; the retained negation
@@ -766,14 +783,99 @@ describe("stripUnsupportedStrictKeywords", () => {
 	it("leaves a pointer that never resolved in the declared schema untouched (review 4726104178)", () => {
 		const schema: Schema = {
 			type: "object",
-			properties: { w: { $ref: "#/nowhere" } },
+			properties: { w: { $ref: "#/nowhere" }, guarded: { type: "string", pattern: "^a$" } },
 			required: ["w"],
 		}
 		const stripped = strip(schema)
-		const w = (stripped.properties as Schema).w as Schema
-		// The pointer was already broken before the strip; repairing it is
-		// out of scope and the verbatim pointer stays.
+		const props = stripped.properties as Schema
+		// The sibling pattern is what makes the repair pass run at all:
+		// with no strip change the pass never starts, and the test would
+		// stay green even if repair deleted every unresolved pointer
+		// (review 4726390997). The pattern leaves; the pointer was already
+		// broken before the strip, so repairing it is out of scope and the
+		// verbatim pointer stays.
+		expect(props.guarded).not.toHaveProperty("pattern")
+		const w = props.w as Schema
 		expect(w.$ref).toBe("#/nowhere")
+		expect(w).not.toHaveProperty("description")
+	})
+
+	it("relaxes unevaluatedProperties when a dropped branch evaluated the extra key (review 4726391005)", () => {
+		const schema: Schema = {
+			type: "object",
+			if: { properties: { kind: { pattern: "^a$" } } },
+			then: { properties: { x: { type: "string" } } },
+			unevaluatedProperties: false,
+		}
+		const stripped = strip(schema)
+		// The predicate strips (its pattern leaves), so the branch travels
+		// into the hint - and with it the evaluation of x, which no
+		// retained keyword performs. The closed rule would forbid every
+		// object carrying x, which the original accepted; it relaxes
+		// instead.
+		expect(stripped).not.toHaveProperty("then")
+		expect(stripped.unevaluatedProperties).toBe(true)
+		expect(String(stripped.description)).toContain("then")
+	})
+
+	it("keeps unevaluatedProperties when no dropped branch evaluated keys (review 4726391005 control)", () => {
+		const schema: Schema = {
+			type: "object",
+			if: { properties: { kind: { pattern: "^a$" } } },
+			then: { const: "a" },
+			unevaluatedProperties: false,
+		}
+		const stripped = strip(schema)
+		// The branch dropped, but a const evaluates no keys: the closed
+		// rule is an ordinary one and stays.
+		expect(stripped).not.toHaveProperty("then")
+		expect(stripped.unevaluatedProperties).toBe(false)
+	})
+
+	it("relocates a percent-encoded reference to a moved rule (review 4726391009)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { pick: { $ref: "#/$defs/A%20B/oneOf/0" } },
+			required: ["pick"],
+			// The definition name is "A B": the relocation prefix records
+			// the raw name, while the pointer writes it percent-encoded.
+			$defs: { "A B": { oneOf: [{ type: "string", pattern: "^a$" }, { type: "integer" }] } },
+		}
+		const stripped = strip(schema)
+		const pick = (stripped.properties as Schema).pick as Schema
+		// The pointer follows the branches to their anyOf position and
+		// stays percent-encoded, so it still names the branch that
+		// applies the string type (RFC 6901 section 6).
+		expect(pick.$ref).toBe("#/$defs/A%20B/anyOf/0")
+		expect(accepts(pick, "bb", stripped)).toBe(true)
+		expect(accepts(pick, 5, stripped)).toBe(false)
+	})
+
+	it("keeps a property named __proto__ across a strip that repairs pointers (review 4726391002)", () => {
+		// The computed key makes "__proto__" an OWN data property, the way
+		// a caller's JSON.parse'd tool schema arrives - a plain literal
+		// key would set the prototype instead.
+		const schema: Schema = {
+			type: "object",
+			properties: {
+				["__proto__"]: { type: "string", title: "legacy" },
+				guarded: { type: "string", pattern: "^a$" },
+				move: {
+					oneOf: [{ type: "string", pattern: "^m$" }, { type: "integer" }],
+				},
+			},
+			required: ["guarded", "move"],
+		}
+		const stripped = strip(schema)
+		const props = stripped.properties as Schema
+		// The repair and relocation walks rebuild every node: a plain
+		// assignment would invoke the inherited setter and silently drop
+		// the entry, so the emitted schema loses the property map. Both
+		// walks create own properties instead.
+		expect(Object.prototype.hasOwnProperty.call(props, "__proto__")).toBe(true)
+		expect(props.__proto__).toStrictEqual({ type: "string", title: "legacy" })
+		expect(props.guarded).not.toHaveProperty("pattern")
+		expect((props.move as Schema).anyOf).toBeDefined()
 	})
 
 	it.each([

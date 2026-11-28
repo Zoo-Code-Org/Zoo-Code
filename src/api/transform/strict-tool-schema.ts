@@ -116,6 +116,68 @@ function decodePathSegments(path: string): string[] {
 	return decodePointerSegments(path) ?? []
 }
 
+// The inverse of decodePointerSegments for one segment: JSON Pointer "~"
+// escapes apply to the decoded name, percent-encoding applies to the wire
+// form, so encoding un-escapes in the opposite order (RFC 6901 section 6).
+// Characters that are legal in a URI fragment stay raw (A-Za-z0-9 and the
+// RFC 3986 sub-delims plus ":@"), so plain names emit unchanged; "%",
+// whitespace, "#", quotes and non-ASCII are percent-encoded so the
+// decoder's decodeURIComponent round-trips the original name
+// (review 4726391009).
+function encodePointerSegment(segment: string): string {
+	const escaped = segment.replace(/~/g, "~0").replace(/\//g, "~1")
+	return escaped.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]/gu, (ch) => {
+		try {
+			return encodeURIComponent(ch)
+		} catch {
+			// A lone surrogate cannot be percent-encoded; it stays raw and
+			// the decoder's malformed-escape fallback keeps it verbatim.
+			return ch
+		}
+	})
+}
+
+// True when refSegments names relocation's old location or a position under
+// it: both sides arrive decoded, so a reference written percent-encoded
+// ("#/$defs/A%20B/oneOf/0") matches a recorded prefix that carries the raw
+// name (review 4726391009).
+function relocationMatches(refSegments: string[], oldSegments: string[]): boolean {
+	if (refSegments.length < oldSegments.length) {
+		return false
+	}
+	return oldSegments.every((segment, index) => refSegments[index] === segment)
+}
+
+/**
+ * Explicit own-property creation: a schema key like "__proto__" (legal in
+ * JSON and produced by JSON.parse as an own property) must become an own
+ * data property of the rebuilt copy, never a prototype change - a plain
+ * assignment invokes the inherited setter and silently drops the entry
+ * (review 4726391002).
+ */
+function defineOwnKey(target: Record<string, unknown>, key: string, value: unknown): void {
+	Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true })
+}
+
+// Whether a subtree evaluates object keys through properties or
+// patternProperties rules: a dropped conditional branch that did takes
+// those evaluations with it, so a retained unevaluatedProperties rule at
+// the conditional's level would forbid a value the original accepted
+// (review 4726391005).
+function carriesPropertyEvaluation(value: unknown, seen: Set<unknown> = new Set()): boolean {
+	if (Array.isArray(value)) {
+		return value.some((entry) => carriesPropertyEvaluation(entry, seen))
+	}
+	if (!isRecord(value) || seen.has(value)) {
+		return false
+	}
+	seen.add(value)
+	if ("properties" in value || "patternProperties" in value) {
+		return true
+	}
+	return Object.values(value).some((entry) => carriesPropertyEvaluation(entry, seen))
+}
+
 // True when one decoded path equals the other or sits inside it: a
 // reference is affected by a change at its own location or at any
 // ancestor or descendant of it.
@@ -234,12 +296,16 @@ function isUnsupportedKeyword(key: string, value: unknown): boolean {
 
 /**
  * Rewrites every local pointer that names a relocated oneOf location to the
- * location the branches occupy after the relaxation. Pointer matching is
- * segment-boundary exact, so "#/$defs/a" does not collide with a property
- * named with the same prefix, and the longest prefix applies first. Literal
- * values under const, enum, default and examples stay verbatim at schema
- * positions; entries of a name-to-schema map are schemas and their
- * references relocate with everything else (review 4726104168).
+ * location the branches occupy after the relaxation. Matching compares
+ * DECODED pointer segments, so a reference written percent-encoded matches
+ * the same location a raw name records, and the rewritten pointer is
+ * re-encoded per segment (review 4726391009). Matching is segment-boundary
+ * exact, so "#/$defs/a" does not collide with a property named with the
+ * same prefix, and the longest prefix applies first - relocations arrive
+ * pre-sorted once per strip. Literal values under const, enum, default and
+ * examples stay verbatim at schema positions; entries of a name-to-schema
+ * map are schemas and their references relocate with everything else
+ * (review 4726104168).
  */
 function rewriteRelocatedRefs(node: unknown, relocations: RefRelocation[], insideSchemaMap = false): unknown {
 	if (relocations.length === 0) {
@@ -254,21 +320,38 @@ function rewriteRelocatedRefs(node: unknown, relocations: RefRelocation[], insid
 	const result: Record<string, unknown> = {}
 	for (const [key, value] of Object.entries(node)) {
 		if (!insideSchemaMap && LITERAL_VALUE_KEYWORDS.has(key)) {
-			result[key] = value
+			defineOwnKey(result, key, value)
 			continue
 		}
 		if (key === "$ref" && typeof value === "string" && value.startsWith("#/")) {
 			let ref = value
-			for (const relocation of [...relocations].sort((a, b) => b.oldPrefix.length - a.oldPrefix.length)) {
-				const matches = ref === relocation.oldPrefix || ref.startsWith(`${relocation.oldPrefix}/`)
-				if (matches) {
-					ref = `${relocation.newPrefix}${ref.slice(relocation.oldPrefix.length)}`
+			const refSegments = decodePointerSegments(ref)
+			if (refSegments !== undefined) {
+				for (const relocation of relocations) {
+					const oldSegments = decodePathSegments(relocation.oldPrefix)
+					if (!relocationMatches(refSegments, oldSegments)) {
+						continue
+					}
+					// The new location's decoded segments plus the
+					// untouched decoded tail, re-encoded as a fragment:
+					// the pointer keeps naming the same target constraint
+					// after the move (review 4726391009).
+					const newSegments = [
+						...decodePathSegments(relocation.newPrefix),
+						...refSegments.slice(oldSegments.length),
+					]
+					ref = `#/${newSegments.map(encodePointerSegment).join("/")}`
+					break
 				}
 			}
-			result[key] = ref
+			defineOwnKey(result, key, ref)
 			continue
 		}
-		result[key] = rewriteRelocatedRefs(value, relocations, insideSchemaMap ? false : entersSchemaMap(key, value))
+		defineOwnKey(
+			result,
+			key,
+			rewriteRelocatedRefs(value, relocations, insideSchemaMap ? false : entersSchemaMap(key, value)),
+		)
 	}
 	return result
 }
@@ -321,11 +404,19 @@ function inlineUnresolvableRefs(
 			result[key] = value
 			continue
 		}
-		result[key] = inlineUnresolvableRefs(
-			value,
-			strippedRoot,
-			declaredRoot,
-			insideSchemaMap ? false : entersSchemaMap(key, value),
+		// Own-property creation: a schema key like "__proto__" must stay an
+		// own data property of the rebuilt copy - a plain assignment
+		// invokes the inherited setter and silently drops the entry
+		// (review 4726391002).
+		defineOwnKey(
+			result,
+			key,
+			inlineUnresolvableRefs(
+				value,
+				strippedRoot,
+				declaredRoot,
+				insideSchemaMap ? false : entersSchemaMap(key, value),
+			),
 		)
 	}
 	if (droppedRef !== undefined) {
@@ -362,7 +453,10 @@ function inlineUnresolvableRefs(
  * context: the stripped predicate selects the other branch for values the
  * original rejected, and a retained branch would reject values the original
  * schema accepted (review 4725679729); a bare if asserts nothing, so the
- * retained predicate is annotation only.
+ * retained predicate is annotation only. A dropped branch that evaluated
+ * keys through its properties or patternProperties rules relaxes a
+ * retained unevaluatedProperties rule, which would otherwise forbid a
+ * value the original accepted (review 4726391005).
  */
 export function stripUnsupportedStrictKeywords(schema: unknown, insideNot = false): unknown {
 	// Pass one measures: the same strip with every reference-aware decision
@@ -379,7 +473,16 @@ export function stripUnsupportedStrictKeywords(schema: unknown, insideNot = fals
 	// A relocated oneOf's old pointer positions are gone from the document:
 	// a reference naming one would dangle, so the surviving pointers are
 	// rewritten once the whole strip has recorded every relocation.
-	const rewritten = rewriteRelocatedRefs(result, facts.relocations)
+	const rewritten = rewriteRelocatedRefs(
+		result,
+		// The rewrite matches decoded segments with the longest decoded
+		// prefix first: one sort per strip, not per reference
+		// (reviews 4726391009, 4726390984).
+		[...facts.relocations]
+			.map((relocation, index) => ({ relocation, depth: decodePathSegments(relocation.oldPrefix).length, index }))
+			.sort((a, b) => b.depth - a.depth || a.index - b.index)
+			.map((entry) => entry.relocation),
+	)
 	// The relocation rewrite repairs pointers into moved rules; pointers
 	// into REMOVED subtrees need their own repair pass (review 4726104178).
 	// Nothing was removed when no node changed, so an unchanged document
@@ -519,6 +622,7 @@ function stripNode(schema: unknown, insideNot: boolean, path: string, facts: Str
 		// below - it asserts nothing.
 		removed.if = ifOriginal
 	}
+	let conditionalEvaluationLost = false
 	for (const branch of conditionalBranches) {
 		if (conditionalStripped && !insideNot) {
 			// The stripped predicate selects the other branch for values
@@ -529,8 +633,21 @@ function stripNode(schema: unknown, insideNot: boolean, path: string, facts: Str
 			// assertion. Inside a negation context the stripped branches
 			// only widen the negated subtree, which relaxes the enclosing
 			// negation - keep them.
+			// A dropped branch that evaluated keys (its properties or
+			// patternProperties rules) takes those evaluations with it: a
+			// retained unevaluatedProperties rule at this level would then
+			// forbid a value the original accepted, so it relaxes below
+			// (review 4726391005).
+			conditionalEvaluationLost = conditionalEvaluationLost || carriesPropertyEvaluation(branch.original)
 			delete result[branch.key]
 			removed[branch.key] = branch.original
+		}
+	}
+	if (conditionalEvaluationLost) {
+		if (result.unevaluatedProperties === false) {
+			result.unevaluatedProperties = true
+		} else if (isRecord(result.unevaluatedProperties)) {
+			result.unevaluatedProperties = true
 		}
 	}
 	for (const pending of pendingNotDrops) {

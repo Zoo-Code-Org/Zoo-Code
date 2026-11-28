@@ -544,45 +544,67 @@ function relocateMovedRefs(
 }
 
 /**
- * Whether a patternProperties rule sits anywhere inside a subtree. A child
- * applicator (allOf) that carried one loses the property evaluations the
- * rule performed when compilation removes it, and a retained
+ * Whether a patternProperties rule sits anywhere inside a subtree, following
+ * local reference targets with cycle protection: a rule behind a "$ref"
+ * applies its evaluations at validation time exactly like an inline one. A
+ * child applicator (allOf) that carried one loses the property evaluations
+ * the rule performed when compilation removes it, and a retained
  * unevaluatedProperties rule at the ENCLOSING level then forbids the keys
  * the child evaluated (issue #547 review 4725679723).
  */
-function containsPatternProperties(value: unknown, seen: Set<unknown>): boolean {
+function containsPatternProperties(value: unknown, seen: Set<unknown>, root: unknown): boolean {
 	if (Array.isArray(value)) {
-		return value.some((entry) => containsPatternProperties(entry, seen))
+		return value.some((entry) => containsPatternProperties(entry, seen, root))
 	}
 	if (!isRecord(value) || seen.has(value)) {
 		return false
 	}
 	seen.add(value)
+	if (typeof value.$ref === "string") {
+		// The referenced target carries the rule the pointer applies at
+		// validation time; seen keeps a self-referential chain finite
+		// (review 4726390999).
+		const resolved = resolveLocalRef(root, value.$ref)
+		if (resolved.resolved && containsPatternProperties(resolved.target, seen, root)) {
+			return true
+		}
+	}
 	if ("patternProperties" in value) {
 		return true
 	}
-	return Object.values(value).some((entry) => containsPatternProperties(entry, seen))
+	return Object.values(value).some((entry) => containsPatternProperties(entry, seen, root))
 }
 
 /**
- * Whether a contains rule sits anywhere inside a subtree. A child
+ * Whether a contains rule sits anywhere inside a subtree, following local
+ * reference targets with cycle protection: a rule behind a "$ref" applies
+ * its evaluations at validation time exactly like an inline one. A child
  * applicator branch that carried one loses the item evaluations the rule
  * performed when compilation removes it, and a retained unevaluatedItems
  * rule at the ENCLOSING level then forbids the items the branch evaluated
- * (issue #547 review 4726104165).
+ * (issue #547 review 4726104165, reference form 4726390999).
  */
-function containsContainsRule(value: unknown, seen: Set<unknown>): boolean {
+function containsContainsRule(value: unknown, seen: Set<unknown>, root: unknown): boolean {
 	if (Array.isArray(value)) {
-		return value.some((entry) => containsContainsRule(entry, seen))
+		return value.some((entry) => containsContainsRule(entry, seen, root))
 	}
 	if (!isRecord(value) || seen.has(value)) {
 		return false
 	}
 	seen.add(value)
+	if (typeof value.$ref === "string") {
+		// The referenced target carries the rule the pointer applies at
+		// validation time; seen keeps a self-referential chain finite
+		// (review 4726390999).
+		const resolved = resolveLocalRef(root, value.$ref)
+		if (resolved.resolved && containsContainsRule(resolved.target, seen, root)) {
+			return true
+		}
+	}
 	if ("contains" in value) {
 		return true
 	}
-	return Object.values(value).some((entry) => containsContainsRule(entry, seen))
+	return Object.values(value).some((entry) => containsContainsRule(entry, seen, root))
 }
 
 /**
@@ -705,7 +727,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 							if (deepEqualJson(branch, value[index])) {
 								return false
 							}
-							return containsPatternProperties(value[index], new Set())
+							return containsPatternProperties(value[index], new Set(), root)
 						})
 					childItemEvaluationLost =
 						childItemEvaluationLost ||
@@ -713,7 +735,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 							if (deepEqualJson(branch, value[index])) {
 								return false
 							}
-							return containsContainsRule(value[index], new Set())
+							return containsContainsRule(value[index], new Set(), root)
 						})
 				}
 				let relaxed = key === "oneOf" && branchesChanged
@@ -785,7 +807,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 					// 4726104161). value is schema.if and compiled above; the
 					// original predicate travels into the hint beside its
 					// branches.
-					childEvaluationLost = childEvaluationLost || containsPatternProperties(value, new Set())
+					childEvaluationLost = childEvaluationLost || containsPatternProperties(value, new Set(), root)
 					defineOwnKey(removed, key, value)
 				}
 				continue
@@ -810,7 +832,7 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 				// 4726104161).
 				childEvaluationLost =
 					childEvaluationLost ||
-					(!deepEqualJson(compiledBranch, value) && containsPatternProperties(value, new Set()))
+					(!deepEqualJson(compiledBranch, value) && containsPatternProperties(value, new Set(), root))
 				defineOwnKey(result, key, compiledBranch)
 				continue
 			}

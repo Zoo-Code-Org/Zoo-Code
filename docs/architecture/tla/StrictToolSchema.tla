@@ -31,33 +31,36 @@
 \* Replay: the unit tests in base-provider.spec.ts and
 \* strict-tool-schema.spec.ts run the real conversion on mocked schemas.
 \* Not modeled: message serialization, XML output (removed by design), tool
-\* result order (serial execution). Cost: each config checks in seconds.
-\* Review ratchet: R1 1 added (4658277638; the other 3 round-1 findings
-\* were code fixes replayed by unit tests). RN+1 2 added (4674816413,
-\* 4674816421); 4674816417 is an execution-layer contract outside this
-\* spec (BaseTool.null-sentinels.spec.ts). RN+2 1 added (4675120035).
-\* R6 1 added (4675584064; closes the round-5 object ratchet 4675158952).
-\* R7 0 added, 2 gap (4680624688, mutation report 7079812310: test
-\* harness and mutants, pinned by unit tests). R8 1 added (4716476955);
-\* 6084531532 covered by WrappedInnerStrict. R9 1 added (4719419437);
-\* 4719419445 and 4719419450 outside this spec. R13 1 added and 1
-\* rewritten (4725679664 NotOneOfValueKept, 4725679729 CondValuesKept).
-\* R10 1 added (round-7 outside-diff comment, via-map conjunct).
-\* R14 (4726104174) 1 added: change detected through a reference widens
-\* the not/conditional/oneOf changed facts (notRefPat, condRefPat,
-\* oneOfRefPat). 4726104157 (nested wrap path rooting), 4726104178
-\* (dangling-reference inlining), 4726104168 (map-position reference
-\* traversal) and 4726104169 (pointer escaping) are pointer-map
-\* contracts the one-property model cannot represent - gap, pinned by
-\* base-provider.spec.ts and strict-tool-schema.spec.ts; 4726104159 is
-\* the unit-test oracle itself. 0 covered, 1 added, 4 gap.
+\* result order (serial execution).
+\* Cost: each config checks in seconds.
+\* Findings ratchet, by round (review id; added invariants or inputs):
+\* R1: 1 added (4658277638; the other 3 round-1 findings were code fixes
+\* replayed by unit tests).
+\* RN+1: 2 added (4674816413, 4674816421); 4674816417 is an
+\* execution-layer contract (BaseTool.null-sentinels.spec.ts).
+\* RN+2: 1 added (4675120035). R6: 1 added (4675584064, closing round-5).
+\* R7: 0 added, 2 gap (4680624688; mutation report 7079812310).
+\* R8: 1 added (4716476955); 6084531532 covered by WrappedInnerStrict.
+\* R9: 1 added (4719419437); 4719419445, 4719419450 outside this spec.
+\* R10: 1 added (via-map conjunct). R13: 1 added, 1 rewritten
+\* (4725679664 NotOneOfValueKept, 4725679729 CondValuesKept).
+\* R14: 1 added (4726104174 - notRefPat, condRefPat, oneOfRefPat).
+\* Gap, pointer-map contracts pinned by unit tests: 4726104157,
+\* 4726104178, 4726104168, 4726104169; 4726104159 is the test oracle.
+\* R15: 2 added (4726390981 shape flags admit a reference-only change;
+\* 4726390986 a nested wrapper can be an allOf conjunct).
+\* R15 gap, pinned by unit tests: 4726391005 unevaluated* interplay,
+\* 4726391009 percent-encoded pointers, 4726391002 own-key walks,
+\* 4726390984 sort-once, 4726390978 header length, and the test-oracle
+\* tightenings 4726390991, 4726390993, 4726390997, 4726390983.
+\* R15 totals: 0 covered, 2 added, 10 gap.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat, condShape, oneOfShape
 
 Props == {q}
 Types == {"str", "null"}
@@ -77,10 +80,12 @@ EmittedKeepsPattern(declared) == FALSE
 \* evaluator reports TRUE for any wrapper without type/enum (the sabotage).
 \* A nested anyOf accepts null when AT LEAST one nested alternative accepts
 \* it; a nested oneOf requires EXACTLY ONE - two accepting alternatives
-\* reject null under exactly-one semantics (review 4675120035). The hook
-\* reports the nested combinator truth.
+\* reject null under exactly-one semantics (review 4675120035). An allOf
+\* wrapper (NestedIsOneOf = 2) accepts null only when EVERY conjunct does
+\* (review 4726390986). The hook reports the nested combinator truth.
 RecursesIntoNested(nm) ==
-    IF nm = 1 THEN TRUE
+    IF NestedIsOneOf = 2 THEN nm = 2
+    ELSE IF nm = 1 THEN TRUE
     ELSE IF nm >= 2 THEN NestedIsOneOf = 0
     ELSE FALSE
 \* Fixed code: an optional oneOf with MULTIPLE null-accepting alternatives is
@@ -163,7 +168,10 @@ EmittedPattern == EmittedKeepsPattern(declaredPat)
 \* (anyOf: at least one accepting alternative; oneOf: exactly one) OR when
 \* the evaluator's report made it append an outer null alternative; a
 \* multi-match oneOf accepts null exactly when it was wrapped.
-NestedCombinatorTruth == IF NestedIsOneOf = 1 THEN nestedMatches = 1 ELSE nestedMatches >= 1
+NestedCombinatorTruth ==
+    IF NestedIsOneOf = 1 THEN nestedMatches = 1
+    ELSE IF NestedIsOneOf = 2 THEN nestedMatches = 2
+    ELSE nestedMatches >= 1
 CombinatorGroundTruth ==
     IF nestedWrapper THEN NestedCombinatorTruth \/ ~RecursesIntoNested(nestedMatches)
     ELSE IF oneOfMultiNull THEN WrapsMultiMatch(oneOfMultiNull)
@@ -189,7 +197,7 @@ TypeOK ==
     /\ nestedWrapper \in BOOLEAN
     /\ nestedMatches \in 0..2
     /\ oneOfMultiNull \in BOOLEAN
-    /\ NestedIsOneOf \in {0, 1}
+    /\ NestedIsOneOf \in {0, 1, 2}
     /\ wrappedInner \in {"none", "object", "array"}
     /\ patOneOf \in BOOLEAN
     /\ notOneOf \in BOOLEAN
@@ -200,11 +208,15 @@ TypeOK ==
     /\ notRefPat \in BOOLEAN
     /\ condRefPat \in BOOLEAN
     /\ oneOfRefPat \in BOOLEAN
+    /\ condShape \in BOOLEAN
+    /\ oneOfShape \in BOOLEAN
     /\ (notBranchPat => notOneOf)
     /\ (notBranchPatViaMap => notOneOfViaMap)
     /\ (notRefPat => notOneOf)
-    /\ (condRefPat => condPat)
-    /\ (oneOfRefPat => patOneOf)
+    /\ (condPat => condShape)
+    /\ (condRefPat => condShape)
+    /\ (patOneOf => oneOfShape)
+    /\ (oneOfRefPat => oneOfShape)
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
@@ -216,7 +228,7 @@ Init ==
     /\ nestedWrapper \in BOOLEAN
     /\ nestedMatches \in 0..2
     /\ oneOfMultiNull \in BOOLEAN
-    /\ NestedIsOneOf \in {0, 1}
+    /\ NestedIsOneOf \in {0, 1, 2}
     /\ wrappedInner \in {"none", "object", "array"}
     /\ patOneOf \in BOOLEAN
     /\ notOneOf \in BOOLEAN
@@ -227,17 +239,21 @@ Init ==
     /\ notRefPat \in BOOLEAN
     /\ condRefPat \in BOOLEAN
     /\ oneOfRefPat \in BOOLEAN
+    /\ condShape \in BOOLEAN
+    /\ oneOfShape \in BOOLEAN
     /\ (notBranchPat => notOneOf)
     /\ (notBranchPatViaMap => notOneOfViaMap)
     /\ (notRefPat => notOneOf)
-    /\ (condRefPat => condPat)
-    /\ (oneOfRefPat => patOneOf)
+    /\ (condPat => condShape)
+    /\ (condRefPat => condShape)
+    /\ (patOneOf => oneOfShape)
+    /\ (oneOfRefPat => oneOfShape)
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat, condShape, oneOfShape>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat, condShape, oneOfShape>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -262,8 +278,13 @@ WrappedInnerStrict == (oneOfMultiNull /\ wrappedInner # "none") => EmittedInnerS
 \* were stripped must relax under anyOf - a value the declared oneOf
 \* accepted ("a", matching exactly one ^a$/^b$ alternative) stays accepted
 \* whether the change sits in the branch or in a $ref target
-\* (4726104174). Under the sabotage the stripped rule accepts nothing.
-OneOfValuesKept == (patOneOf \/ oneOfRefPat) => RelaxesChangedOneOf(patOneOf \/ oneOfRefPat)
+\* (4726104174). The change flags presuppose the oneOf shape, not each
+\* other: a reference change with no direct change is an admitted state
+\* (4726390981). Under the sabotage the stripped rule accepts nothing.
+OneOfAcceptsMatchingValue(changed) ==
+    IF RelaxesChangedOneOf(changed) THEN TRUE
+    ELSE ~changed
+OneOfValuesKept == oneOfShape => OneOfAcceptsMatchingValue(patOneOf \/ oneOfRefPat)
 
 \* Review round 13 (4725679664): the negation acceptance check REPLACES the
 \* round-9/10 position hooks, which returned TRUE regardless of the strip
@@ -290,11 +311,13 @@ NotOneOfValueKept ==
 \* predicate selects then for values the original routed to else, and the
 \* retained then rejects the enum - the else value stays accepted only when
 \* the branches dropped or the predicate never lost a keyword, directly or
-\* through a changed $ref target (condRefPat, 4726104174). The then value
-\* stays accepted through the same derivation.
+\* through a changed $ref target (condRefPat, 4726104174). The change
+\* flags presuppose the conditional shape, not each other: a reference
+\* change with no direct change is an admitted state (4726390981). The
+\* then value stays accepted through the same derivation.
 CondAcceptsElseValue(changed) ==
     IF DropsChangedConditional(changed) THEN TRUE
     ELSE ~changed
-CondValuesKept == (condPat \/ condRefPat) => CondAcceptsElseValue(condPat \/ condRefPat)
+CondValuesKept == condShape => CondAcceptsElseValue(condPat \/ condRefPat)
 
 ====

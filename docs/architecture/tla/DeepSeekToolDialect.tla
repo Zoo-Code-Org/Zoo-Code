@@ -81,6 +81,10 @@
 \* conditional branch relaxes the stranded unevaluatedProperties rule
 \* (CondEvalRelaxed); a changed child branch carrying contains relaxes the
 \* stranded unevaluatedItems rule (ArraySatKept). 0 covered, 0 gap.
+\* R15 (4726390999) 1 covered: childContains2 already admits a contains
+\* carried behind a $ref, so the walk's reference following is a code
+\* conformance fix pinned by the referenced-case unit regression.
+\* 1 covered, 0 added, 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
