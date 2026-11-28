@@ -43,6 +43,16 @@ import type {
 	SingleCompletionHandler,
 } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	mergeAbortSignals,
+	rejectOnAbort,
+	settleOnAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -141,6 +151,19 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	protected models: ModelRecord = {}
 	protected endpoints: ModelRecord = {}
 	private currentReasoningDetails: any[] = []
+	// Monotonic id for model lookups. Overlapping lookups (two requests, or an
+	// abandoned lookup whose request was cancelled) can settle in any order, and
+	// only the newest one may publish the records it fetched.
+	private fetchModelSequence = 0
+	// Sequence of the newest lookup whose result this handler actually published. A lookup only
+	// publishes when it is newer than what was published, so an older lookup that settles first is
+	// not dropped just because a newer one has started.
+	private publishedModelSequence = 0
+	// Sequence of the newest lookup whose endpoint records were published. Endpoints keep their own
+	// ordering because they publish even when the model catalog came back empty; sharing the model
+	// sequence would let an older lookup overwrite newer endpoint records whenever both lookups
+	// returned an empty catalog, since the model sequence only advances when models publish.
+	private publishedEndpointSequence = 0
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -175,14 +198,13 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
 		await this.ensureCatalogLoaded(async () => {
-			await this.fetchModel()
-			// fetchModel() returns model info, not the catalog, so report emptiness
-			// from the catalogs it assigned: an empty response must stay retryable.
-			// With a specific provider selected, the endpoint catalog is what
-			// getModel() uses, so an empty endpoint response is a failed load even
-			// when the model-level catalog arrived.
-			const hasModels = Object.keys(this.models).length > 0
-			const hasEndpoints = Object.keys(this.endpoints).length > 0
+			const { hasModels, hasEndpoints } = await this.runModelLookup()
+			// Judge the load by what this lookup returned, not by the records that happen to be
+			// published: a lookup that came back empty keeps the previous records, so reading
+			// this.models / this.endpoints here would memoize a failed lookup as complete and never
+			// retry it. With a specific provider selected, the endpoint catalog is what getModel()
+			// uses, so an empty endpoint response is a failed load even when the model-level catalog
+			// arrived.
 			return hasModels && (!this.hasSpecificProvider || hasEndpoints)
 		}, signal)
 	}
@@ -216,343 +238,459 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): AsyncGenerator<ApiStreamChunk> {
-		const model = await this.fetchModel()
+		// Bridge the external abort signal with the shared helper: the helper owns the
+		// pre-abort guard, the once-only listener, and the handle that the finally block
+		// below uses to detach it. The helper does not expose its controller, so this
+		// generator keeps one of its own for the teardown abort - abandoning the generator
+		// (early break or a downstream error) must still cancel the in-flight request. The
+		// two signals are merged so either cancellation reaches the SDK; with no external
+		// signal the request still gets a signal, as before, and the client-level timeout
+		// remains the default safety net.
+		const { signal: bridgedSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
+		const teardownController = new AbortController()
+		const requestSignal = bridgedSignal
+			? mergeAbortSignals(bridgedSignal, teardownController.signal)
+			: teardownController.signal
 
-		let { id: modelId, maxTokens, temperature, topP, reasoning } = model
+		try {
+			// The request was already aborted before we started: fail fast without calling the API.
+			if (requestSignal.aborted) {
+				throw createAbortError(providerIdentifiers.openrouter)
+			}
 
-		// Reset reasoning_details accumulator for this request
-		this.currentReasoningDetails = []
+			// Model discovery is not signal-aware: race it against the per-request signal so an
+			// abort during the lookup rejects with AbortError instead of calling the API with an
+			// already-aborted signal.
+			const model = await rejectOnAbort(this.fetchModel(), requestSignal, providerIdentifiers.openrouter)
 
-		// OpenRouter sends reasoning tokens by default for Gemini 2.5 Pro models
-		// even if you don't request them. This is not the default for
-		// other providers (including Gemini), so we need to explicitly disable
-		// them unless the user has explicitly configured reasoning.
-		// Note: Gemini 3 models use reasoning_details format with thought signatures,
-		// but we handle this via skip_thought_signature_validator injection below.
-		if (
-			(modelId === "google/gemini-2.5-pro-preview" || modelId === "google/gemini-2.5-pro") &&
-			typeof reasoning === "undefined"
-		) {
-			reasoning = { exclude: true }
-		}
+			let { id: modelId, maxTokens, temperature, topP, reasoning } = model
 
-		// Convert Anthropic messages to OpenAI format.
-		// Pass normalization function for Mistral compatibility (requires 9-char alphanumeric IDs)
-		const isMistral = modelId.toLowerCase().includes("mistral")
-		let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOpenAiMessages(
-				messages,
-				isMistral ? { normalizeToolCallId: normalizeMistralToolCallId } : undefined,
-			),
-		]
+			// Reset reasoning_details accumulator for this request
+			this.currentReasoningDetails = []
 
-		// DeepSeek highly recommends using user instead of system role.
-		if (modelId.startsWith("deepseek/deepseek-r1") || modelId === "perplexity/sonar-reasoning") {
-			openAiMessages = convertToR1Format([{ role: "user", content: systemPrompt }, ...messages])
-		}
+			// OpenRouter sends reasoning tokens by default for Gemini 2.5 Pro models
+			// even if you don't request them. This is not the default for
+			// other providers (including Gemini), so we need to explicitly disable
+			// them unless the user has explicitly configured reasoning.
+			// Note: Gemini 3 models use reasoning_details format with thought signatures,
+			// but we handle this via skip_thought_signature_validator injection below.
+			if (
+				(modelId === "google/gemini-2.5-pro-preview" || modelId === "google/gemini-2.5-pro") &&
+				typeof reasoning === "undefined"
+			) {
+				reasoning = { exclude: true }
+			}
 
-		// Process reasoning_details when switching models to Gemini.
-		const isGemini = modelId.startsWith("google/gemini")
+			// Convert Anthropic messages to OpenAI format.
+			// Pass normalization function for Mistral compatibility (requires 9-char alphanumeric IDs)
+			const isMistral = modelId.toLowerCase().includes("mistral")
+			let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(
+					messages,
+					isMistral ? { normalizeToolCallId: normalizeMistralToolCallId } : undefined,
+				),
+			]
 
-		// For Gemini models with native protocol:
-		// 1. Sanitize messages to handle thought signature validation issues.
-		//    This must happen BEFORE fake encrypted block injection to avoid injecting for
-		//    tool calls that will be dropped due to missing/mismatched reasoning_details.
-		// 2. Inject fake reasoning.encrypted block for tool calls without existing encrypted reasoning.
-		//    This is required when switching from other models to Gemini to satisfy API validation.
-		//    Per OpenRouter documentation (conversation with Toven, Nov 2025):
-		//    - Create ONE reasoning_details entry per assistant message with tool calls
-		//    - Set `id` to the FIRST tool call's ID from the tool_calls array
-		//    - Set `data` to "skip_thought_signature_validator" to bypass signature validation
-		//    - Set `index` to 0
-		// See: https://github.com/cline/cline/issues/8214
-		if (isGemini) {
-			// Step 1: Sanitize messages - filter out tool calls with missing/mismatched reasoning_details
-			openAiMessages = sanitizeGeminiMessages(openAiMessages, modelId)
+			// DeepSeek highly recommends using user instead of system role.
+			if (modelId.startsWith("deepseek/deepseek-r1") || modelId === "perplexity/sonar-reasoning") {
+				openAiMessages = convertToR1Format([{ role: "user", content: systemPrompt }, ...messages])
+			}
 
-			// Step 2: Inject fake reasoning.encrypted block for tool calls that survived sanitization
-			openAiMessages = openAiMessages.map((msg) => {
-				if (msg.role === "assistant") {
-					const toolCalls = (msg as any).tool_calls as any[] | undefined
-					const existingDetails = (msg as any).reasoning_details as any[] | undefined
+			// Process reasoning_details when switching models to Gemini.
+			const isGemini = modelId.startsWith("google/gemini")
 
-					// Only inject if there are tool calls and no existing encrypted reasoning
-					if (toolCalls && toolCalls.length > 0) {
-						const hasEncrypted = existingDetails?.some((d) => d.type === "reasoning.encrypted") ?? false
+			// For Gemini models with native protocol:
+			// 1. Sanitize messages to handle thought signature validation issues.
+			//    This must happen BEFORE fake encrypted block injection to avoid injecting for
+			//    tool calls that will be dropped due to missing/mismatched reasoning_details.
+			// 2. Inject fake reasoning.encrypted block for tool calls without existing encrypted reasoning.
+			//    This is required when switching from other models to Gemini to satisfy API validation.
+			//    Per OpenRouter documentation (conversation with Toven, Nov 2025):
+			//    - Create ONE reasoning_details entry per assistant message with tool calls
+			//    - Set `id` to the FIRST tool call's ID from the tool_calls array
+			//    - Set `data` to "skip_thought_signature_validator" to bypass signature validation
+			//    - Set `index` to 0
+			// See: https://github.com/cline/cline/issues/8214
+			if (isGemini) {
+				// Step 1: Sanitize messages - filter out tool calls with missing/mismatched reasoning_details
+				openAiMessages = sanitizeGeminiMessages(openAiMessages, modelId)
 
-						if (!hasEncrypted) {
-							// Create ONE fake encrypted block with the FIRST tool call's ID
-							// This is the documented format from OpenRouter for skipping thought signature validation
-							const fakeEncrypted = {
-								type: "reasoning.encrypted",
-								data: "skip_thought_signature_validator",
-								id: toolCalls[0].id,
-								format: "google-gemini-v1",
-								index: 0,
-							}
+				// Step 2: Inject fake reasoning.encrypted block for tool calls that survived sanitization
+				openAiMessages = openAiMessages.map((msg) => {
+					if (msg.role === "assistant") {
+						const toolCalls = (msg as any).tool_calls as any[] | undefined
+						const existingDetails = (msg as any).reasoning_details as any[] | undefined
 
-							return {
-								...msg,
-								reasoning_details: [...(existingDetails ?? []), fakeEncrypted],
+						// Only inject if there are tool calls and no existing encrypted reasoning
+						if (toolCalls && toolCalls.length > 0) {
+							const hasEncrypted = existingDetails?.some((d) => d.type === "reasoning.encrypted") ?? false
+
+							if (!hasEncrypted) {
+								// Create ONE fake encrypted block with the FIRST tool call's ID
+								// This is the documented format from OpenRouter for skipping thought signature validation
+								const fakeEncrypted = {
+									type: "reasoning.encrypted",
+									data: "skip_thought_signature_validator",
+									id: toolCalls[0].id,
+									format: "google-gemini-v1",
+									index: 0,
+								}
+
+								return {
+									...msg,
+									reasoning_details: [...(existingDetails ?? []), fakeEncrypted],
+								}
 							}
 						}
 					}
-				}
-				return msg
-			})
-		}
-
-		// https://openrouter.ai/docs/features/prompt-caching
-		// TODO: Add a `promptCacheStratey` field to `ModelInfo`.
-		if (OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
-			if (modelId.startsWith("google")) {
-				// Gemini markers keep their default TTL: ADR-0006 scopes the knob to
-				// Anthropic-shaped markers only, and Gemini has no 1h class.
-				addGeminiCacheBreakpoints(systemPrompt, openAiMessages)
-			} else {
-				// Capability comes from the resolved ModelInfo, never from the id.
-				addAnthropicCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, model.info))
+					return msg
+				})
 			}
-		}
 
-		// https://openrouter.ai/docs/transforms
-		const completionParams: OpenRouterChatCompletionParams = {
-			model: modelId,
-			...(maxTokens && maxTokens > 0 && { max_tokens: maxTokens }),
-			temperature,
-			top_p: topP,
-			messages: openAiMessages,
-			stream: true,
-			// Only include provider if openRouterSpecificProvider is not "[default]".
-			...(this.options.openRouterSpecificProvider &&
-				this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME && {
-					provider: {
-						order: [this.options.openRouterSpecificProvider],
-						only: [this.options.openRouterSpecificProvider],
-						allow_fallbacks: false,
-					},
-				}),
-			...(reasoning && { reasoning }),
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-		}
+			// https://openrouter.ai/docs/features/prompt-caching
+			// TODO: Add a `promptCacheStratey` field to `ModelInfo`.
+			if (OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
+				if (modelId.startsWith("google")) {
+					// Gemini markers keep their default TTL: ADR-0006 scopes the knob to
+					// Anthropic-shaped markers only, and Gemini has no 1h class.
+					addGeminiCacheBreakpoints(systemPrompt, openAiMessages)
+				} else {
+					// Capability comes from the resolved ModelInfo, never from the id.
+					addAnthropicCacheBreakpoints(
+						systemPrompt,
+						openAiMessages,
+						resolveCacheTtl(this.options, model.info),
+					)
+				}
+			}
 
-		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		const requestOptions = modelId.startsWith("anthropic/")
-			? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
-			: undefined
+			// https://openrouter.ai/docs/transforms
+			const completionParams: OpenRouterChatCompletionParams = {
+				model: modelId,
+				...(maxTokens && maxTokens > 0 && { max_tokens: maxTokens }),
+				temperature,
+				top_p: topP,
+				messages: openAiMessages,
+				stream: true,
+				// Only include provider if openRouterSpecificProvider is not "[default]".
+				...(this.options.openRouterSpecificProvider &&
+					this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME && {
+						provider: {
+							order: [this.options.openRouterSpecificProvider],
+							only: [this.options.openRouterSpecificProvider],
+							allow_fallbacks: false,
+						},
+					}),
+				...(reasoning && { reasoning }),
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+			}
 
-		let stream
-		try {
-			stream = await this.client.chat.completions.create(completionParams, requestOptions)
-		} catch (error) {
-			// Try to parse as OpenRouter error structure using Zod
-			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
+			// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
+			// and pass the per-request signal so external aborts cancel the in-flight stream.
+			const requestOptions: OpenAI.RequestOptions = {
+				...(modelId.startsWith("anthropic/")
+					? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
+					: undefined),
+				signal: requestSignal,
+			}
 
-			if (parseResult.success && parseResult.data.error) {
-				const openRouterError = parseResult.data
-				const rawString = openRouterError.error?.metadata?.raw
-				const parsedError = extractErrorFromMetadataRaw(rawString)
-				const rawErrorMessage = parsedError || openRouterError.error?.message || "Unknown error"
+			let stream
+			try {
+				// openai@5.23.2 inspects the request signal before the first attempt and after a retry
+				// sleep has already ended, so a cancellation that lands during the backoff would leave this
+				// await pending until the sleep finishes. settleOnAbort cuts the wait and rejects with the
+				// contract AbortError; the SDK promise keeps running on, exactly as before.
+				stream = await settleOnAbort(
+					this.client.chat.completions.create(completionParams, requestOptions),
+					requestSignal,
+					providerIdentifiers.openrouter,
+				)
+			} catch (error) {
+				// Aborted requests are user-initiated: surface them as AbortError instead of
+				// a completion error (and keep them out of exception telemetry). The SDK reports its own
+				// cancellations (APIUserAbortError / "Request was aborted.") that the merged signal never
+				// saw, so recognize those too (precedent: requesty.ts, zoo-gateway.ts).
+				if (isRequestAborted(error, requestSignal)) {
+					throw createAbortError(providerIdentifiers.openrouter)
+				}
+				// Try to parse as OpenRouter error structure using Zod
+				const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
 
-				const apiError = Object.assign(
-					new ApiProviderError(
-						rawErrorMessage,
+				if (parseResult.success && parseResult.data.error) {
+					const openRouterError = parseResult.data
+					const rawString = openRouterError.error?.metadata?.raw
+					const parsedError = extractErrorFromMetadataRaw(rawString)
+					const rawErrorMessage = parsedError || openRouterError.error?.message || "Unknown error"
+
+					const apiError = Object.assign(
+						new ApiProviderError(
+							rawErrorMessage,
+							providerIdentifiers.openrouter,
+							modelId,
+							"createMessage",
+							openRouterError.error?.code,
+						),
+						{
+							status: openRouterError.error?.code,
+							error: openRouterError.error,
+						},
+					)
+
+					TelemetryService.instance.captureException(apiError)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
+				} else {
+					// Fallback for non-OpenRouter errors
+					const errorMessage = error instanceof Error ? error.message : String(error)
+					const apiError = new ApiProviderError(
+						errorMessage,
 						providerIdentifiers.openrouter,
 						modelId,
 						"createMessage",
-						openRouterError.error?.code,
-					),
-					{
-						status: openRouterError.error?.code,
-						error: openRouterError.error,
-					},
-				)
-
-				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, providerIdentifiers.openrouter)
-			} else {
-				// Fallback for non-OpenRouter errors
-				const errorMessage = error instanceof Error ? error.message : String(error)
-				const apiError = new ApiProviderError(
-					errorMessage,
-					providerIdentifiers.openrouter,
-					modelId,
-					"createMessage",
-				)
-				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, providerIdentifiers.openrouter)
-			}
-		}
-
-		let lastUsage: CompletionUsage | undefined = undefined
-		// Accumulator for reasoning_details FROM the API.
-		// We preserve the original shape of reasoning_details to prevent malformed responses.
-		const reasoningDetailsAccumulator = new Map<
-			string,
-			{
-				type: string
-				text?: string
-				summary?: string
-				data?: string
-				id?: string | null
-				format?: string
-				signature?: string
-				index: number
-			}
-		>()
-
-		// Track whether we've yielded displayable text from reasoning_details.
-		// When reasoning_details has displayable content (reasoning.text or reasoning.summary),
-		// we skip yielding the top-level reasoning field to avoid duplicate display.
-		let hasYieldedReasoningFromDetails = false
-		const activeToolCallIds = new Set<string>()
-
-		for await (const chunk of stream) {
-			// OpenRouter returns an error object instead of the OpenAI SDK throwing an error.
-			if ("error" in chunk) {
-				this.handleStreamingError(chunk.error as OpenRouterError, modelId, "createMessage")
-			}
-
-			const delta = chunk.choices[0]?.delta
-			const finishReason = chunk.choices[0]?.finish_reason
-
-			if (delta) {
-				// Handle reasoning_details array format (used by Gemini 3, Claude, OpenAI o-series, etc.)
-				// See: https://openrouter.ai/docs/use-cases/reasoning-tokens#preserving-reasoning-blocks
-				// Priority: Check for reasoning_details first, as it's the newer format
-				const deltaWithReasoning = delta as typeof delta & {
-					reasoning_details?: Array<{
-						type: string
-						text?: string
-						summary?: string
-						data?: string
-						id?: string | null
-						format?: string
-						signature?: string
-						index?: number
-					}>
+					)
+					TelemetryService.instance.captureException(apiError)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
 				}
+			}
 
-				if (deltaWithReasoning.reasoning_details && Array.isArray(deltaWithReasoning.reasoning_details)) {
-					for (const detail of deltaWithReasoning.reasoning_details) {
-						const index = detail.index ?? 0
-						const key = `${detail.type}-${index}`
-						const existing = reasoningDetailsAccumulator.get(key)
+			let lastUsage: CompletionUsage | undefined = undefined
+			// Accumulator for reasoning_details FROM the API.
+			// We preserve the original shape of reasoning_details to prevent malformed responses.
+			const reasoningDetailsAccumulator = new Map<
+				string,
+				{
+					type: string
+					text?: string
+					summary?: string
+					data?: string
+					id?: string | null
+					format?: string
+					signature?: string
+					index: number
+				}
+			>()
 
-						if (existing) {
-							// Accumulate text/summary/data for existing reasoning detail
-							if (detail.text !== undefined) {
-								existing.text = (existing.text || "") + detail.text
-							}
-							if (detail.summary !== undefined) {
-								existing.summary = (existing.summary || "") + detail.summary
-							}
-							if (detail.data !== undefined) {
-								existing.data = (existing.data || "") + detail.data
-							}
-							// Update other fields if provided
-							if (detail.id !== undefined) existing.id = detail.id
-							if (detail.format !== undefined) existing.format = detail.format
-							if (detail.signature !== undefined) existing.signature = detail.signature
-						} else {
-							// Start new reasoning detail accumulation
-							reasoningDetailsAccumulator.set(key, {
-								type: detail.type,
-								text: detail.text,
-								summary: detail.summary,
-								data: detail.data,
-								id: detail.id,
-								format: detail.format,
-								signature: detail.signature,
-								index,
-							})
+			// Track whether we've yielded displayable text from reasoning_details.
+			// When reasoning_details has displayable content (reasoning.text or reasoning.summary),
+			// we skip yielding the top-level reasoning field to avoid duplicate display.
+			let hasYieldedReasoningFromDetails = false
+			const activeToolCallIds = new Set<string>()
+
+			try {
+				for await (const chunk of stream) {
+					// The iterator can keep delivering buffered chunks after the abort has already
+					// fired (openai@5.23.2 swallows the mid-stream AbortError), so re-check the
+					// signal before processing each chunk. The yields below are synchronous (there
+					// is no await between this check and them), so nothing is emitted once the
+					// signal aborts.
+					// A yield suspends this generator: the consumer can abort while it is paused
+					// and we would resume without re-checking. One SDK chunk can yield several
+					// events, so every yield below is guarded, not just the loop entry.
+					const abortIfSignalled = () => {
+						if (requestSignal.aborted) {
+							throw createAbortError(providerIdentifiers.openrouter)
+						}
+					}
+					abortIfSignalled()
+
+					// OpenRouter returns an error object instead of the OpenAI SDK throwing an error.
+					if ("error" in chunk) {
+						this.handleStreamingError(chunk.error as OpenRouterError, modelId, "createMessage")
+					}
+
+					const delta = chunk.choices[0]?.delta
+					const finishReason = chunk.choices[0]?.finish_reason
+
+					if (delta) {
+						// Handle reasoning_details array format (used by Gemini 3, Claude, OpenAI o-series, etc.)
+						// See: https://openrouter.ai/docs/use-cases/reasoning-tokens#preserving-reasoning-blocks
+						// Priority: Check for reasoning_details first, as it's the newer format
+						const deltaWithReasoning = delta as typeof delta & {
+							reasoning_details?: Array<{
+								type: string
+								text?: string
+								summary?: string
+								data?: string
+								id?: string | null
+								format?: string
+								signature?: string
+								index?: number
+							}>
 						}
 
-						// Yield text for display (still fragmented for live streaming)
-						// Only reasoning.text and reasoning.summary have displayable content
-						// reasoning.encrypted is intentionally skipped as it contains redacted content
-						let reasoningText: string | undefined
-						if (detail.type === "reasoning.text" && typeof detail.text === "string") {
-							reasoningText = detail.text
-						} else if (detail.type === "reasoning.summary" && typeof detail.summary === "string") {
-							reasoningText = detail.summary
+						if (
+							deltaWithReasoning.reasoning_details &&
+							Array.isArray(deltaWithReasoning.reasoning_details)
+						) {
+							for (const detail of deltaWithReasoning.reasoning_details) {
+								const index = detail.index ?? 0
+								const key = `${detail.type}-${index}`
+								const existing = reasoningDetailsAccumulator.get(key)
+
+								if (existing) {
+									// Accumulate text/summary/data for existing reasoning detail. Only
+									// strings accumulate: a non-string fragment would coerce the stored
+									// value (e.g. "x[object Object]") and be replayed in later requests.
+									if (typeof detail.text === "string") {
+										existing.text = (existing.text || "") + detail.text
+									}
+									if (typeof detail.summary === "string") {
+										existing.summary = (existing.summary || "") + detail.summary
+									}
+									if (typeof detail.data === "string") {
+										existing.data = (existing.data || "") + detail.data
+									}
+									// Update other fields if provided
+									if (detail.id !== undefined) existing.id = detail.id
+									if (detail.format !== undefined) existing.format = detail.format
+									if (detail.signature !== undefined) existing.signature = detail.signature
+								} else {
+									// Start new reasoning detail accumulation
+									reasoningDetailsAccumulator.set(key, {
+										type: detail.type,
+										text: typeof detail.text === "string" ? detail.text : undefined,
+										summary: typeof detail.summary === "string" ? detail.summary : undefined,
+										data: typeof detail.data === "string" ? detail.data : undefined,
+										id: detail.id,
+										format: detail.format,
+										signature: detail.signature,
+										index,
+									})
+								}
+
+								// Yield text for display (still fragmented for live streaming)
+								// Only reasoning.text and reasoning.summary have displayable content
+								// reasoning.encrypted is intentionally skipped as it contains redacted content
+								let reasoningText: string | undefined
+								if (detail.type === "reasoning.text" && typeof detail.text === "string") {
+									reasoningText = detail.text
+								} else if (detail.type === "reasoning.summary" && typeof detail.summary === "string") {
+									reasoningText = detail.summary
+								}
+
+								if (reasoningText) {
+									hasYieldedReasoningFromDetails = true
+									abortIfSignalled()
+									yield { type: "reasoning", text: reasoningText }
+								}
+							}
 						}
 
-						if (reasoningText) {
-							hasYieldedReasoningFromDetails = true
-							yield { type: "reasoning", text: reasoningText }
+						// Handle top-level reasoning field for UI display.
+						// Skip if we've already yielded from reasoning_details to avoid duplicate display.
+						if ("reasoning" in delta && delta.reasoning && typeof delta.reasoning === "string") {
+							if (!hasYieldedReasoningFromDetails) {
+								abortIfSignalled()
+								yield { type: "reasoning", text: delta.reasoning }
+							}
 						}
+
+						// Emit raw tool call chunks - NativeToolCallParser handles state management
+						if ("tool_calls" in delta && Array.isArray(delta.tool_calls)) {
+							for (const toolCall of delta.tool_calls) {
+								if (toolCall.id) {
+									activeToolCallIds.add(toolCall.id)
+								}
+								abortIfSignalled()
+								yield {
+									type: "tool_call_partial",
+									index: toolCall.index,
+									id: toolCall.id,
+									name: toolCall.function?.name,
+									arguments: toolCall.function?.arguments,
+								}
+							}
+						}
+
+						if (delta.content) {
+							abortIfSignalled()
+							yield { type: "text", text: delta.content }
+						}
+					}
+
+					// Process finish_reason to emit tool_call_end events
+					// This ensures tool calls are finalized even if the stream doesn't properly close
+					// Process finish_reason to emit tool_call_end events
+					// This ensures tool calls are finalized even if the stream doesn't properly close
+					if (finishReason === "tool_calls") {
+						for (const id of activeToolCallIds) {
+							abortIfSignalled()
+							yield { type: "tool_call_end", id }
+						}
+						activeToolCallIds.clear()
+					}
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
 
-				// Handle top-level reasoning field for UI display.
-				// Skip if we've already yielded from reasoning_details to avoid duplicate display.
-				if ("reasoning" in delta && delta.reasoning && typeof delta.reasoning === "string") {
-					if (!hasYieldedReasoningFromDetails) {
-						yield { type: "reasoning", text: delta.reasoning }
+				// openai@5.23.2's stream iterator swallows a mid-stream AbortError and returns
+				// normally instead of throwing, so the catch below would never run: without this
+				// check, createMessage completes silently after yielding partial output.
+				if (requestSignal.aborted) {
+					throw createAbortError(providerIdentifiers.openrouter)
+				}
+
+				// After streaming completes, consolidate and store reasoning_details from the API.
+				// This filters out corrupted encrypted blocks (missing `data`) and consolidates by index.
+				if (reasoningDetailsAccumulator.size > 0) {
+					const rawDetails = Array.from(reasoningDetailsAccumulator.values())
+					this.currentReasoningDetails = consolidateReasoningDetails(rawDetails)
+				}
+
+				if (lastUsage) {
+					yield {
+						type: "usage",
+						inputTokens: lastUsage.prompt_tokens || 0,
+						outputTokens: lastUsage.completion_tokens || 0,
+						cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens,
+						reasoningTokens: lastUsage.completion_tokens_details?.reasoning_tokens,
+						// BYOK inference is billed separately. Other routes include it in cost.
+						totalCost:
+							(lastUsage.cost ?? 0) +
+							(lastUsage.is_byok === true ? (lastUsage.cost_details?.upstream_inference_cost ?? 0) : 0),
 					}
 				}
-
-				// Emit raw tool call chunks - NativeToolCallParser handles state management
-				if ("tool_calls" in delta && Array.isArray(delta.tool_calls)) {
-					for (const toolCall of delta.tool_calls) {
-						if (toolCall.id) {
-							activeToolCallIds.add(toolCall.id)
-						}
-						yield {
-							type: "tool_call_partial",
-							index: toolCall.index,
-							id: toolCall.id,
-							name: toolCall.function?.name,
-							arguments: toolCall.function?.arguments,
-						}
-					}
+			} catch (error) {
+				// Normalize abort-driven stream failures (SDK abort or timeout errors) to a
+				// DOM-standard AbortError so callers can detect the aborted request, including the abort
+				// shapes the SDK reports on its own without our signal firing.
+				if (isRequestAborted(error, requestSignal)) {
+					throw createAbortError(providerIdentifiers.openrouter)
 				}
-
-				if (delta.content) {
-					yield { type: "text", text: delta.content }
-				}
+				throw error
 			}
-
-			// Process finish_reason to emit tool_call_end events
-			// This ensures tool calls are finalized even if the stream doesn't properly close
-			if (finishReason === "tool_calls") {
-				for (const id of activeToolCallIds) {
-					yield { type: "tool_call_end", id }
-				}
-				activeToolCallIds.clear()
-			}
-
-			if (chunk.usage) {
-				lastUsage = chunk.usage
-			}
-		}
-
-		// After streaming completes, consolidate and store reasoning_details from the API.
-		// This filters out corrupted encrypted blocks (missing `data`) and consolidates by index.
-		if (reasoningDetailsAccumulator.size > 0) {
-			const rawDetails = Array.from(reasoningDetailsAccumulator.values())
-			this.currentReasoningDetails = consolidateReasoningDetails(rawDetails)
-		}
-
-		if (lastUsage) {
-			yield {
-				type: "usage",
-				inputTokens: lastUsage.prompt_tokens || 0,
-				outputTokens: lastUsage.completion_tokens || 0,
-				cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens,
-				reasoningTokens: lastUsage.completion_tokens_details?.reasoning_tokens,
-				// BYOK inference is billed separately. Other routes include it in cost.
-				totalCost:
-					(lastUsage.cost ?? 0) +
-					(lastUsage.is_byok === true ? (lastUsage.cost_details?.upstream_inference_cost ?? 0) : 0),
-			}
+		} finally {
+			// Detach on every exit path - completion, failure, abort, or the consumer
+			// closing the generator - so the listener never outlives this request.
+			removeExternalAbortListener()
+			// Cancel the in-flight request when the consumer abandons the generator
+			// (early break / downstream error). No-op once the stream has completed
+			// or the signal is already aborted.
+			teardownController.abort()
 		}
 	}
 
 	public async fetchModel() {
+		const { info } = await this.runModelLookup()
+		return info
+	}
+
+	/**
+	 * Run one catalog lookup and publish whichever records it returned, under the per-catalog
+	 * sequences above. It also reports what this lookup itself saw: a lookup that came back empty
+	 * leaves the previous records published (both retention rules are deliberate), so the published
+	 * maps cannot tell a fresh catalog from a failed fetch, and a loader that reads them would memoize
+	 * the failure as a complete load.
+	 */
+	private async runModelLookup() {
+		// Claim the lookup id before the first await so a lookup that starts later
+		// always outranks an earlier one when both are in flight.
+		const sequence = ++this.fetchModelSequence
 		const [models, endpoints] = await Promise.all([
 			getModels({ provider: providerIdentifiers.openrouter }, this),
 			getModelEndpoints(
@@ -565,19 +703,57 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			),
 		])
 
-		this.models = models
-		this.endpoints = endpoints
+		// A slower earlier lookup must not overwrite records a newer lookup already
+		// published: writing them would silently roll model metadata (pricing,
+		// limits, endpoint records) back to an older fetch. The stale lookup still
+		// returns the handler's current model, which is what its caller observes.
+		if (sequence > this.publishedModelSequence && Object.keys(models).length > 0) {
+			this.publishedModelSequence = sequence
+			this.models = models
+		}
 
-		return this.getModel()
+		// Endpoints are ordered by their own sequence for the same reason, and they publish even when
+		// the model catalog came back empty: a catalog miss must not discard a successful endpoint
+		// answer, whose records carry the pricing and limits for the selected provider. The endpoint
+		// lookup answers an empty map when its request failed, and publishing that would drop the
+		// records a previous successful lookup installed, so only a non-empty answer replaces them.
+		if (sequence > this.publishedEndpointSequence && Object.keys(endpoints).length > 0) {
+			this.publishedEndpointSequence = sequence
+			this.endpoints = endpoints
+		}
+
+		return {
+			info: this.getModel(),
+			// What this lookup itself saw, reported alongside the model so a loader can judge its own
+			// attempt instead of the records that happen to be published.
+			hasModels: Object.keys(models).length > 0,
+			hasEndpoints: Object.keys(endpoints).length > 0,
+		}
 	}
 
 	override getModel() {
 		const id = this.options.openRouterModelId ?? openRouterDefaultModelId
 		let info = this.models[id] ?? openRouterDefaultModelInfo
 
-		// If a specific provider is requested, use the endpoint for that provider.
-		if (this.options.openRouterSpecificProvider && this.endpoints[this.options.openRouterSpecificProvider]) {
-			info = this.endpoints[this.options.openRouterSpecificProvider]
+		const specificProvider = this.options.openRouterSpecificProvider
+		const endpoint = specificProvider ? this.endpoints[specificProvider] : undefined
+
+		// The endpoint record is what OpenRouter reported for the selected provider - its limits,
+		// pricing and description - so those keep coming from it. Its two capability fields are a copy
+		// taken off whichever catalog was current when the endpoints were fetched
+		// (src/api/providers/fetchers/modelEndpointCache.ts:74-79), and an endpoint record is only ever
+		// replaced by a lookup that actually returned records, so a retained one can predate several
+		// catalog publications. Model-level capabilities therefore follow the newest catalog entry when
+		// the model has one, and fall back to the endpoint's copy on a catalog miss.
+		if (endpoint) {
+			const model = this.models[id]
+			info = model
+				? {
+						...endpoint,
+						supportsReasoningEffort: model.supportsReasoningEffort,
+						supportedParameters: model.supportedParameters ? [...model.supportedParameters] : undefined,
+					}
+				: endpoint
 		}
 
 		// Re-apply the Moonshot K3 profile at consumption time: model records are
@@ -602,82 +778,157 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { id, info, topP: isDeepSeekR1 ? 0.95 : undefined, ...params }
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
-		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
-
-		const completionParams: OpenRouterChatCompletionParams = {
-			model: modelId,
-			max_tokens: maxTokens,
-			temperature,
-			messages: [{ role: "user", content: prompt }],
-			stream: false,
-			// Only include provider if openRouterSpecificProvider is not "[default]".
-			...(this.options.openRouterSpecificProvider &&
-				this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME && {
-					provider: {
-						order: [this.options.openRouterSpecificProvider],
-						only: [this.options.openRouterSpecificProvider],
-						allow_fallbacks: false,
-					},
-				}),
-			...(reasoning && { reasoning }),
-		}
-
-		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		const requestOptions = modelId.startsWith("anthropic/")
-			? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
-			: undefined
-
-		let response
-
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+		// Bridge the caller's signal before anything else: the OpenAI SDK attaches its abort
+		// listener to whichever signal it receives and leaves it attached once the request
+		// completes, and with no usable timeout `mergeAbortSignalAndTimeout` would hand it the
+		// caller's own long-lived signal - one retained listener and controller per completed
+		// request. The bridge gives the SDK a per-request signal and returns the handle that
+		// detaches it, which the `finally` below must run on every exit path.
+		//
+		// Establishing the cancellation scope here also covers model lookup: a pre-aborted call,
+		// or one aborted while model metadata is loading, must reject promptly instead of waiting
+		// for the lookup to settle. The configured timeoutMs covers the lookup as well.
+		const { signal: bridgedCallerSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			options?.abortSignal,
+		)
+		const requestAbortSignal = mergeAbortSignalAndTimeout(bridgedCallerSignal, options?.timeoutMs)
 		try {
-			response = await this.client.chat.completions.create(completionParams, requestOptions)
-		} catch (error) {
-			// Try to parse as OpenRouter error structure using Zod
-			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
+			if (requestAbortSignal?.aborted) {
+				throw createAbortError(providerIdentifiers.openrouter)
+			}
 
-			if (parseResult.success && parseResult.data.error) {
-				const openRouterError = parseResult.data
-				const rawString = openRouterError.error?.metadata?.raw
-				const parsedError = extractErrorFromMetadataRaw(rawString)
-				const rawErrorMessage = parsedError || openRouterError.error?.message || "Unknown error"
+			let model: Awaited<ReturnType<OpenRouterHandler["fetchModel"]>>
+			try {
+				model = requestAbortSignal
+					? await rejectOnAbort(this.fetchModel(), requestAbortSignal, providerIdentifiers.openrouter)
+					: await this.fetchModel()
+			} catch (error) {
+				// Only our own merged signal marks this as a cancellation. An
+				// abort-shaped failure from the model cache's internal timeout is a
+				// discovery failure, not a caller cancellation, so it propagates with
+				// its original identity.
+				if (requestAbortSignal?.aborted) {
+					throw createAbortError(providerIdentifiers.openrouter)
+				}
+				throw error
+			}
+			const { id: modelId, maxTokens, temperature, reasoning } = model
 
-				const apiError = Object.assign(
-					new ApiProviderError(
-						rawErrorMessage,
+			const completionParams: OpenRouterChatCompletionParams = {
+				model: modelId,
+				max_tokens: maxTokens,
+				temperature,
+				messages: [{ role: "user", content: prompt }],
+				stream: false,
+				// Only include provider if openRouterSpecificProvider is not "[default]".
+				...(this.options.openRouterSpecificProvider &&
+					this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME && {
+						provider: {
+							order: [this.options.openRouterSpecificProvider],
+							only: [this.options.openRouterSpecificProvider],
+							allow_fallbacks: false,
+						},
+					}),
+				...(reasoning && { reasoning }),
+			}
+
+			// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
+			// and forward the caller's abort signal / per-request timeout to the SDK. The merged
+			// signal (established before model lookup, above) aborts when either the caller's signal
+			// or the timeout fires, so timeouts are normalized to AbortError in the catch below.
+			// The client-level timeout remains the default safety net; timeoutMs <= 0 disables the
+			// per-request timeout, and 0 is never passed to the SDK.
+			// The SDK validates a per-request timeout as a uint32: non-finite values
+			// must be dropped, fractional delays rounded up (they fail its integer
+			// validation) and delays above 2^31-1 ms capped (Node clamps them to 1 ms
+			// otherwise). Same policy as mergeAbortSignalAndTimeout, which owns the
+			// signal side of the same option.
+			const perRequestTimeoutMs =
+				typeof options?.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+					? toSdkTimeoutMs(options.timeoutMs)
+					: undefined
+
+			const requestOptions: OpenAI.RequestOptions = {
+				...(modelId.startsWith("anthropic/")
+					? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
+					: undefined),
+				...(requestAbortSignal && { signal: requestAbortSignal }),
+				...(perRequestTimeoutMs !== undefined && { timeout: perRequestTimeoutMs }),
+			}
+
+			let response
+
+			try {
+				// The same retry-backoff window as createMessage: cut the wait so a cancellation that lands
+				// during the SDK's sleep settles as AbortError at once instead of after the backoff ends.
+				response = await settleOnAbort(
+					this.client.chat.completions.create(completionParams, requestOptions),
+					requestAbortSignal,
+					providerIdentifiers.openrouter,
+				)
+			} catch (error) {
+				// Aborted requests are user-initiated: surface them as AbortError (this also covers
+				// timeouts, which abort the same signal) instead of a completion error. SDK-reported
+				// abort shapes are normalized as well (see the createMessage catch).
+				if (isRequestAborted(error, requestAbortSignal)) {
+					throw createAbortError(providerIdentifiers.openrouter)
+				}
+				// Try to parse as OpenRouter error structure using Zod
+				const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
+
+				if (parseResult.success && parseResult.data.error) {
+					const openRouterError = parseResult.data
+					const rawString = openRouterError.error?.metadata?.raw
+					const parsedError = extractErrorFromMetadataRaw(rawString)
+					const rawErrorMessage = parsedError || openRouterError.error?.message || "Unknown error"
+
+					const apiError = Object.assign(
+						new ApiProviderError(
+							rawErrorMessage,
+							providerIdentifiers.openrouter,
+							modelId,
+							"completePrompt",
+							openRouterError.error?.code,
+						),
+						{
+							status: openRouterError.error?.code,
+							error: openRouterError.error,
+						},
+					)
+
+					TelemetryService.instance.captureException(apiError)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
+				} else {
+					// Fallback for non-OpenRouter errors
+					const errorMessage = error instanceof Error ? error.message : String(error)
+					const apiError = new ApiProviderError(
+						errorMessage,
 						providerIdentifiers.openrouter,
 						modelId,
 						"completePrompt",
-						openRouterError.error?.code,
-					),
-					{
-						status: openRouterError.error?.code,
-						error: openRouterError.error,
-					},
-				)
-
-				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, providerIdentifiers.openrouter)
-			} else {
-				// Fallback for non-OpenRouter errors
-				const errorMessage = error instanceof Error ? error.message : String(error)
-				const apiError = new ApiProviderError(
-					errorMessage,
-					providerIdentifiers.openrouter,
-					modelId,
-					"completePrompt",
-				)
-				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, providerIdentifiers.openrouter)
+					)
+					TelemetryService.instance.captureException(apiError)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
+				}
 			}
-		}
 
-		if ("error" in response) {
-			this.handleStreamingError(response.error as OpenRouterError, modelId, "completePrompt")
-		}
+			if (requestAbortSignal?.aborted) {
+				// The response resolved after the request was aborted: do not return the late result.
+				throw createAbortError(providerIdentifiers.openrouter)
+			}
 
-		const completion = response as OpenAI.Chat.ChatCompletion
-		return completion.choices[0]?.message?.content || ""
+			if ("error" in response) {
+				this.handleStreamingError(response.error as OpenRouterError, modelId, "completePrompt")
+			}
+
+			const completion = response as OpenAI.Chat.ChatCompletion
+			return completion.choices[0]?.message?.content || ""
+		} finally {
+			// Detach on every exit path - completion, failure, abort, or a late result. The listener
+			// sits on the caller's long-lived signal and would outlive this request otherwise.
+			removeExternalAbortListener()
+		}
 	}
 
 	/**

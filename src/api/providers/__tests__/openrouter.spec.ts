@@ -14,10 +14,17 @@ vitest.mock("../utils/timeout-config", () => ({
 
 const MOCK_TIMEOUT_MS = 300_000
 
+import { getEventListeners } from "node:events"
+
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { OPENROUTER_DEFAULT_PROVIDER_NAME, openRouterDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
+import {
+	OPENROUTER_DEFAULT_PROVIDER_NAME,
+	openRouterDefaultModelInfo,
+	providerIdentifiers,
+	type ModelRecord,
+} from "@roo-code/types"
 import type { ModelInfo } from "@roo-code/types"
 import { ApiProviderError, extractApiProviderErrorProperties } from "@roo-code/types"
 
@@ -25,10 +32,11 @@ import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
-import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { settlesWithin } from "../../../test-utils/promise"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -133,6 +141,46 @@ vitest.mock("../fetchers/modelCache", () => ({
 		return getModels(options, handler)
 	}),
 }))
+
+const ABORT_SETTLE_MS = 150
+
+/**
+ * Installs a per-instance `chat.completions.create` double on the handler's auto-mocked client.
+ * The mocked `chat` slot is read-only at the prototype, so a scenario has to redefine the instance
+ * property; each scenario still keeps its own response fixture and assertions inline.
+ */
+/**
+ * Chat-completion chunk shaped the way OpenRouter delivers it: reasoning fragments ride on
+ * `reasoning_details`, and a mid-stream failure arrives as an `error` member instead of a throw.
+ */
+type StreamFixtureChunk = {
+	id?: string
+	choices?: {
+		delta: {
+			content?: string
+			reasoning?: string
+			reasoning_details?: unknown[]
+			tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[]
+		}
+		finish_reason?: string
+	}[]
+	error?: { message?: string; code?: number; metadata?: { raw?: string } }
+	usage?: { prompt_tokens?: number; completion_tokens?: number }
+}
+
+/** One guarded-emit row: how far to drain the stream, the last event seen, and the chunks behind it. */
+type GuardFixtureRow = { stopBefore: string; consume: number; last: unknown; chunks: StreamFixtureChunk[] }
+
+function stubCompletionsCreate(handler: OpenRouterHandler, create: (...args: never[]) => unknown) {
+	// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts, and the
+	// double assertion is the one place that shape is spelled out.
+	const client = handler["client"] as unknown as { chat: { completions: { create: typeof create } } }
+	Object.defineProperty(client, "chat", {
+		value: { completions: { create } },
+		configurable: true,
+		writable: true,
+	})
+}
 
 describe("OpenRouterHandler", () => {
 	const mockOptions = makeApiHandlerOptions({
@@ -337,6 +385,301 @@ describe("OpenRouterHandler", () => {
 			expect(result.reasoningEffort).toBe("high")
 			expect(result.reasoning).toEqual({ effort: "high" })
 		})
+
+		it("keeps the newest lookup's records when an older lookup settles last", async () => {
+			// Two lookups overlap (a second request, or a lookup whose request was
+			// cancelled). The first started but settles last; publishing its records
+			// would roll pricing and limits back to an older fetch.
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+			let releaseFirst!: () => void
+			let releaseSecond!: () => void
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockedGetModels
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return {
+						"anthropic/claude-sonnet-4": { ...openRouterDefaultModelInfo, maxTokens: 111 },
+					}
+				})
+				.mockImplementationOnce(async () => {
+					await secondGate
+					return {
+						"anthropic/claude-sonnet-4": { ...openRouterDefaultModelInfo, maxTokens: 222 },
+					}
+				})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+				}),
+			)
+
+			const first = handler.fetchModel()
+			const second = handler.fetchModel()
+
+			releaseSecond()
+			await second
+			releaseFirst()
+			await first
+
+			expect(handler.getModel().info.maxTokens).toBe(222)
+		})
+
+		it("keeps the previous endpoint records when a newer endpoint lookup returns none", async () => {
+			mockGetModelEndpoints
+				.mockResolvedValueOnce({
+					"provider-x": { ...openRouterDefaultModelInfo, maxTokens: 333 },
+				})
+				// A failed endpoint fetch answers an empty map.
+				.mockResolvedValueOnce({})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+			expect(handler.getModel().info.maxTokens).toBe(333)
+
+			// The newer lookup saw no endpoints: the records from the successful one must survive,
+			// otherwise the pricing and limits fall back to the base catalogue entry.
+			await handler.fetchModel()
+			expect(handler.getModel().info.maxTokens).toBe(333)
+		})
+
+		it("publishes endpoint records even when the model catalog came back empty", async () => {
+			// A catalog miss must not discard endpoint data: the endpoint lookup carries the
+			// pricing and limits for the selected provider, and getModel() prefers the endpoint
+			// record over the (now missing) catalog entry.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({})
+			mockGetModelEndpoints.mockResolvedValueOnce({
+				"provider-x": { ...openRouterDefaultModelInfo, maxTokens: 444 },
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+
+			expect(handler.getModel().info.maxTokens).toBe(444)
+		})
+
+		it("keeps the published model record when a newer lookup returns an empty catalog", async () => {
+			// getModel() takes supportedParameters from the published catalog entry and only the endpoint
+			// record's limits override it, so those fields show which publication is current: an answer
+			// that came back empty must not roll them back to the default record.
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+			// Registered after construction so only this test's two lookups see these answers.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest
+				.mocked(getModels)
+				.mockResolvedValueOnce({
+					"anthropic/claude-sonnet-4": { ...openRouterDefaultModelInfo, supportedParameters: ["max_tokens"] },
+				})
+				.mockResolvedValueOnce({})
+			mockGetModelEndpoints
+				.mockResolvedValueOnce({ "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 444 } })
+				.mockResolvedValueOnce({ "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 555 } })
+
+			await handler.fetchModel()
+			await handler.fetchModel()
+
+			expect(handler.getModel().info.maxTokens).toBe(555)
+			expect(handler.getModel().info.supportedParameters).toEqual(["max_tokens"])
+		})
+
+		it("does not let an older endpoint answer replace a newer one when both catalogs are empty", async () => {
+			// With no models to publish, the model sequence never advances, so endpoint ordering
+			// needs its own sequence: without it the slower, older lookup would overwrite the
+			// endpoint records the newer lookup already installed.
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+			mockedGetModels.mockResolvedValueOnce({}).mockResolvedValueOnce({})
+
+			let releaseFirst!: () => void
+			let releaseSecond!: () => void
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockGetModelEndpoints
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return { "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 111 } }
+				})
+				.mockImplementationOnce(async () => {
+					await secondGate
+					return { "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 222 } }
+				})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			const first = handler.fetchModel()
+			const second = handler.fetchModel()
+
+			releaseSecond()
+			await second
+			releaseFirst()
+			await first
+
+			expect(handler.getModel().info.maxTokens).toBe(222)
+		})
+
+		it("keeps an older endpoint answer when a newer lookup publishes models without endpoints", async () => {
+			// The endpoint sequence advances only when endpoints publish, so a newer lookup that
+			// failed its endpoint fetch must not freeze the ordering: the older lookup's successful
+			// endpoint records may still arrive afterwards and must be published.
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+
+			let releaseFirst!: () => void
+			let releaseSecond!: () => void
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockedGetModels
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return {}
+				})
+				.mockImplementationOnce(async () => {
+					await secondGate
+					return { "anthropic/claude-sonnet-4": { ...openRouterDefaultModelInfo, maxTokens: 555 } }
+				})
+			mockGetModelEndpoints
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return { "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 111 } }
+				})
+				.mockResolvedValueOnce({})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			const first = handler.fetchModel()
+			const second = handler.fetchModel()
+
+			releaseSecond()
+			await second
+			releaseFirst()
+			await first
+
+			expect(handler.getModel().info.maxTokens).toBe(111)
+		})
+
+		it("takes model capabilities from the newest catalog and endpoint limits from the endpoint", async () => {
+			// The endpoint cache copies supportsReasoningEffort and supportedParameters off the catalog
+			// that was current when the endpoints were fetched, and endpoint records survive a lookup
+			// that returned none, so a retained record's capabilities can be older than the catalog.
+			// The provider's own limits must not be dragged along with them.
+			const { getModels } = await import("../fetchers/modelCache")
+			const catalogRecord: ModelInfo = {
+				...openRouterDefaultModelInfo,
+				maxTokens: 9999,
+				supportsReasoningEffort: ["low", "high"],
+				supportedParameters: ["temperature", "reasoning"],
+			}
+			const endpointRecord: ModelInfo = {
+				...openRouterDefaultModelInfo,
+				maxTokens: 4096,
+				contextWindow: 131072,
+				description: "Provider X endpoint",
+				supportsReasoningEffort: ["minimal"],
+				supportedParameters: ["max_tokens"],
+			}
+			vitest.mocked(getModels).mockResolvedValueOnce({ "anthropic/claude-sonnet-4": catalogRecord })
+			mockGetModelEndpoints.mockResolvedValueOnce({ "provider-x": endpointRecord })
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+
+			const info = handler.getModel().info
+			expect(info.supportsReasoningEffort).toEqual(["low", "high"])
+			expect(info.supportedParameters).toEqual(["temperature", "reasoning"])
+			// Provider-specific limits and metadata still come from the endpoint record.
+			expect(info.maxTokens).toBe(4096)
+			expect(info.contextWindow).toBe(131072)
+			expect(info.description).toBe("Provider X endpoint")
+			// The capability list is a copy: rendering or a later fetch must not write through to the
+			// catalog record the shared model cache also holds.
+			info.supportedParameters?.push("include_reasoning")
+			expect(catalogRecord.supportedParameters).toEqual(["temperature", "reasoning"])
+		})
+
+		it("keeps the endpoint's capability copy when the catalog has no entry for the model", async () => {
+			// A catalog miss must not leave the selected provider without capabilities: the endpoint
+			// record is the only record there is, so it is used as is.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({})
+			const endpointRecord: ModelInfo = {
+				...openRouterDefaultModelInfo,
+				maxTokens: 4096,
+				description: "Provider X endpoint",
+				supportsReasoningEffort: ["minimal"],
+				supportedParameters: ["max_tokens"],
+			}
+			mockGetModelEndpoints.mockResolvedValueOnce({ "provider-x": endpointRecord })
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+
+			const info = handler.getModel().info
+			expect(info.supportsReasoningEffort).toEqual(["minimal"])
+			expect(info.supportedParameters).toEqual(["max_tokens"])
+			expect(info.maxTokens).toBe(4096)
+		})
 	})
 
 	describe("applyOpenRouterMoonshotK3Profile", () => {
@@ -403,9 +746,14 @@ describe("OpenRouterHandler", () => {
 			// Mock OpenAI chat.completions.create
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
 
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const systemPrompt = "test system prompt"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "test message" }]
@@ -438,7 +786,10 @@ describe("OpenRouterHandler", () => {
 					temperature: 0,
 					top_p: undefined,
 				}),
-				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+				{
+					headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+					signal: expect.any(AbortSignal),
+				},
 			)
 		})
 
@@ -458,9 +809,14 @@ describe("OpenRouterHandler", () => {
 			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: "message 1" },
@@ -481,7 +837,10 @@ describe("OpenRouterHandler", () => {
 						}),
 					]),
 				}),
-				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+				{
+					headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+					signal: expect.any(AbortSignal),
+				},
 			)
 		})
 
@@ -599,9 +958,14 @@ describe("OpenRouterHandler", () => {
 			const mockStream = asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("openrouter API Error 500: API Error")
@@ -640,9 +1004,14 @@ describe("OpenRouterHandler", () => {
 		it("captures telemetry when createMessage throws an exception", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockRejectedValue(new Error("Connection failed"))
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow()
@@ -659,13 +1028,17 @@ describe("OpenRouterHandler", () => {
 
 		it("passes SDK exceptions with status 429 to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const error = new Error("Rate limit exceeded: free-models-per-day") as any
-			error.status = 429
+			const error = Object.assign(new Error("Rate limit exceeded: free-models-per-day"), { status: 429 })
 
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("Rate limit exceeded")
@@ -684,9 +1057,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("429 Rate limit exceeded: free-models-per-day")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("429 Rate limit exceeded")
@@ -705,9 +1083,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Request failed due to rate limit")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("rate limit")
@@ -727,9 +1110,14 @@ describe("OpenRouterHandler", () => {
 			const mockStream = asyncStreamFrom([{ error: { message: "Rate limit exceeded", code: 429 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("openrouter API Error 429: Rate limit exceeded")
@@ -854,9 +1242,14 @@ describe("OpenRouterHandler", () => {
 			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			const parserScope = NativeToolCallParser.createScope()
@@ -961,11 +1354,8 @@ describe("OpenRouterHandler", () => {
 						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
 					]),
 				)
-			Object.defineProperty(OpenAI.prototype, "chat", {
-				configurable: true,
-				value: { completions: { create: mockCreate } },
-			})
 			const handler = new OpenRouterHandler(mockOptions)
+			stubCompletionsCreate(handler, mockCreate)
 
 			const idlessChunks = await collectStream(handler.createMessage("idless", []))
 			const stoppedChunks = await collectStream(handler.createMessage("stopped", []))
@@ -1033,11 +1423,8 @@ describe("OpenRouterHandler", () => {
 				{ id: "stream-b", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
 			])
 			const mockCreate = vitest.fn().mockResolvedValueOnce(firstStream()).mockResolvedValueOnce(secondStream)
-			Object.defineProperty(OpenAI.prototype, "chat", {
-				configurable: true,
-				value: { completions: { create: mockCreate } },
-			})
 			const handler = new OpenRouterHandler(mockOptions)
+			stubCompletionsCreate(handler, mockCreate)
 
 			const firstChunksPromise = collectStreamAndParseToolCalls(handler.createMessage("first", []))
 			await firstStreamPaused
@@ -1060,6 +1447,2278 @@ describe("OpenRouterHandler", () => {
 				{ type: "tool_call_delta", id: "call_openrouter_b", name: "read_file", delta: '{"path":"b' },
 			])
 		})
+
+		// The OpenRouter-shaped branch: OpenRouter can carry an error object inside the SSE stream instead
+		// of throwing. The SDK-thrown branch (openai@5.23.2 raises APIError before yielding the frame) is
+		// covered by the rejecting-create tests and by the iterator-throws test in the cancellation block.
+		it("throws an OpenRouter API error for an error frame carried inside the stream", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { content: "ok" } }] },
+					{
+						id: "1",
+						error: {
+							message: "Upstream failed",
+							code: 500,
+							metadata: { raw: '{"message":"upstream: boom"}' },
+						},
+					},
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+
+			await expect(collectStream(stream)).rejects.toThrow("openrouter API Error 500: upstream: boom")
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "upstream: boom",
+					provider: providerIdentifiers.openrouter,
+					modelId: "anthropic/claude-sonnet-4",
+					operation: "createMessage",
+				}),
+			)
+		})
+		it("rejects with AbortError when the external signal is pre-aborted", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// The constructor loads models in the background; the pre-aborted path must fail
+			// fast without starting a second discovery lookup.
+			const { getModels } = await import("../fetchers/modelCache")
+			const lookupsBefore = vitest.mocked(getModels).mock.calls.length
+
+			const controller = new AbortController()
+			controller.abort()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			await expect(
+				handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata).next(),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(vitest.mocked(getModels).mock.calls.length).toBe(lookupsBefore)
+		})
+
+		it("rejects with AbortError when the external signal aborts during deferred model discovery", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			const mockCreate = vitest.fn()
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// Model discovery is deferred: capture the resolver and settle it only at the end of
+			// the test, so the abort deterministically lands while the lookup is still pending.
+			// The barrier below (instead of a fixed sleep) synchronizes on the lookup starting.
+			let resolveModelLookup!: (models: ModelRecord) => void
+			const deferredModelLookup = new Promise<ModelRecord>((resolve) => {
+				resolveModelLookup = resolve
+			})
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return deferredModelLookup
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const nextPromise = generator.next()
+			await settlesWithin(lookupStarted, ABORT_SETTLE_MS)
+			controller.abort()
+
+			await expect(settlesWithin(nextPromise, ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// Settle the abandoned lookup so it cannot outlive the test.
+			resolveModelLookup({})
+		})
+
+		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					requestSignal = options?.signal
+					// Emulate the OpenAI SDK: the first chunk arrives, then the in-flight
+					// response body rejects once the request signal aborts.
+					return (async function* () {
+						yield { id: "1", choices: [{ delta: { content: "first" } }] }
+						await new Promise<void>((resolve) => {
+							expect(requestSignal).toBeDefined()
+							if (requestSignal!.aborted) {
+								resolve()
+							} else {
+								requestSignal!.addEventListener("abort", () => resolve(), { once: true })
+							}
+						})
+						const abortError = new Error("The user aborted a request")
+						abortError.name = "AbortError"
+						throw abortError
+					})()
+				})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const chunks: unknown[] = []
+			const iteration = (async () => {
+				for await (const chunk of generator) {
+					chunks.push(chunk)
+					if (chunk.type === "text") {
+						// Abort while the stream is still in flight.
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(settlesWithin(iteration, ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(chunks).toContainEqual({ type: "text", text: "first" })
+		})
+		it("cancels the in-flight stream when the consumer abandons the generator", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			// Emulate the OpenAI SDK: the first chunk arrives, then the response body
+			// stalls until the request signal aborts — no further chunk arrives on its own.
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					requestSignal = options?.signal
+					return (async function* () {
+						yield { id: "1", choices: [{ delta: { content: "first" } }] }
+						await new Promise<void>((resolve) => {
+							expect(requestSignal).toBeDefined()
+							if (requestSignal!.aborted) {
+								resolve()
+							} else {
+								requestSignal!.addEventListener("abort", () => resolve(), { once: true })
+							}
+						})
+						yield { id: "2", choices: [{ delta: { content: "second" } }] }
+					})()
+				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }])
+
+			const first = await settlesWithin(generator.next(), ABORT_SETTLE_MS)
+			expect(first.value).toEqual({ type: "text", text: "first" })
+			expect(requestSignal?.aborted).toBe(false)
+
+			// Abandon the generator mid-stream: the finally block must abort the per-request
+			// controller so the in-flight stream is cancelled instead of lingering until
+			// the client-level timeout.
+			await settlesWithin(generator.return(undefined), ABORT_SETTLE_MS)
+			expect(requestSignal?.aborted).toBe(true)
+		})
+		it("does not emit buffered chunks after a mid-stream abort (iterator keeps delivering)", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Simulate openai@5.23.2 delivering a buffered chunk after the abort has already
+			// fired, then ending the iterator normally (no throw).
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					requestSignal = options?.signal
+					return (async function* () {
+						yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+						// Wait for the abort instead of polling: the buffered chunk is delivered
+						// once the request signal aborts.
+						await new Promise<void>((resolve) => {
+							expect(requestSignal).toBeDefined()
+							if (requestSignal!.aborted) {
+								resolve()
+							} else {
+								requestSignal!.addEventListener("abort", () => resolve(), { once: true })
+							}
+						})
+						yield { id: "2", choices: [{ delta: { content: "after-abort" } }] }
+					})()
+				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value).toEqual({ type: "text", text: "partial" })
+			// Abort mid-stream, after the first chunk has been yielded.
+			controller.abort()
+
+			// The buffered second chunk must not be emitted, and the generator must reject
+			// with the provider AbortError.
+			await expect(settlesWithin(generator.next(), ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+		// Each row parks the consumer at the yield that immediately precedes one of the loop's abort
+		// guards, so the guard itself is what has to reject: without it the next() below resolves with
+		// the extra event and the cancellation only surfaces a step later.
+		const guardFixtureRows: GuardFixtureRow[] = [
+			{
+				stopBefore: "the next reasoning_details fragment",
+				consume: 1,
+				last: { type: "reasoning", text: "A" },
+				chunks: [
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{ index: 0, type: "reasoning.text", text: "A" },
+										{ index: 0, type: "reasoning.text", text: "B" },
+									],
+								},
+							},
+						],
+					},
+				],
+			},
+			{
+				stopBefore: "a tool_call_partial chunk",
+				consume: 1,
+				last: { type: "reasoning", text: "A" },
+				chunks: [
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [{ index: 0, type: "reasoning.text", text: "A" }],
+									tool_calls: [{ index: 0, id: "call_1", function: { name: "f", arguments: "{}" } }],
+								},
+							},
+						],
+					},
+				],
+			},
+			{
+				stopBefore: "the next chunk from the SDK",
+				consume: 1,
+				last: { type: "text", text: "A" },
+				chunks: [
+					{ id: "1", choices: [{ delta: { content: "A" } }] },
+					{ id: "2", choices: [{ delta: { content: "B" } }] },
+				],
+			},
+			{
+				stopBefore: "the tool_call_end of a tool_calls finish",
+				consume: 2,
+				last: { type: "text", text: "A" },
+				chunks: [
+					{ id: "1", choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1" }] } }] },
+					{ id: "2", choices: [{ delta: { content: "A" }, finish_reason: "tool_calls" }] },
+				],
+			},
+		]
+		it.each(guardFixtureRows)(
+			"rejects instead of emitting $stopBefore when the caller aborts during the previous yield",
+			async ({ consume, last, chunks }) => {
+				const handler = new OpenRouterHandler(mockOptions)
+				stubCompletionsCreate(handler, vitest.fn().mockResolvedValue(asyncStreamFrom(chunks)))
+				const controller = new AbortController()
+				const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+				const iterator = handler
+					.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+					[Symbol.asyncIterator]()
+
+				let pending: unknown
+				for (let index = 0; index < consume; index++) {
+					pending = (await iterator.next()).value
+				}
+				expect(pending).toEqual(last)
+
+				controller.abort()
+				await expect(iterator.next()).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The openrouter request was aborted",
+				})
+			},
+		)
+
+		it("reports the provider AbortError rather than an API error for an error frame buffered behind the abort", async () => {
+			// openai@5.23.2 can still deliver a buffered SSE frame after the abort fired, and
+			// OpenRouter signals failures as an error object inside the stream. The per-chunk guard
+			// has to reject that frame as a cancellation before the OpenRouter error mapping runs.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { content: "partial" } }] },
+					{
+						id: "2",
+						error: {
+							message: "Upstream failed",
+							code: 500,
+							metadata: { raw: '{"message":"upstream: boom"}' },
+						},
+					},
+				]),
+			)
+			stubCompletionsCreate(handler, mockCreate)
+
+			const generator = handler.createMessage(
+				"system",
+				[{ role: "user" as const, content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const first = await generator.next()
+			expect(first.value).toEqual({ type: "text", text: "partial" })
+
+			controller.abort()
+			await expect(settlesWithin(generator.next(), ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			// The cancellation has to win before the OpenRouter error mapping runs: reporting the buffered
+			// frame as an API failure would put a user-initiated abort into exception telemetry.
+			expect(mockCaptureException).not.toHaveBeenCalled()
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
+		it("rejects with the provider AbortError when the SDK iterator ends quietly after an abort", async () => {
+			// The SDK's stream iterator swallows a mid-stream cancellation and returns normally, so a
+			// request can end with no further chunk and no error. Only the post-loop check stands
+			// between that quiet end and a silently completed request with partial output.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			stubCompletionsCreate(
+				handler,
+				vitest.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{ id: "1", choices: [{ delta: { content: "partial" } }] },
+						{
+							id: "2",
+							choices: [{ delta: { content: "tail" }, finish_reason: "stop" }],
+							usage: { prompt_tokens: 3, completion_tokens: 2 },
+						},
+					]),
+				),
+			)
+
+			const generator = handler.createMessage(
+				"system",
+				[{ role: "user" as const, content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			expect((await generator.next()).value).toEqual({ type: "text", text: "partial" })
+			expect((await generator.next()).value).toEqual({ type: "text", text: "tail" })
+
+			controller.abort()
+			await expect(settlesWithin(generator.next(), ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+
+		it("settles the create await as AbortError while the SDK is parked in a retry backoff", async () => {
+			// openai@5.23.2 inspects the request signal before the first attempt and only after a
+			// retry sleep has already ended, so a create() that is asleep never settles: the race in
+			// settleOnAbort is what ends the wait on a cancellation or timeout.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			let createStarted: () => void
+			const createAwaited = new Promise<void>((resolve) => {
+				createStarted = resolve
+			})
+			stubCompletionsCreate(
+				handler,
+				vitest.fn().mockImplementation(() => {
+					createStarted()
+					return new Promise<never>(() => {})
+				}),
+			)
+
+			const generator = handler.createMessage(
+				"system",
+				[{ role: "user" as const, content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const next = settlesWithin(generator.next(), ABORT_SETTLE_MS)
+			// Only abort once the create call is in flight: model discovery has its own abort race, and
+			// aborting earlier would settle the generator there instead of at the create await. The readiness
+			// wait is bounded by the same helper that bounds the generator step, so a discovery that
+			// rejects fails this line instead of hanging it until the runner times out.
+			await settlesWithin(createAwaited, ABORT_SETTLE_MS)
+			controller.abort()
+
+			await expect(next).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+
+		it("normalizes the SDK's own abort error into the provider AbortError instead of a completion error", async () => {
+			// The SDK reports a cancellation as APIUserAbortError("Request was aborted.") even when
+			// the merged request signal never fired, and that shape does not satisfy the task abort
+			// contract, so the create catch normalizes it and skips exception telemetry.
+			const handler = new OpenRouterHandler(mockOptions)
+			const sdkAbort = Object.assign(new Error("Request was aborted."), {
+				name: "APIUserAbortError",
+				status: 499,
+			})
+			stubCompletionsCreate(handler, vitest.fn().mockRejectedValue(sdkAbort))
+
+			await expect(
+				collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }])),
+			).rejects.toMatchObject({ name: "AbortError", message: "The openrouter request was aborted" })
+			expect(mockCaptureException).not.toHaveBeenCalled()
+		})
+
+		it("propagates the error the SDK throws while iterating the stream", async () => {
+			// A provider failure that the SDK raises from inside the SSE iterator (rather than as an
+			// error frame) reaches the iteration catch, which rethrows it unchanged and reports it.
+			const handler = new OpenRouterHandler(mockOptions)
+			const iteratorError = Object.assign(new Error("upstream exploded"), { status: 500 })
+			const partialThenThrow = async function* () {
+				yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+				throw iteratorError
+			}
+			stubCompletionsCreate(handler, vitest.fn().mockResolvedValue(partialThenThrow()))
+
+			await expect(
+				collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }])),
+			).rejects.toBe(iteratorError)
+			expect(mockCaptureException).not.toHaveBeenCalled()
+		})
+
+		it("normalizes an abort the SDK reports during iteration when the request signal never fired", async () => {
+			// Same iterator, abort-shaped failure: without the normalization this raw SDK error (name
+			// "Error", message "Request was aborted.") would reach the task loop unnormalized.
+			const handler = new OpenRouterHandler(mockOptions)
+			stubCompletionsCreate(
+				handler,
+				vitest.fn().mockResolvedValue(
+					(async function* () {
+						yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+						throw new Error("Request was aborted.")
+					})(),
+				),
+			)
+
+			await expect(
+				collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }])),
+			).rejects.toMatchObject({ name: "AbortError", message: "The openrouter request was aborted" })
+		})
+
+		it("registers the external abort listener with { once: true } and removes the exact reference on completion", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const controller = new AbortController()
+			const addSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			const stream = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
+			await collectStream(stream)
+
+			// The listener must be registered once with self-removal, and the exact
+			// registered reference must be removed once the request completes.
+			const registeredListener = addSpy.mock.calls[0]?.[1]
+			expect(registeredListener).toBeTypeOf("function")
+			expect(addSpy).toHaveBeenCalledWith("abort", registeredListener, { once: true })
+			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		})
+
+		it("resets the reasoning_details accumulator between requests on the same handler", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-pro",
+				}),
+			)
+			const mockCreate = vitest.fn()
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// Request 1: a Gemini stream with reasoning_details populates the handler's
+			// accumulator when the stream completes.
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{ delta: { reasoning_details: [{ index: 0, type: "reasoning.text", text: "thinking" }] } },
+						],
+					},
+					{ id: "2", choices: [{ delta: { content: "answer" } }] },
+				]),
+			)
+			await collectStream(handler.createMessage("test", [{ role: "user" as const, content: "hi" }]))
+			expect(handler.getReasoningDetails()?.length ?? 0).toBeGreaterThan(0)
+
+			// Request 2 on the same handler must start from an empty accumulator so the
+			// previous request's details cannot leak into the next one.
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			await collectStream(handler.createMessage("test", [{ role: "user" as const, content: "hi" }]))
+			expect(handler.getReasoningDetails()).toBeUndefined()
+		})
+
+		it("stops yielding a chunk's remaining events when the consumer aborts between them", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [{ index: 0, type: "reasoning.text", text: "thinking" }],
+									content: "answer",
+								},
+							},
+						],
+					},
+				]),
+			)
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const controller = new AbortController()
+			const iterator = handler
+				.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "task",
+					abortSignal: controller.signal,
+				})
+				[Symbol.asyncIterator]()
+
+			// One SDK chunk yields reasoning BEFORE text: abort while the generator is paused
+			// between the two yields, so the text must not be emitted.
+			expect((await iterator.next()).value).toEqual({ type: "reasoning", text: "thinking" })
+			controller.abort()
+			await expect(iterator.next()).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("skips non-string reasoning detail fragments instead of coercing them", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{ index: 0, type: "reasoning.text", text: { not: "a string" } },
+										{ index: 1, type: "reasoning.summary", summary: { not: "a string" } },
+										{ index: 2, type: "reasoning.encrypted", data: { not: "a string" } },
+										{ index: 0, type: "reasoning.text", text: "ok" },
+									],
+								},
+							},
+							{ id: "2", choices: [{ delta: { content: "answer" } }] },
+						],
+					},
+				]),
+			)
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+			const details = handler.getReasoningDetails()
+			const text = details?.find((d) => d.type === "reasoning.text")?.text
+			// The object fragment is skipped and the later string accumulates from empty.
+			expect(text).toBe("ok")
+			expect(text).not.toContain("[object Object]")
+			// The same rule guards summary and encrypted: a stored object would be replayed to the provider
+			// as a summary block or as a non-string encrypted payload.
+			expect(details?.find((detail) => detail.type === "reasoning.summary")).toBeUndefined()
+			expect(details?.find((detail) => detail.type === "reasoning.encrypted")).toBeUndefined()
+		})
+
+		it.each([
+			{ type: "reasoning.text", field: "text", good: "ok", emitsReasoning: true },
+			{ type: "reasoning.summary", field: "summary", good: "s", emitsReasoning: true },
+			{ type: "reasoning.encrypted", field: "data", good: "enc", emitsReasoning: false },
+		])(
+			"keeps the valid fragment when a non-string $type fragment arrives after it at the same index",
+			async ({ type, field, good, emitsReasoning }) => {
+				const handler = new OpenRouterHandler(mockOptions)
+				const mockCreate = vitest.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
+							id: "1",
+							choices: [
+								{ delta: { reasoning_details: [{ index: 0, type, [field]: good }] } },
+								{ delta: { reasoning_details: [{ index: 0, type, [field]: { not: "a string" } }] } },
+							],
+						},
+					]),
+				)
+				// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+				const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+				Object.defineProperty(client, "chat", {
+					value: { completions: { create: mockCreate } },
+					configurable: true,
+					writable: true,
+				})
+
+				const chunks = await collectStream(
+					handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+				)
+				// The valid fragment is the only displayable one; the non-string fragment yields nothing.
+				expect(chunks).toEqual(emitsReasoning ? [{ type: "reasoning", text: good }] : [])
+
+				const details = handler.getReasoningDetails()
+				expect(details).toHaveLength(1)
+				expect(details?.[0]).toMatchObject({ type, index: 0, [field]: good })
+				expect(JSON.stringify(details)).not.toContain("[object Object]")
+			},
+		)
+
+		it("excludes reasoning for Gemini 2.5 Pro models by default", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-pro-preview",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ reasoning: { exclude: true } }),
+				expect.any(Object),
+			)
+		})
+
+		// The default-record branch: the mocked catalog has no google/gemini-2.5-pro entry, so getModel()
+		// serves openRouterDefaultModelInfo and the exclusion comes from that fallback record. The two
+		// cases below are the catalog-backed ones - the required budget and a configured budget.
+		it("excludes reasoning for Gemini 2.5 Pro when the catalog has no entry for it", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-pro",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ reasoning: { exclude: true } }),
+				expect.any(Object),
+			)
+		})
+
+		it("does not inject reasoning exclusion for non-Gemini models without configured reasoning", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { reasoning?: unknown }
+			expect(params.reasoning).toBeUndefined()
+		})
+
+		it("keeps user-configured reasoning for Gemini 2.5 Pro models instead of overriding it", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-pro",
+					enableReasoningEffort: true,
+					modelMaxThinkingTokens: 1024,
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// The constructor already consumed the default model-cache mock; serve a Gemini
+			// entry that advertises reasoning-budget support to fetchModel so getModelParams
+			// resolves a user reasoning budget for this request.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"google/gemini-2.5-pro": {
+					maxTokens: 65536,
+					contextWindow: 1048576,
+					supportsPromptCache: false,
+					supportsReasoningBudget: true,
+				},
+			}))
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { reasoning?: { max_tokens?: number; exclude?: boolean } }
+			// 1024 is the user's modelMaxThinkingTokens, not the 128 Gemini 2.5 Pro default, so this pins
+			// the configured value reaching the request instead of a default that happens to fit.
+			expect(params.reasoning).toEqual({ max_tokens: 1024 })
+		})
+
+		it("resolves the required Gemini 2.5 Pro thinking budget from a catalog entry", async () => {
+			// The OpenRouter fetcher marks google/gemini-2.5-pro required-reasoning-budget
+			// (src/api/providers/fetchers/openrouter.ts:304-306 over
+			// OPEN_ROUTER_REQUIRED_REASONING_BUDGET_MODELS), so a published entry already resolves a
+			// thinking budget by the time createMessage checks the Gemini default: the exclusion is a
+			// catalog-miss fallback, not this model's normal shape.
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "google/gemini-2.5-pro" }),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			stubCompletionsCreate(handler, mockCreate)
+
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"google/gemini-2.5-pro": {
+					maxTokens: 65536,
+					contextWindow: 1048576,
+					supportsPromptCache: false,
+					requiredReasoningBudget: true,
+				},
+			}))
+
+			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+
+			const params = mockCreate.mock.calls[0][0] as { reasoning?: { max_tokens?: number; exclude?: boolean } }
+			expect(params.reasoning).toEqual({ max_tokens: 128 })
+		})
+
+		it("passes an assistant turn without tool calls through the Gemini injection untouched", async () => {
+			// The fake encrypted block exists only to satisfy Gemini tool-call validation, so a plain
+			// assistant turn must reach the request exactly as converted: injecting unconditionally would
+			// read the first element of a tool_calls array this message does not have.
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "google/gemini-2.5-pro" }),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			stubCompletionsCreate(handler, mockCreate)
+
+			await collectStream(
+				handler.createMessage("system", [
+					{ role: "user" as const, content: "question" },
+					{ role: "assistant" as const, content: [{ type: "text" as const, text: "plain reply" }] },
+				]),
+			)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: { role: string; content: unknown; tool_calls?: unknown; reasoning_details?: unknown }[]
+			}
+			const assistant = params.messages.find((message) => message.role === "assistant")
+			expect(assistant?.content).toBe("plain reply")
+			expect(assistant && "tool_calls" in assistant).toBe(false)
+			expect(assistant && "reasoning_details" in assistant).toBe(false)
+		})
+
+		it("replays a Gemini assistant tool turn with the details it kept plus the signature placeholder", async () => {
+			// The placeholder entry exists only to get past Gemini tool-call validation on a turn whose
+			// kept details carry no encrypted block, and it has to be appended to those details instead of
+			// standing in for them.
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "google/gemini-2.5-pro" }),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			stubCompletionsCreate(handler, mockCreate)
+
+			const assistantTurn: Anthropic.Messages.MessageParam & {
+				reasoning_details: { id: string; type: string; text: string; index: number }[]
+			} = {
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call_1", name: "lookup", input: {} }],
+				reasoning_details: [{ id: "call_1", type: "reasoning.text", text: "thinking", index: 0 }],
+			}
+
+			await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "question" }, assistantTurn]),
+			)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: {
+					role: string
+					tool_calls?: { id: string }[]
+					reasoning_details?: { type: string; id?: string; data?: string; text?: string }[]
+				}[]
+			}
+			const assistant = params.messages.find((message) => message.role === "assistant")
+			expect(assistant?.tool_calls?.map((toolCall) => toolCall.id)).toEqual(["call_1"])
+			expect(assistant?.reasoning_details).toEqual([
+				// The sanitizer consolidates the kept detail, which stamps the provider format it came
+				// from; only the placeholder entry is added by the injection below it.
+				{ type: "reasoning.text", text: "thinking", id: "call_1", index: 0, format: "unknown" },
+				{
+					type: "reasoning.encrypted",
+					data: "skip_thought_signature_validator",
+					id: "call_1",
+					format: "google-gemini-v1",
+					index: 0,
+				},
+			])
+		})
+
+		it.each([
+			{ modelId: "anthropic/claude-sonnet-4", maxTokens: 8192, sent: 8192 },
+			{ modelId: "openai/gpt-4o-mini", maxTokens: undefined, sent: undefined },
+		])(
+			"sends max_tokens only when the resolved model has a positive output budget ($modelId)",
+			async ({ modelId, maxTokens, sent }) => {
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({ openRouterApiKey: "test-key", openRouterModelId: modelId }),
+				)
+				const mockCreate = vitest
+					.fn()
+					.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+				stubCompletionsCreate(handler, mockCreate)
+				const { getModels } = await import("../fetchers/modelCache")
+				vitest.mocked(getModels).mockResolvedValueOnce({
+					[modelId]: {
+						contextWindow: 200_000,
+						supportsPromptCache: true,
+						...(maxTokens === undefined ? {} : { maxTokens }),
+					},
+				})
+
+				await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+
+				const params = mockCreate.mock.calls[0][0] as { max_tokens?: number }
+				// A model without an output budget must omit the key rather than send max_tokens as
+				// undefined, which OpenRouter reads as its own default.
+				expect("max_tokens" in params).toBe(sent !== undefined)
+				expect(params.max_tokens).toBe(sent)
+			},
+		)
+
+		it("omits the anthropic beta header for non-Anthropic models", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { messages: { role: string; content: unknown }[] }
+			expect(params.messages[0]).toEqual({ role: "system", content: "system" })
+
+			const options = mockCreate.mock.calls[0][1] as { headers?: Record<string, string>; signal?: AbortSignal }
+			expect(options).not.toHaveProperty("headers")
+			expect(options.signal).toBeInstanceOf(AbortSignal)
+		})
+
+		it("uses user role for the system prompt with DeepSeek R1 models", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "deepseek/deepseek-r1",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system prompt", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { messages: { role: string; content: unknown }[] }
+			expect(params.messages[0].role).toBe("user")
+			expect(params.messages.map((m) => m.role)).not.toContain("system")
+		})
+
+		it("uses user role for the system prompt with Perplexity Sonar Reasoning", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "perplexity/sonar-reasoning",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system prompt", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { messages: { role: string; content: unknown }[] }
+			expect(params.messages[0].role).toBe("user")
+			expect(params.messages.map((m) => m.role)).not.toContain("system")
+		})
+
+		it("pins provider order and only for a specific openRouterSpecificProvider", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: providerIdentifiers.anthropic,
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				provider?: { order?: string[]; only?: string[]; allow_fallbacks?: boolean }
+			}
+			expect(params.provider).toEqual({
+				order: [providerIdentifiers.anthropic],
+				only: [providerIdentifiers.anthropic],
+				allow_fallbacks: false,
+			})
+		})
+
+		it("omits the provider option when openRouterSpecificProvider is [default]", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: "[default]",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { provider?: unknown }
+			expect(params).not.toHaveProperty("provider")
+		})
+
+		it("omits the provider option when openRouterSpecificProvider is unset", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { provider?: unknown }
+			expect(params).not.toHaveProperty("provider")
+		})
+
+		it("injects a fake encrypted reasoning block for Gemini tool calls without encrypted reasoning", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// reasoning_details is an OpenRouter extension field round-tripped on assistant
+			// messages; the Anthropic SDK types do not include it, hence the structural cast.
+			const assistantMessage = {
+				role: "assistant" as const,
+				content: [{ type: "tool_use" as const, id: "toolu_01", name: "get_weather", input: { city: "SF" } }],
+				reasoning_details: [{ type: "reasoning.text", id: "toolu_01", text: "thinking", index: 0 }],
+			}
+			const stream = handler.createMessage("system", [
+				assistantMessage as unknown as Anthropic.Messages.MessageParam,
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: {
+					role: string
+					tool_calls?: { id: string }[]
+					reasoning_details?: { type: string; id: string; data: string }[]
+				}[]
+			}
+			const assistant = params.messages.find((m) => m.role === "assistant")
+			expect(assistant?.tool_calls).toHaveLength(1)
+			const encrypted = assistant?.reasoning_details?.find((d) => d.type === "reasoning.encrypted")
+			expect(encrypted).toMatchObject({
+				id: "toolu_01",
+				data: "skip_thought_signature_validator",
+				format: "google-gemini-v1",
+				index: 0,
+			})
+		})
+
+		it("keeps the matching reasoning detail when sanitizing Gemini tool call messages", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const assistantMessage = {
+				role: "assistant" as const,
+				content: [{ type: "tool_use" as const, id: "toolu_01", name: "get_weather", input: { city: "SF" } }],
+				reasoning_details: [{ type: "reasoning.text", id: "toolu_01", text: "thinking", index: 0 }],
+			}
+			const stream = handler.createMessage("system", [
+				assistantMessage as unknown as Anthropic.Messages.MessageParam,
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: {
+					role: string
+					tool_calls?: { id: string }[]
+					reasoning_details?: { type: string; id?: string; text?: string }[]
+				}[]
+			}
+			const assistant = params.messages.find((m) => m.role === "assistant")
+			expect(assistant?.tool_calls).toHaveLength(1)
+			const textDetail = assistant?.reasoning_details?.find((d) => d.type === "reasoning.text")
+			expect(textDetail).toMatchObject({ id: "toolu_01", text: "thinking" })
+			const encrypted = assistant?.reasoning_details?.find((d) => d.type === "reasoning.encrypted")
+			expect(encrypted).toMatchObject({ id: "toolu_01" })
+		})
+
+		it("drops tool calls without reasoning details but keeps the content for Gemini messages", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const assistantMessage = {
+				role: "assistant" as const,
+				content: [
+					{ type: "text" as const, text: "kept content" },
+					{ type: "tool_use" as const, id: "toolu_02", name: "get_weather", input: { city: "NY" } },
+				],
+			}
+			const stream = handler.createMessage("system", [
+				assistantMessage as unknown as Anthropic.Messages.MessageParam,
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: { role: string; content?: unknown; tool_calls?: unknown }[]
+			}
+			const assistant = params.messages.find((m) => m.role === "assistant")
+			expect(assistant).toBeDefined()
+			expect(assistant?.content).toBe("kept content")
+			expect(assistant).not.toHaveProperty("tool_calls")
+		})
+
+		it("drops tool calls without a matching reasoning detail id for Gemini messages", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const assistantMessage = {
+				role: "assistant" as const,
+				content: [
+					{ type: "tool_use" as const, id: "toolu_03", name: "get_weather", input: { city: "SF" } },
+					{ type: "tool_use" as const, id: "toolu_04", name: "search", input: { q: "x" } },
+				],
+				reasoning_details: [{ type: "reasoning.text", id: "toolu_03", text: "thinking", index: 0 }],
+			}
+			const stream = handler.createMessage("system", [
+				assistantMessage as unknown as Anthropic.Messages.MessageParam,
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: { role: string; tool_calls?: { id: string }[] }[]
+			}
+			const assistant = params.messages.find((m) => m.role === "assistant")
+			expect(assistant?.tool_calls).toHaveLength(1)
+			expect(assistant?.tool_calls?.[0].id).toBe("toolu_03")
+		})
+
+		it("accumulates and yields reasoning_details from streamed chunks", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning: "top-level thinking" } }] },
+					{
+						id: "2",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0, text: "thinking " }] } },
+						],
+					},
+					{
+						id: "3",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{
+											type: "reasoning.text",
+											index: 0,
+											text: "more",
+											id: "r1",
+											format: "google-gemini-v1",
+											signature: "sig",
+										},
+									],
+								},
+							},
+						],
+					},
+					{
+						id: "4",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.summary", index: 1, summary: "sum" }] } },
+						],
+					},
+					{ id: "5", choices: [{ delta: { content: "hello" } }] },
+					{
+						id: "6",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [{ type: "reasoning.summary", index: 1, summary: " more" }],
+								},
+							},
+						],
+					},
+					{
+						id: "7",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.encrypted", index: 2, data: "enc-" }] } },
+						],
+					},
+					{
+						id: "8",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [{ type: "reasoning.encrypted", index: 2, data: "rypted" }],
+								},
+							},
+						],
+					},
+				]),
+			)
+			stubCompletionsCreate(handler, mockCreate)
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+
+			// The fragments interleave reasoning_details, top-level reasoning, and content, and every one of
+			// them must reach the consumer in arrival order, so the whole array is asserted.
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "top-level thinking" },
+				{ type: "reasoning", text: "thinking " },
+				{ type: "reasoning", text: "more" },
+				{ type: "reasoning", text: "sum" },
+				{ type: "text", text: "hello" },
+				{ type: "reasoning", text: " more" },
+			])
+
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(3)
+			expect(details?.find((d) => d.type === "reasoning.summary")?.summary).toBe("sum more")
+			expect(details?.find((d) => d.type === "reasoning.encrypted")?.data).toBe("enc-rypted")
+		})
+
+		it("ignores chunks with empty choices", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [] },
+					{ id: "1", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+		})
+
+		it("keeps id, format and signature from the first reasoning chunk on updates", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{
+											type: "reasoning.text",
+											index: 0,
+											id: "det-1",
+											format: "google-gemini-v1",
+											signature: "sig-1",
+										},
+									],
+								},
+							},
+						],
+					},
+					{
+						id: "1",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0, text: "more" }] } },
+						],
+					},
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(1)
+			expect(details?.[0]).toMatchObject({
+				type: "reasoning.text",
+				text: "more",
+				id: "det-1",
+				format: "google-gemini-v1",
+				signature: "sig-1",
+				index: 0,
+			})
+		})
+
+		it("initializes empty accumulator entries without undefined prefixes", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0 }] } }] },
+					{
+						id: "1",
+						choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0, text: "t0" }] } }],
+					},
+					{ id: "1", choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", index: 1 }] } }] },
+					{
+						id: "1",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.text", index: 1, summary: "s1" }] } },
+						],
+					},
+					{ id: "1", choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", index: 2 }] } }] },
+					{
+						id: "1",
+						choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", index: 2, data: "d2" }] } }],
+					},
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(3)
+			expect(details?.find((d) => d.index === 0)?.text).toBe("t0")
+			expect(details?.find((d) => d.index === 1)?.summary).toBe("s1")
+			expect(details?.find((d) => d.index === 2)?.data).toBe("d2")
+		})
+
+		it("groups reasoning details without an explicit index under index 0", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", text: "a" }] } }] },
+					{
+						id: "1",
+						choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", text: "b", index: 0 }] } }],
+					},
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(1)
+			expect(details?.[0]?.text).toBe("ab")
+			expect(details?.[0]?.index).toBe(0)
+		})
+
+		it("accumulates reasoning text and summary with the same index separately", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0, text: "a" }] } }],
+					},
+					{
+						id: "1",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.summary", index: 0, summary: "s" }] } },
+						],
+					},
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			// Both fragments stream live in arrival order (the summary is yielded from detail.summary),
+			// so a dropped summary is visible here rather than hidden by toContainEqual on one chunk.
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "a" },
+				{ type: "reasoning", text: "s" },
+			])
+
+			const details = handler.getReasoningDetails()
+			// consolidateReasoningDetails emits a summary entry only when no text arrived at the same
+			// index (src/api/transform/openai-format.ts:116), so the consolidated store keeps the text
+			// and drops the summary; asserting the drop is what makes this fail when that predicate
+			// narrows. The companion test below covers the no-text branch. The entry's type label follows the
+			// last fragment seen for the index (openai-format.ts:93-99, 105); a text payload carrying a
+			// summary label is not a shape the request replays, so it is left unasserted here.
+			expect(details).toHaveLength(1)
+			expect(details?.[0]?.text).toBe("a")
+			expect(details?.[0]?.index).toBe(0)
+			expect(details?.[0]?.summary).toBeUndefined()
+		})
+
+		it("keeps a reasoning summary entry when no text arrives at the same index", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: { reasoning_details: [{ type: "reasoning.summary", index: 0, summary: "s" }] },
+							},
+						],
+					},
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toEqual([{ type: "reasoning", text: "s" }])
+
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(1)
+			expect(details?.[0]).toMatchObject({ type: "reasoning.summary", index: 0, summary: "s" })
+		})
+
+		it("does not yield displayable reasoning for encrypted-only details", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.encrypted", index: 0, data: "enc" }] } },
+						],
+					},
+					{ id: "1", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			expect(chunks).not.toContainEqual(expect.objectContaining({ type: "reasoning" }))
+
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(1)
+			expect(details?.[0]?.data).toBe("enc")
+		})
+
+		it("ignores non-array reasoning_details values", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning_details: "not-an-array" } }] },
+					{ id: "1", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			expect(handler.getReasoningDetails()).toBeUndefined()
+		})
+
+		it("ignores object reasoning_details values", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning_details: { bogus: true } } }] },
+					{ id: "1", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			expect(handler.getReasoningDetails()).toBeUndefined()
+		})
+
+		it("rejects with AbortError when the external signal aborts during request creation", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Deterministic synchronization (mirrors the Requesty test): the mock notifies the
+			// test when the request actually starts, so the abort lands after create() began
+			// instead of racing a fixed sleep that a slow runner can lose.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					notifyCreateStarted()
+					// Emulate the OpenAI SDK: the pending request rejects when the signal aborts.
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const nextPromise = generator.next()
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			nextPromise.catch(() => {})
+			// Abort only once create() has actually started, bounded so that a create() which
+			// never starts fails here instead of hanging until the runner times out.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
+			controller.abort()
+
+			await expect(nextPromise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+
+		it("normalizes Mistral tool call ids in tool result messages", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "Mistral/mixtral-large",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system", [
+				{
+					role: "user" as const,
+					content: [
+						{ type: "text" as const, text: "hi" },
+						{ type: "tool_result" as const, tool_use_id: "toolu_123456789", content: "tool result ok" },
+					],
+				},
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: { role: string; tool_call_id?: string; content: unknown }[]
+			}
+			const toolMessage = params.messages.find((m) => m.role === "tool")
+			expect(toolMessage).toMatchObject({ role: "tool", tool_call_id: "toolu1234", content: "tool result ok" })
+		})
+
+		it("uses user role for the system prompt with suffixed DeepSeek R1 model ids", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "deepseek/deepseek-r1-0528",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("system prompt", [
+				{ role: "assistant" as const, content: "earlier reply" },
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { messages: { role: string; content: unknown }[] }
+			expect(params.messages[0]).toMatchObject({ role: "user", content: "system prompt" })
+			expect(params.messages[1]).toMatchObject({ role: "assistant", content: "earlier reply" })
+			expect(params.messages.some((m) => m.role === "system")).toBe(false)
+		})
+
+		it("adds gemini cache breakpoints and the default max tokens for google/gemini models", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const stream = handler.createMessage("sys-k1", [{ role: "user" as const, content: "hello" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: { role: string; content: unknown }[]
+				max_tokens?: number
+			}
+			expect(params.messages[0]).toEqual({
+				role: "system",
+				content: [{ type: "text", text: "sys-k1", cache_control: { type: "ephemeral" } }],
+			})
+			expect(params.messages[1]).toEqual({ role: "user", content: [{ type: "text", text: "hello" }] })
+			expect(params.max_tokens).toBe(8192)
+		})
+
+		it("skips gemini sanitization for non-google gemini model ids", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "openai/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// No reasoning_details at all: gemini sanitization would drop this tool call, so a
+			// surviving tool call proves the sanitization path was skipped.
+			const assistantMessage = {
+				role: "assistant" as const,
+				content: [{ type: "tool_use" as const, id: "toolu_k2", name: "lookup", input: {} }],
+			}
+			const stream = handler.createMessage("system", [
+				assistantMessage as unknown as Anthropic.Messages.MessageParam,
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: { role: string; tool_calls?: unknown[]; reasoning_details?: unknown[] }[]
+			}
+			const assistant = params.messages.find((m) => m.role === "assistant")
+			expect(assistant?.tool_calls).toHaveLength(1)
+			expect(assistant).not.toHaveProperty("reasoning_details")
+		})
+
+		it("does not inject fake encrypted reasoning when the assistant already carries encrypted details", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// The first assistant mixes a text detail with an encrypted one; the second carries
+			// only encrypted details so the every()/==/-!== variants each diverge somewhere.
+			const assistantOne = {
+				role: "assistant" as const,
+				content: [
+					{ type: "tool_use" as const, id: "toolu_05", name: "lookup_a", input: {} },
+					{ type: "tool_use" as const, id: "toolu_06", name: "lookup_b", input: {} },
+				],
+				reasoning_details: [
+					{ type: "reasoning.text", id: "toolu_05", text: "t", index: 0 },
+					{ type: "reasoning.encrypted", id: "toolu_06", data: "orig-enc", index: 1 },
+				],
+			}
+			const assistantTwo = {
+				role: "assistant" as const,
+				content: [
+					{ type: "tool_use" as const, id: "toolu_07", name: "lookup_c", input: {} },
+					{ type: "tool_use" as const, id: "toolu_08", name: "lookup_d", input: {} },
+				],
+				reasoning_details: [
+					{ type: "reasoning.encrypted", id: "toolu_07", data: "enc-7", index: 0 },
+					{ type: "reasoning.encrypted", id: "toolu_08", data: "enc-8", index: 1 },
+				],
+			}
+			const stream = handler.createMessage("system", [
+				assistantOne as unknown as Anthropic.Messages.MessageParam,
+				assistantTwo as unknown as Anthropic.Messages.MessageParam,
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: {
+					role: string
+					tool_calls?: { id: string }[]
+					reasoning_details?: { type: string; data?: string }[]
+				}[]
+			}
+			const assistants = params.messages.filter((m) => m.role === "assistant")
+			expect(assistants).toHaveLength(2)
+			expect(assistants[0].tool_calls).toHaveLength(2)
+			const firstEncrypted =
+				assistants[0].reasoning_details?.filter((d) => d.type === "reasoning.encrypted") ?? []
+			expect(firstEncrypted).toHaveLength(1)
+			expect(firstEncrypted[0]).toMatchObject({ data: "orig-enc" })
+			expect(assistants[1].tool_calls).toHaveLength(2)
+			const secondEncrypted =
+				assistants[1].reasoning_details?.filter((d) => d.type === "reasoning.encrypted") ?? []
+			expect(secondEncrypted).toHaveLength(2)
+		})
+
+		it("keeps the last usage chunk when later chunks carry no usage", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [],
+						usage: {
+							prompt_tokens: 10,
+							completion_tokens: 5,
+							// BYOK attribution is what makes the upstream inference cost join the total;
+							// without it the rule adds nothing, so the fixture has to state it.
+							is_byok: true,
+							cost: 2,
+							cost_details: { upstream_inference_cost: 3 },
+						},
+					},
+					{ id: "2", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			const usage = chunks.find((c) => c.type === "usage")
+			expect(usage).toMatchObject({ type: "usage", inputTokens: 10, outputTokens: 5, totalCost: 5 })
+		})
+
+		it("merges id, format and signature into an existing reasoning detail", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0, text: "start" }] } },
+						],
+					},
+					{
+						id: "2",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{
+											type: "reasoning.text",
+											index: 0,
+											text: "more",
+											id: "det-1",
+											format: "google-gemini-v1",
+											signature: "sig-1",
+										},
+									],
+								},
+							},
+						],
+					},
+					{ id: "3", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toContainEqual({ type: "reasoning", text: "start" })
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(1)
+			expect(details?.[0]).toMatchObject({
+				type: "reasoning.text",
+				text: "startmore",
+				id: "det-1",
+				format: "google-gemini-v1",
+				signature: "sig-1",
+				index: 0,
+			})
+		})
+
+		it("ignores non-string text and summary values in reasoning details", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{ type: "reasoning.encrypted", index: 0, text: "secret", data: "enc" },
+										{ type: "reasoning.text", index: 1, text: 5 },
+										{ type: "reasoning.text", index: 2, summary: "leak" },
+										{ type: "reasoning.summary", index: 3, summary: 7 },
+										{ type: "reasoning.summary", index: 4, summary: "sum-ok" },
+										{ type: "reasoning.text", index: 5, text: "text-ok" },
+									],
+								},
+							},
+						],
+					},
+					{ id: "2", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks.filter((c) => c.type === "reasoning")).toEqual([
+				{ type: "reasoning", text: "sum-ok" },
+				{ type: "reasoning", text: "text-ok" },
+			])
+		})
+
+		it("yields top-level reasoning only for non-empty string values", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning: 5 } }] },
+					{ id: "2", choices: [{ delta: { reasoning: "" } }] },
+					{ id: "3", choices: [{ delta: { reasoning: "top" } }] },
+					{ id: "4", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks.filter((c) => c.type === "reasoning")).toEqual([{ type: "reasoning", text: "top" }])
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+		})
+
+		it("skips top-level reasoning once reasoning details have yielded displayable text", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0, text: "det" }] } },
+						],
+					},
+					{ id: "2", choices: [{ delta: { reasoning: "top" } }] },
+					{ id: "3", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks.filter((c) => c.type === "reasoning")).toEqual([{ type: "reasoning", text: "det" }])
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+		})
+
+		it("ignores non-array tool_calls values in stream deltas", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { tool_calls: "nope", content: "x" } }] },
+					{ id: "2", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks.some((c) => c.type === "tool_call_partial")).toBe(false)
+			expect(chunks).toContainEqual({ type: "text", text: "x" })
+		})
+
+		it("emits tool_call_partial chunks for tool calls without a function payload", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { tool_calls: [{ index: 0, id: "c1" }], content: "x" } }] },
+					{ id: "2", choices: [{ delta: { content: "ok" } }] },
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toContainEqual(expect.objectContaining({ type: "tool_call_partial", id: "c1", index: 0 }))
+		})
+
+		it("reports OpenRouter structured errors in createMessage with telemetry", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockRejectedValueOnce({
+				error: {
+					message: "Model not found",
+					code: 404,
+					metadata: { raw: '{"message":"upstream: model not found"}' },
+				},
+			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+
+			await expect(generator.next()).rejects.toThrow(/completion error/)
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+		})
+
+		it("prefers the raw metadata message over the SDK error message in createMessage telemetry", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockRejectedValueOnce({
+				error: {
+					message: "Model not found",
+					code: 404,
+					metadata: { raw: '{"message":"upstream: model not found"}' },
+				},
+			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+
+			await expect(generator.next()).rejects.toThrow(/completion error/)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "upstream: model not found",
+					provider: providerIdentifiers.openrouter,
+					modelId: "anthropic/claude-sonnet-4",
+					operation: "createMessage",
+					status: 404,
+				}),
+			)
+		})
+
+		it("falls back to the SDK error message in createMessage telemetry when no raw metadata is present", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockRejectedValueOnce({
+				error: {
+					message: "Model not found",
+					code: 404,
+				},
+			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+
+			await expect(generator.next()).rejects.toThrow(/completion error/)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "Model not found",
+					provider: providerIdentifiers.openrouter,
+					modelId: "anthropic/claude-sonnet-4",
+					operation: "createMessage",
+				}),
+			)
+		})
+
+		it("falls back to an unknown error in createMessage telemetry when no message is available", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockRejectedValueOnce({
+				error: {
+					code: 500,
+				},
+			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+
+			await expect(generator.next()).rejects.toThrow(/completion error/)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "Unknown error",
+					provider: providerIdentifiers.openrouter,
+					modelId: "anthropic/claude-sonnet-4",
+					operation: "createMessage",
+				}),
+			)
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -1068,9 +3727,14 @@ describe("OpenRouterHandler", () => {
 			const mockResponse = { choices: [{ message: { content: "test completion" } }] }
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockResponse)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const result = await handler.completePrompt("test prompt")
 
@@ -1098,9 +3762,14 @@ describe("OpenRouterHandler", () => {
 			}
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockError)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("openrouter API Error 500: API Error")
 
@@ -1121,9 +3790,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Unexpected error")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
 
@@ -1140,12 +3814,16 @@ describe("OpenRouterHandler", () => {
 
 		it("passes SDK exceptions with status 429 to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const error = new Error("Rate limit exceeded: free-models-per-day") as any
-			error.status = 429
+			const error = Object.assign(new Error("Rate limit exceeded: free-models-per-day"), { status: 429 })
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Rate limit exceeded")
 
@@ -1164,9 +3842,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("429 Rate limit exceeded: free-models-per-day")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("429 Rate limit exceeded")
 
@@ -1185,9 +3868,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Request failed due to rate limit")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("rate limit")
 
@@ -1212,9 +3900,14 @@ describe("OpenRouterHandler", () => {
 			}
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockError)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow(
 				"openrouter API Error 429: Rate limit exceeded",
@@ -1298,6 +3991,743 @@ describe("OpenRouterHandler", () => {
 				expect((thrown as Error).message.startsWith("openrouter"), name).toBe(true)
 				expect((thrown as Error).message, name).not.toContain("OpenRouter")
 			}
+		})
+		it("should pass abort signal through to client", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+			// What the SDK is handed is the per-request bridge output, not the caller's own signal:
+			// the SDK attaches its abort listener to whatever signal it receives and leaves it attached
+			// once the request ends, so forwarding the caller's long-lived signal would retain one
+			// listener on it for every completed request. That the caller's cancellation still reaches
+			// the SDK through the bridge is a separate claim, pinned by its own test below.
+			const createOptions = mockCreate.mock.calls[0]?.[1]
+			expect(createOptions?.signal).toBeDefined()
+			expect(createOptions?.signal).not.toBe(controller.signal)
+		})
+
+		it("detaches its abort listener from the caller signal when the request finishes without a timeout", async () => {
+			// The leak: openai@5.23.2 client.mjs:350-351 attaches an abort listener to whichever signal
+			// it is handed and never detaches it (client.js carries one addEventListener and no
+			// removeEventListener), so handing the SDK the caller's own long-lived signal retains one
+			// listener - and the SDK controller behind it - per completed request. The double below
+			// mirrors that behaviour so the pair, not just the bridge, is what the test measures.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.resolve({ choices: [{ message: { content: "response" } }] })
+			})
+			stubCompletionsCreate(handler, create)
+
+			const added = vitest.spyOn(controller.signal, "addEventListener")
+			const removed = vitest.spyOn(controller.signal, "removeEventListener")
+			let addedCount = 0
+			let removedCount = 0
+			let listenersLeftOnCallerSignal = -1
+			try {
+				// Two calls with no timeoutMs: the branch where the merge used to return the caller's
+				// signal unchanged, so each completed request left its listener behind.
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+				// Take the evidence before restoring: `mockRestore` clears the call log the two calls
+				// just filled, so asserting on the spies after the finally asserts on an emptied record.
+				addedCount = added.mock.calls.length
+				removedCount = removed.mock.calls.length
+				listenersLeftOnCallerSignal = getEventListeners(controller.signal, "abort").length
+			} finally {
+				added.mockRestore()
+				removed.mockRestore()
+			}
+
+			// The floor keeps the pair equality from being satisfied by an empty record: a double that
+			// never touched the signal at all would leave both counts at 0 and pass 0 === 0.
+			expect(addedCount, "expected the caller signal to be observed at least once").toBeGreaterThanOrEqual(1)
+			expect(removedCount).toBe(addedCount)
+			// The leak itself: nothing may stay attached to the caller's signal once the request ended.
+			expect(listenersLeftOnCallerSignal, "caller signal kept a listener after the request").toBe(0)
+		})
+
+		it("detaches the caller-signal listener when completePrompt fails with a non-abort error", async () => {
+			// The half of the ask with teeth: a `finally` is justified by the error exits, so the detach is
+			// proven on a failing request as well as on the successful pair the test above measures.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const failure = new Error("completion failed without an abort")
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.reject(failure)
+			})
+			stubCompletionsCreate(handler, create)
+
+			const addedListeners = vitest.spyOn(controller.signal, "addEventListener")
+			const removedListeners = vitest.spyOn(controller.signal, "removeEventListener")
+			let attachedTypes: string[] = []
+			let attachedRefs: unknown[] = []
+			let detachCalls: { type: string; listener: unknown }[] = []
+			let listenersLeft = -1
+			try {
+				// `completePrompt` wraps a non-abort completion failure but keeps the cause text, so
+				// the assertion matches the message the way the other failure tests in this file do.
+				await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toThrow(
+					"completion failed without an abort",
+				)
+				// Read the record before restoring: `mockRestore` clears the calls these two lines depend on.
+				attachedTypes = addedListeners.mock.calls.map((call) => String(call[0]))
+				attachedRefs = addedListeners.mock.calls.map((call) => call[1])
+				detachCalls = removedListeners.mock.calls.map((call) => ({ type: String(call[0]), listener: call[1] }))
+				listenersLeft = getEventListeners(controller.signal, "abort").length
+			} finally {
+				addedListeners.mockRestore()
+				removedListeners.mockRestore()
+			}
+
+			expect(attachedTypes, "expected the bridge to attach to the caller signal once").toEqual(["abort"])
+			// Identity, not merely one removal: the detached listener must be the exact reference the bridge
+			// added, under the same event type. Removing a different listener would leave this one attached.
+			expect(detachCalls.length, "expected exactly one detach call on the caller signal").toBe(1)
+			expect(detachCalls[0]?.type).toBe("abort")
+			expect(detachCalls[0]?.listener, "the removed listener must be the one the bridge added").toBe(
+				attachedRefs[0],
+			)
+			expect(listenersLeft, "caller signal kept a listener after a failed request").toBe(0)
+		})
+
+		it("detaches the caller-signal listener when createMessage fails at request creation", async () => {
+			// Same claim on the streaming entry point, failing before any chunk is produced.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const failure = new Error("create failed without an abort")
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.reject(failure)
+			})
+			stubCompletionsCreate(handler, create)
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			const addedListeners = vitest.spyOn(controller.signal, "addEventListener")
+			const removedListeners = vitest.spyOn(controller.signal, "removeEventListener")
+			let attachedTypes: string[] = []
+			let attachedRefs: unknown[] = []
+			let detachCalls: { type: string; listener: unknown }[] = []
+			let listenersLeft = -1
+			try {
+				await expect(
+					collectStream(handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)),
+				).rejects.toThrow("create failed without an abort")
+				attachedTypes = addedListeners.mock.calls.map((call) => String(call[0]))
+				attachedRefs = addedListeners.mock.calls.map((call) => call[1])
+				detachCalls = removedListeners.mock.calls.map((call) => ({ type: String(call[0]), listener: call[1] }))
+				listenersLeft = getEventListeners(controller.signal, "abort").length
+			} finally {
+				addedListeners.mockRestore()
+				removedListeners.mockRestore()
+			}
+
+			expect(attachedTypes, "expected the bridge to attach to the caller signal once").toEqual(["abort"])
+			expect(detachCalls.length, "expected exactly one detach call on the caller signal").toBe(1)
+			expect(detachCalls[0]?.type).toBe("abort")
+			expect(detachCalls[0]?.listener, "the removed listener must be the one the bridge added").toBe(
+				attachedRefs[0],
+			)
+			expect(listenersLeft, "caller signal kept a listener after a failed request").toBe(0)
+		})
+
+		it("detaches the caller-signal listener when the SDK stream throws mid-iteration", async () => {
+			// The exit the success-path tests cannot reach: the request resolves, a chunk is delivered, and
+			// the iterator then throws, so only the `finally` can detach the listener.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const iteratorError = new Error("stream exploded mid-iteration")
+			const partialThenThrow = async function* () {
+				yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+				throw iteratorError
+			}
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.resolve(partialThenThrow())
+			})
+			stubCompletionsCreate(handler, create)
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			const addedListeners = vitest.spyOn(controller.signal, "addEventListener")
+			const removedListeners = vitest.spyOn(controller.signal, "removeEventListener")
+			let attachedTypes: string[] = []
+			let attachedRefs: unknown[] = []
+			let detachCalls: { type: string; listener: unknown }[] = []
+			let listenersLeft = -1
+			try {
+				await expect(
+					collectStream(handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)),
+				).rejects.toBe(iteratorError)
+				attachedTypes = addedListeners.mock.calls.map((call) => String(call[0]))
+				attachedRefs = addedListeners.mock.calls.map((call) => call[1])
+				detachCalls = removedListeners.mock.calls.map((call) => ({ type: String(call[0]), listener: call[1] }))
+				listenersLeft = getEventListeners(controller.signal, "abort").length
+			} finally {
+				addedListeners.mockRestore()
+				removedListeners.mockRestore()
+			}
+
+			expect(attachedTypes, "expected the bridge to attach to the caller signal once").toEqual(["abort"])
+			expect(detachCalls.length, "expected exactly one detach call on the caller signal").toBe(1)
+			expect(detachCalls[0]?.type).toBe("abort")
+			expect(detachCalls[0]?.listener, "the removed listener must be the one the bridge added").toBe(
+				attachedRefs[0],
+			)
+			expect(listenersLeft, "caller signal kept a listener after a failed stream").toBe(0)
+		})
+
+		it("propagates a caller abort to the signal the SDK receives", async () => {
+			// The ordering half of the bridge: the caller's cancellation must still reach the SDK
+			// through the per-request signal, and it must do so while the request is in flight.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			let abortedDuringRequest: boolean | undefined
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				controller.abort()
+				abortedDuringRequest = options?.signal?.aborted
+				return Promise.resolve({ choices: [{ message: { content: "late result" } }] })
+			})
+			stubCompletionsCreate(handler, create)
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(abortedDuringRequest, "the signal handed to the SDK must abort with the caller's").toBe(true)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("normalizes the per-request timeout before handing it to the SDK", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// Fractional delays fail the SDK's integer validation: round up.
+			await handler.completePrompt("test prompt", { timeoutMs: 1500.4 })
+			expect(mockCreate.mock.calls[0][1]).toMatchObject({ timeout: 1501 })
+
+			// Non-finite delays are not a timeout at all: omit the option.
+			mockCreate.mockClear()
+			await handler.completePrompt("test prompt", { timeoutMs: Number.POSITIVE_INFINITY })
+			expect(mockCreate.mock.calls[0][1]).not.toHaveProperty("timeout")
+
+			// Node clamps overflowing delays to 1 ms: cap them at the uint32 max.
+			mockCreate.mockClear()
+			await handler.completePrompt("test prompt", { timeoutMs: 9_000_000_000_000 })
+			expect(mockCreate.mock.calls[0][1]).toMatchObject({ timeout: 2_147_483_647 })
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+
+		it("omits the anthropic beta header for non-Anthropic models", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await handler.completePrompt("test prompt")
+			const options = mockCreate.mock.calls[0][1] as { headers?: Record<string, string> }
+			expect(options).not.toHaveProperty("headers")
+		})
+
+		it("omits the signal and timeout options when timeoutMs is zero and no signal is provided", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			const options = mockCreate.mock.calls[0][1] as { signal?: AbortSignal; timeout?: number }
+			expect(options).not.toHaveProperty("signal")
+			expect(options).not.toHaveProperty("timeout")
+		})
+
+		it("propagates non-abort model-discovery failures from completePrompt", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// The constructor's background discovery consumed the default mock; make the next
+			// lookup (completePrompt's own fetchModel) reject with a non-abort failure.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockRejectedValueOnce(new Error("discovery failed"))
+
+			await expect(handler.completePrompt("test prompt")).rejects.toThrow("discovery failed")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("propagates an abort-named model-discovery failure unchanged in completePrompt", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// The constructor's background discovery consumed the default mock; make the next
+			// lookup (completePrompt's own fetchModel) reject with an abort-named failure.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockRejectedValueOnce(Object.assign(new Error("aborted"), { name: "AbortError" }))
+
+			// An abort-shaped discovery failure with no caller cancellation is a
+			// discovery failure: it keeps its original identity instead of being
+			// reported as a cancellation.
+			await expect(handler.completePrompt("test prompt")).rejects.toMatchObject({
+				name: "AbortError",
+				message: "aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("rejects with AbortError when the external signal aborts during deferred model discovery", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const mockCreate = vitest.fn()
+			stubCompletionsCreate(handler, mockCreate)
+
+			// Discovery is deferred and notifies when it starts, so the abort lands while the lookup is
+			// pending: that is the window completePrompt's rejectOnAbort(fetchModel()) race covers.
+			let resolveModelLookup!: (models: ModelRecord) => void
+			const deferredModelLookup = new Promise<ModelRecord>((resolve) => {
+				resolveModelLookup = resolve
+			})
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return deferredModelLookup
+			})
+
+			const completion = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			await settlesWithin(lookupStarted, ABORT_SETTLE_MS)
+			controller.abort()
+
+			await expect(settlesWithin(completion, ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// Settle the abandoned lookup so it cannot outlive the test.
+			resolveModelLookup({})
+		})
+
+		it("rejects with AbortError when a timeout elapses during deferred model discovery", async () => {
+			// The configured timeoutMs covers model lookup too, so a lookup that outlives it must end
+			// the call with the same canonical AbortError and must not reach the SDK.
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn()
+			stubCompletionsCreate(handler, mockCreate)
+
+			let resolveModelLookup!: (models: ModelRecord) => void
+			const deferredModelLookup = new Promise<ModelRecord>((resolve) => {
+				resolveModelLookup = resolve
+			})
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return deferredModelLookup
+			})
+
+			const completion = handler.completePrompt("test prompt", { timeoutMs: 50 })
+			await settlesWithin(lookupStarted, ABORT_SETTLE_MS)
+
+			await expect(settlesWithin(completion, ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// Settle the abandoned lookup so it cannot outlive the test.
+			resolveModelLookup({})
+		})
+
+		it("rejects with AbortError when the request aborts before a late result lands", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Deterministic synchronization: the mock notifies the test when create() has been
+			// called, so the abort lands after model discovery instead of racing it.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let resolveCreate!: (value: unknown) => void
+			const mockCreate = vitest.fn().mockImplementation(() => {
+				notifyCreateStarted()
+				return new Promise((resolve) => {
+					resolveCreate = resolve
+				})
+			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			// Bounded readiness: a create() that never starts fails here instead of hanging.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
+			controller.abort()
+			resolveCreate({ choices: [{ message: { content: "late result" } }] })
+
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+
+		it("rejects with AbortError when the SDK fulfils first and the abort is queued before the provider resumes", async () => {
+			// The abort-first case above cannot see the post-settlement signal check under the create
+			// await: settleOnAbort rejects there first, so the check survives its removal. Aborting
+			// synchronously after the fulfilment is no better - that is still inside settleOnAbort,
+			// whose own listener rejects and hides the check; both were measured. Queueing the
+			// cancellation is the ordering that reaches it: by the time this microtask runs the race
+			// is decided and the listener is detached, so the abort cannot reject the wait and can
+			// only flip the signal the check reads on the way back from the fulfilment.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let resolveCreate!: (value: unknown) => void
+			const mockCreate = vitest.fn().mockImplementation(() => {
+				notifyCreateStarted()
+				return new Promise((resolve) => {
+					resolveCreate = resolve
+				})
+			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			// Bounded readiness, the same helper the neighbouring tests use: a create() that never
+			// starts fails here instead of hanging until the runner times out.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
+			resolveCreate({ choices: [{ message: { content: "late result" } }] })
+			queueMicrotask(() => {
+				controller.abort()
+			})
+
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+
+		it("settles the completePrompt await as AbortError while the SDK is parked in a retry backoff", async () => {
+			// The same backoff window as createMessage: a create() asleep in its retry sleep never
+			// settles, so the race in settleOnAbort is what ends the wait on a caller cancellation.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			let createStarted: () => void
+			const createAwaited = new Promise<void>((resolve) => {
+				createStarted = resolve
+			})
+			stubCompletionsCreate(
+				handler,
+				vitest.fn().mockImplementation(() => {
+					createStarted()
+					return new Promise<never>(() => {})
+				}),
+			)
+
+			const completion = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Abort only after the create call is in flight so this pins the create await, not model
+			// discovery. The readiness wait is bounded by the same helper the completion assertion
+			// uses, so a discovery that rejects fails here instead of hanging until the runner times out.
+			await settlesWithin(createAwaited, ABORT_SETTLE_MS)
+			controller.abort()
+
+			await expect(settlesWithin(completion, ABORT_SETTLE_MS)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+
+		it("normalizes the SDK's own abort error in completePrompt instead of reporting a completion error", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const sdkAbort = Object.assign(new Error("Request was aborted."), {
+				name: "APIUserAbortError",
+				status: 499,
+			})
+			stubCompletionsCreate(handler, vitest.fn().mockRejectedValue(sdkAbort))
+
+			await expect(handler.completePrompt("test prompt")).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(mockCaptureException).not.toHaveBeenCalled()
+		})
+
+		it("rejects with AbortError when the signal is pre-aborted", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// The catalog loads lazily via ensureModelFetched(), so a fresh handler has not
+			// started a discovery lookup; the pre-abort guard must reject without starting one.
+			const { getModels } = await import("../fetchers/modelCache")
+			const lookupsBefore = vitest.mocked(getModels).mock.calls.length
+
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(vitest.mocked(getModels).mock.calls.length).toBe(lookupsBefore)
+		})
+
+		it("rejects with AbortError when aborted mid-flight", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Wait for create() to actually start before aborting: aborting during
+			// model lookup would exercise the discovery race instead of the
+			// in-flight SDK catch path this test names.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					notifyCreateStarted()
+					// Emulate the OpenAI SDK: the in-flight request rejects when the signal aborts.
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			// The in-flight catch path must have run: create() was entered exactly once.
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+		it("rejects with AbortError when only a timeout is provided and it elapses", async () => {
+			// Non-Anthropic model: also exercises the no-beta-header branch of requestOptions.
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					requestSignal = options?.signal
+					// Emulate the OpenAI SDK: the in-flight request rejects when the signal times out.
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const timeoutError = new Error("TimeoutError: Request timed out.")
+					timeoutError.name = "TimeoutError"
+					throw timeoutError
+				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
+				name: "AbortError",
+			})
+
+			expect(requestSignal?.aborted).toBe(true)
+		})
+
+		it("rejects with AbortError when both an abort signal and a timeout are provided", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Deterministic synchronization: the mock notifies the test when the request
+			// actually starts, so the abort lands mid-flight (after model lookup) instead of
+			// winning the race at model discovery on a slow runner.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					notifyCreateStarted()
+					requestSignal = options?.signal
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const promise = handler.completePrompt("test prompt", {
+				abortSignal: controller.signal,
+				timeoutMs: 100_000,
+			})
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			// Abort only once create() has actually started (after model lookup), bounded so a
+			// create() that never starts fails here instead of hanging until the runner times out.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			// The SDK received a merged signal (not the caller's signal) plus the timeout.
+			expect(requestSignal).toBeDefined()
+			expect(requestSignal).not.toBe(controller.signal)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 100_000 }),
+			)
 		})
 	})
 
@@ -1383,6 +4813,46 @@ describe("OpenRouterHandler", () => {
 			// Both catalogs are populated, so the load is now memoized.
 			await handler.ensureModelFetched()
 			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+		})
+
+		it("keeps retrying when a lookup returns no models after an earlier partial load", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+
+			mockGetModelEndpoints
+				// Lookup 1: the model catalog arrives, the endpoint request produced nothing.
+				.mockResolvedValueOnce({})
+				// Lookup 2: the endpoints arrive, the model request answers an empty map.
+				.mockResolvedValueOnce({ "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 1000 } })
+				// Lookup 3: both answers present, so the load is complete from here on.
+				.mockResolvedValueOnce({ "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 1000 } })
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
+
+			// The endpoint catalog fills in, but this lookup saw no models. The records from lookup 1
+			// are still published, so judging by the published maps would call this load complete;
+			// the load must stay retryable because the answer it got was empty.
+			mockedGetModels.mockResolvedValueOnce({})
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(2)
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+			expect(handler.getModel().info.maxTokens).toBe(1000)
+
+			// A load that answered both catalogs is memoized.
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+			expect(mockedGetModels).toHaveBeenCalledTimes(3)
 		})
 
 		it("memoizes the default-provider load even when the endpoint catalog is empty", async () => {
