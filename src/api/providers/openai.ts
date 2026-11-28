@@ -25,6 +25,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { isOSeriesModelId } from "./utils/is-o-series-model"
 import { buildResponsesRequest } from "./utils/openai-compatible-responses"
 import { resolveOpenAiCompatibleMaxTokens } from "./utils/openai-compatible-max-tokens"
+import { createRequestDeadlineFetchOptions } from "./utils/request-deadlines"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { assertResponsesApiSuccess } from "../transform/responses-api-error"
@@ -99,6 +100,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				"Responses API requires an /openai/v1 base URL for Azure AI Inference. Update the Base URL or disable Use Responses API.",
 			)
 		}
+
+		const deadlineFetchOptions = createRequestDeadlineFetchOptions(this.timeoutMs)
+
 		if (isAzureV1 || (isAzureOpenAi && this.options.openAiUseResponsesApi && !this.options.azureApiVersion)) {
 			// Azure's v1 API supports Responses without a dated api-version parameter.
 			const responsesBaseURL = isAzureV1
@@ -109,6 +113,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				apiKey,
 				defaultHeaders: headers,
 				timeout: this.timeoutMs,
+				...deadlineFetchOptions,
 			})
 		} else if (isAzureAiInference) {
 			// Azure AI Inference Service (e.g., for DeepSeek) uses a different path structure
@@ -118,6 +123,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				defaultHeaders: headers,
 				defaultQuery: { "api-version": this.options.azureApiVersion || "2024-05-01-preview" },
 				timeout: this.timeoutMs,
+				...deadlineFetchOptions,
 			})
 		} else if (isAzureOpenAi) {
 			// Azure API shape slightly differs from the core API shape:
@@ -129,6 +135,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				apiVersion: this.options.azureApiVersion || azureOpenAiDefaultApiVersion,
 				defaultHeaders: headers,
 				timeout: this.timeoutMs,
+				...deadlineFetchOptions,
 			})
 		} else {
 			this.client = new OpenAI({
@@ -136,6 +143,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				apiKey,
 				defaultHeaders: headers,
 				timeout: this.timeoutMs,
+				...deadlineFetchOptions,
 			})
 		}
 	}

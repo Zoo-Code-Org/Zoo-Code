@@ -12,6 +12,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
 import { handleOpenAIError } from "./utils/error-handler"
+import { createRequestDeadlineFetchOptions } from "./utils/request-deadlines"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -64,6 +65,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			apiKey: this.options.apiKey,
 			defaultHeaders: DEFAULT_HEADERS,
 			timeout: this.timeoutMs,
+			...createRequestDeadlineFetchOptions(this.timeoutMs),
 		})
 	}
 
