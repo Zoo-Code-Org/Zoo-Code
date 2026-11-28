@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "Kann keine Dienste erstellen: Code-Indizierung ist nicht richtig konfiguriert"
 	},
 	"orchestrator": {
-		"providerWaiting": "Warten auf {{service}}; die Indexierung wird automatisch fortgesetzt",
-		"providerWaitingUntil": "Warten auf {{service}}; die Indexierung wird um {{time}} automatisch fortgesetzt",
 		"indexingFailedNoBlocks": "Indizierung fehlgeschlagen: Keine Code-Blöcke wurden erfolgreich indiziert. Dies deutet normalerweise auf ein Embedder-Konfigurationsproblem hin.",
 		"fileWatcherStarted": "Datei-Watcher gestartet.",
 		"fileWatcherStopped": "Datei-Watcher gestoppt.",

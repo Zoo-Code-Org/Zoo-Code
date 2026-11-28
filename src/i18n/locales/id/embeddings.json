@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "Tidak dapat membuat layanan: Pengindeksan kode tidak dikonfigurasi dengan benar"
 	},
 	"orchestrator": {
-		"providerWaiting": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis",
-		"providerWaitingUntil": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis pada {{time}}",
 		"indexingFailedNoBlocks": "Pengindeksan gagal: Tidak ada blok kode yang berhasil diindeks. Ini biasanya menunjukkan masalah konfigurasi embedder.",
 		"fileWatcherStarted": "Pemantau file dimulai.",
 		"fileWatcherStopped": "Pemantau file dihentikan.",

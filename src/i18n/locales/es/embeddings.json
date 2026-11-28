@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "No se pueden crear servicios: La indexación de código no está configurada correctamente"
 	},
 	"orchestrator": {
-		"providerWaiting": "Esperando a {{service}}; la indexación se reanuda automáticamente",
-		"providerWaitingUntil": "Esperando a {{service}}; la indexación se reanuda automáticamente a las {{time}}",
 		"indexingFailedNoBlocks": "Indexación fallida: No se indexaron exitosamente bloques de código. Esto usualmente indica un problema de configuración del incrustador.",
 		"fileWatcherStarted": "Monitor de archivos iniciado.",
 		"fileWatcherStopped": "Monitor de archivos detenido.",

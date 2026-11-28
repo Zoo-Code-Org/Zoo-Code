@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "Không thể tạo dịch vụ: Lập chỉ mục mã không được cấu hình đúng cách"
 	},
 	"orchestrator": {
-		"providerWaiting": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục",
-		"providerWaitingUntil": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục lúc {{time}}",
 		"indexingFailedNoBlocks": "Lập chỉ mục thất bại: Không có khối mã nào được lập chỉ mục thành công. Điều này thường cho thấy vấn đề cấu hình embedder.",
 		"fileWatcherStarted": "Trình theo dõi tệp đã khởi động.",
 		"fileWatcherStopped": "Trình theo dõi tệp đã dừng.",

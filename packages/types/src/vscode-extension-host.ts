@@ -922,12 +922,6 @@ export type WebViewMessagePayload =
 	| EditQueuedMessagePayload
 	| { item: MarketplaceItem; parameters?: Record<string, string> }
 
-export interface ProviderWaitStatus {
-	service: string
-	resumeAt?: number
-	waitingFiles: string[]
-}
-
 export interface IndexingStatus {
 	systemStatus: string
 	message?: string

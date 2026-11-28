@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "서비스를 생성할 수 없습니다: 코드 인덱싱이 올바르게 구성되지 않았습니다"
 	},
 	"orchestrator": {
-		"providerWaiting": "{{service}} 대기 중; 인덱싱이 자동으로 재개됩니다",
-		"providerWaitingUntil": "{{service}} 대기 중; {{time}}에 인덱싱이 자동으로 재개됩니다",
 		"indexingFailedNoBlocks": "인덱싱 실패: 코드 블록이 성공적으로 인덱싱되지 않았습니다. 이는 일반적으로 임베더 구성 문제를 나타냅니다.",
 		"fileWatcherStarted": "파일 감시자가 시작되었습니다.",
 		"fileWatcherStopped": "파일 감시자가 중지되었습니다.",

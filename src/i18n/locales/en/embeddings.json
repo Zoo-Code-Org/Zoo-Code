@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "Cannot create services: Code indexing is not properly configured"
 	},
 	"orchestrator": {
-		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
-		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
 		"indexingFailedNoBlocks": "Indexing failed: No code blocks were successfully indexed. This usually indicates an embedder configuration issue.",
 		"fileWatcherStarted": "File watcher started.",
 		"fileWatcherStopped": "File watcher stopped.",

@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "無法建立服務：程式碼索引未正確設定"
 	},
 	"orchestrator": {
-		"providerWaiting": "正在等待 {{service}}；索引將自動恢復",
-		"providerWaitingUntil": "正在等待 {{service}}；索引將於 {{time}} 自動恢復",
 		"indexingFailedNoBlocks": "索引失敗：沒有程式碼區塊被成功索引。這通常表示 Embedder 設定問題。",
 		"fileWatcherStarted": "檔案監控已啟動。",
 		"fileWatcherStopped": "檔案監控已停止。",

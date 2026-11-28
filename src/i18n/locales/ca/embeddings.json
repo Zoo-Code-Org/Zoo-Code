@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "No es poden crear serveis: La indexació de codi no està configurada correctament"
 	},
 	"orchestrator": {
-		"providerWaiting": "Esperant {{service}}; la indexació es reprèn automàticament",
-		"providerWaitingUntil": "Esperant {{service}}; la indexació es reprèn automàticament a les {{time}}",
 		"indexingFailedNoBlocks": "Indexació fallida: No s'ha indexat cap bloc de codi amb èxit. Això normalment indica un problema de configuració de l'embedder.",
 		"fileWatcherStarted": "Monitor de fitxers iniciat.",
 		"fileWatcherStopped": "Monitor de fitxers aturat.",

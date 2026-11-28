@@ -4,11 +4,7 @@ import {
 	classifyIndexingError,
 	getIndexingErrorStatusCode,
 	EmbeddingError,
-	VectorStoreError,
 	parseRetryAfterMs,
-	isSourceMissing,
-	readSource,
-	SOURCE_MISSING,
 	isQuotaError,
 } from "../indexing-errors"
 import { toEmbeddingError } from "../validation-helpers"
@@ -41,37 +37,6 @@ describe("quota 429 classification", () => {
 })
 
 vi.mock("../../../../i18n", () => ({ t: (key: string) => key }))
-
-describe("T44 isSourceMissing and readSource", () => {
-	const withCode = (code?: string) => Object.assign(new Error("x"), code ? { code } : {})
-
-	it.each([
-		["ENOENT", true],
-		["FileNotFound", true],
-		["EACCES", false],
-		["EPERM", false],
-		["NoPermissions", false],
-		["Unknown", false],
-		["EISDIR", false],
-		["ENOTDIR", false],
-		[undefined, false],
-	])("code %s -> %s", (code, expected) => {
-		expect(isSourceMissing(withCode(code))).toBe(expected)
-	})
-
-	it("ignores message text and non-error values", () => {
-		expect(isSourceMissing(new Error("ENOENT: no such file"))).toBe(false)
-		expect(isSourceMissing(undefined)).toBe(false)
-		expect(isSourceMissing("ENOENT")).toBe(false)
-	})
-
-	it("maps only a missing source to the sentinel and rethrows anything else unchanged", async () => {
-		expect(await readSource(Promise.resolve(5))).toBe(5)
-		expect(await readSource(Promise.reject(withCode("FileNotFound")))).toBe(SOURCE_MISSING)
-		const denied = withCode("EACCES")
-		await expect(readSource(Promise.reject(denied))).rejects.toBe(denied)
-	})
-})
 
 describe("indexing error classification", () => {
 	it.each([
@@ -126,9 +91,9 @@ describe("indexing error classification", () => {
 		expect(classifyIndexingError(error, AbortSignal.abort())).toBe("permanent")
 	})
 
-	it.each([EmbeddingError, VectorStoreError])("preserves fields and the raw cause in %s", (ErrorClass) => {
+	it("preserves fields and the raw cause", () => {
 		const cause = { $metadata: { httpStatusCode: 503 } }
-		const error = new ErrorClass("unchanged", cause)
+		const error = new EmbeddingError("unchanged", cause)
 		expect(error.message).toBe("unchanged")
 		expect(error.cause).toBe(cause)
 		expect(error.statusCode).toBe(503)
@@ -189,10 +154,10 @@ describe("parseRetryAfterMs", () => {
 		expect(parseRetryAfterMs(source, now)).toBe(expected)
 	})
 
-	it.each([EmbeddingError, VectorStoreError])("preserves delay and explicit override in %s", (ErrorClass) => {
+	it("preserves delay and explicit override", () => {
 		const cause = { status: 429, headers: new Headers({ "retry-after": "2" }) }
-		expect(new ErrorClass("limited", cause)).toMatchObject({ retryAfterMs: 2000, cause })
-		expect(new ErrorClass("limited", cause, { retryAfterMs: 7000 })).toMatchObject({ retryAfterMs: 7000 })
+		expect(new EmbeddingError("limited", cause)).toMatchObject({ retryAfterMs: 2000, cause })
+		expect(new EmbeddingError("limited", cause, { retryAfterMs: 7000 })).toMatchObject({ retryAfterMs: 7000 })
 	})
 })
 
@@ -215,7 +180,7 @@ it.each(["2", "invalid", undefined])(
 
 it("explicit delay wins without reading headers", () => {
 	const get = vi.fn()
-	const error = new VectorStoreError("limited", { status: 429, headers: { get } }, { retryAfterMs: 7000 })
+	const error = new EmbeddingError("limited", { status: 429, headers: { get } }, { retryAfterMs: 7000 })
 	expect(error.retryAfterMs).toBe(7000)
 	expect(get).not.toHaveBeenCalled()
 })

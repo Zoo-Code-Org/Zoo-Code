@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "Kan geen services maken: Code-indexering is niet correct geconfigureerd"
 	},
 	"orchestrator": {
-		"providerWaiting": "Wachten op {{service}}; de indexering wordt automatisch hervat",
-		"providerWaitingUntil": "Wachten op {{service}}; de indexering wordt automatisch hervat om {{time}}",
 		"indexingFailedNoBlocks": "Indexering mislukt: Geen codeblokken werden succesvol geïndexeerd. Dit duidt meestal op een embedder configuratieprobleem.",
 		"fileWatcherStarted": "Bestandsmonitor gestart.",
 		"fileWatcherStopped": "Bestandsmonitor gestopt.",

@@ -57,8 +57,6 @@
 		"codeIndexingNotConfigured": "Impossible de créer les services : L'indexation du code n'est pas correctement configurée"
 	},
 	"orchestrator": {
-		"providerWaiting": "En attente de {{service}} ; l’indexation reprend automatiquement",
-		"providerWaitingUntil": "En attente de {{service}} ; l’indexation reprend automatiquement à {{time}}",
 		"indexingFailedNoBlocks": "Échec de l'indexation : Aucun bloc de code n'a été indexé avec succès. Cela indique généralement un problème de configuration de l'embedder.",
 		"fileWatcherStarted": "Surveillant de fichiers démarré.",
 		"fileWatcherStopped": "Surveillant de fichiers arrêté.",
