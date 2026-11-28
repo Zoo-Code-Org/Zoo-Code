@@ -10,17 +10,18 @@
 
 import fs from "fs"
 import path from "path"
-import { createHash } from "crypto"
+import { createHash, randomUUID } from "crypto"
 import os from "os"
+import { pathToFileURL } from "url"
 
 import type { CustomToolDefinition, SerializedCustomToolDefinition, CustomToolParametersSchema } from "@roo-code/types"
 
 import type { StoredCustomTool, LoadResult } from "./types.js"
 import { serializeCustomTool } from "./serialize.js"
-import { runEsbuild, NODE_BUILTIN_MODULES, COMMONJS_REQUIRE_BANNER } from "./esbuild-runner.js"
+import { runEsbuild, EsbuildSourceError, NODE_BUILTIN_MODULES, COMMONJS_REQUIRE_BANNER } from "./esbuild-runner.js"
 
 export interface RegistryOptions {
-	/** Directory for caching compiled TypeScript files. */
+	/** Directory for caching compiled TypeScript files. Explicit paths are not supported on Windows. */
 	cacheDir?: string
 	/** Additional paths for resolving node modules (useful for tools outside node_modules). */
 	nodePaths?: string[]
@@ -30,14 +31,25 @@ export interface RegistryOptions {
 
 export class CustomToolRegistry {
 	private tools = new Map<string, StoredCustomTool>()
-	private tsCache = new Map<string, string>()
 	private cacheDir: string
 	private nodePaths: string[]
 	private extensionPath?: string
 	private lastLoaded: Map<string, number> = new Map()
+	private sourceFailures = new Map<string, { mtimeMs: number; error: EsbuildSourceError }>()
 
 	constructor(options?: RegistryOptions) {
-		this.cacheDir = options?.cacheDir ?? path.join(os.tmpdir(), "dynamic-tools-cache")
+		// This check cannot verify Windows ACLs. Reject explicit roots before disk access.
+		if (process.platform === "win32" && options?.cacheDir !== undefined) {
+			throw new Error("Explicit custom tool cache paths are not supported on Windows")
+		}
+		// Normalize the configured root. Preparation also resolves platform aliases.
+		this.cacheDir = path.resolve(
+			options?.cacheDir ??
+				path.join(
+					process.platform === "win32" ? os.homedir() : os.tmpdir(),
+					`dynamic-tools-cache-${process.getuid?.() ?? "user"}`,
+				),
+		)
 		// Default to current working directory's node_modules.
 		this.nodePaths = options?.nodePaths ?? [path.join(process.cwd(), "node_modules")]
 		this.extensionPath = options?.extensionPath
@@ -87,6 +99,7 @@ export class CustomToolRegistry {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
 			console.error(`[CustomToolRegistry] loadFromDirectory(${toolDir}) failed: ${message}`)
+			result.failed.push({ file: toolDir, error: message })
 		}
 
 		return result
@@ -99,11 +112,16 @@ export class CustomToolRegistry {
 
 		const lastLoaded = this.lastLoaded.get(toolDir)
 		const stat = fs.statSync(toolDir)
-		const isStale = lastLoaded ? stat.mtimeMs > lastLoaded : true
+		const isStale = lastLoaded === undefined || stat.mtimeMs > lastLoaded
 
 		if (isStale) {
-			this.lastLoaded.set(toolDir, stat.mtimeMs)
-			return this.loadFromDirectory(toolDir)
+			const result = await this.loadFromDirectory(toolDir)
+			if (result.failed.length === 0) {
+				this.lastLoaded.set(toolDir, stat.mtimeMs)
+			} else {
+				this.lastLoaded.delete(toolDir)
+			}
+			return result
 		}
 
 		return { loaded: this.list(), failed: [] }
@@ -234,24 +252,77 @@ export class CustomToolRegistry {
 		return this.extensionPath
 	}
 
+	/** Reject cache paths that another account could supply or replace.
+	 * Return false only for an absent path when allowMissing is set.
+	 */
+	private validateCachePath(cachePath: string, directory: boolean, allowMissing = false): boolean {
+		const stat = fs.lstatSync(cachePath, { throwIfNoEntry: !allowMissing })
+		if (!stat) return false
+		const uid = process.getuid?.()
+		if (
+			(directory ? !stat.isDirectory() : !stat.isFile()) ||
+			(uid !== undefined && (stat.uid !== uid || (stat.mode & 0o077) !== 0)) ||
+			(!directory && stat.nlink !== 1)
+		) {
+			throw new Error(`Unsafe custom tool cache path: ${cachePath}`)
+		}
+		return true
+	}
+
+	private prepareCacheDirectory(): void {
+		// Resolve platform aliases (e.g. /var on macOS), then check ancestors before writing.
+		let ancestor = path.dirname(this.cacheDir)
+		const missing: string[] = []
+		while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+			missing.unshift(path.basename(ancestor))
+			ancestor = path.dirname(ancestor)
+		}
+		let parent = fs.realpathSync(ancestor)
+		for (let current = parent; ; current = path.dirname(current)) {
+			const stat = fs.statSync(current)
+			const uid = process.getuid?.()
+			if (
+				uid !== undefined &&
+				((stat.uid !== uid && stat.uid !== 0) || ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0))
+			) {
+				throw new Error(`Unsafe custom tool cache parent: ${current}`)
+			}
+			if (path.dirname(current) === current) break
+		}
+		for (const component of missing) {
+			parent = path.join(parent, component)
+			fs.mkdirSync(parent, { recursive: true, mode: 0o700 })
+			this.validateCachePath(parent, true)
+		}
+		this.cacheDir = path.join(parent, path.basename(this.cacheDir))
+		fs.mkdirSync(this.cacheDir, { recursive: true, mode: 0o700 })
+		this.validateCachePath(this.cacheDir, true)
+	}
+
 	/**
-	 * Clear the TypeScript compilation cache (both in-memory and on disk).
+	 * Clear the TypeScript compilation cache on disk.
 	 * This removes all tool-specific subdirectories and their contents.
 	 */
 	clearCache(): void {
-		this.tsCache.clear()
+		this.lastLoaded.clear()
+		this.sourceFailures.clear()
 
 		if (fs.existsSync(this.cacheDir)) {
 			try {
+				this.prepareCacheDirectory()
 				const entries = fs.readdirSync(this.cacheDir, { withFileTypes: true })
 				for (const entry of entries) {
 					const entryPath = path.join(this.cacheDir, entry.name)
-					if (entry.isDirectory()) {
-						// Remove tool-specific subdirectory and all its contents.
-						fs.rmSync(entryPath, { recursive: true, force: true })
-					} else if (entry.name.endsWith(".mjs")) {
-						// Also clean up any legacy flat .mjs files from older cache format.
-						fs.unlinkSync(entryPath)
+					try {
+						if (entry.isDirectory()) {
+							// Remove tool-specific subdirectory and all its contents.
+							fs.rmSync(entryPath, { recursive: true, force: true })
+						} else if (entry.name.endsWith(".mjs")) {
+							// Also clean up any legacy flat .mjs files from older cache format.
+							fs.unlinkSync(entryPath)
+						}
+					} catch (error) {
+						console.error(`[CustomToolRegistry] clearCache failed for ${entryPath}: ${String(error)}`)
 					}
 				}
 			} catch (error) {
@@ -276,31 +347,33 @@ export class CustomToolRegistry {
 		const ext = path.extname(absolutePath)
 
 		if (ext === ".js" || ext === ".mjs") {
-			return import(`file://${absolutePath}`)
+			return import(pathToFileURL(absolutePath).href)
 		}
 
 		const stat = fs.statSync(absolutePath)
-		const cacheKey = `${absolutePath}:${stat.mtimeMs}`
+		// Version the entry format so older bundles cannot bypass env publication.
+		const cacheKey = `v2:${absolutePath}:${stat.mtimeMs}`
 
-		// Check if we have a cached version in memory.
-		if (this.tsCache.has(cacheKey)) {
-			const cachedPath = this.tsCache.get(cacheKey)!
-			return import(`file://${cachedPath}`)
-		}
+		this.prepareCacheDirectory()
 
 		const hash = createHash("sha256").update(cacheKey).digest("hex").slice(0, 16)
 
 		// Use a tool-specific subdirectory to avoid .env file conflicts between tools.
 		const toolCacheDir = path.join(this.cacheDir, hash)
-		fs.mkdirSync(toolCacheDir, { recursive: true })
+		fs.mkdirSync(toolCacheDir, { recursive: true, mode: 0o700 })
+		this.validateCachePath(toolCacheDir, true)
 
 		const tempFile = path.join(toolCacheDir, "bundle.mjs")
 
 		// Check if we have a cached version on disk (from a previous run/instance).
-		if (fs.existsSync(tempFile)) {
-			this.tsCache.set(cacheKey, tempFile)
-			return import(`file://${tempFile}`)
+		if (this.validateCachePath(tempFile, false, true)) {
+			return import(pathToFileURL(tempFile).href)
 		}
+
+		// Remember a source diagnostic, not a missing or unsafe cache path.
+		const failure = this.sourceFailures.get(absolutePath)
+		if (failure?.mtimeMs === stat.mtimeMs) throw failure.error
+		this.sourceFailures.delete(absolutePath)
 
 		// Get the tool's directory to include its node_modules in resolution path.
 		const toolDir = path.dirname(absolutePath)
@@ -313,30 +386,42 @@ export class CustomToolRegistry {
 		// Bundle the TypeScript file with dependencies using esbuild CLI.
 		// - Node.js built-ins are external (they can't be bundled and are always available)
 		// - npm packages are bundled with CommonJS require() shim for compatibility
-		await runEsbuild(
-			{
-				entryPoint: absolutePath,
-				outfile: tempFile,
-				format: "esm",
-				platform: "node",
-				target: "node18",
-				bundle: true,
-				sourcemap: "inline",
-				packages: "bundle",
-				nodePaths,
-				external: NODE_BUILTIN_MODULES,
-				banner: COMMONJS_REQUIRE_BANNER,
-			},
-			this.extensionPath,
-		)
+		const pendingFile = path.join(toolCacheDir, `bundle-${randomUUID()}.tmp.mjs`)
+		try {
+			await runEsbuild(
+				{
+					entryPoint: absolutePath,
+					outfile: pendingFile,
+					format: "esm",
+					platform: "node",
+					target: "node18",
+					bundle: true,
+					sourcemap: "inline",
+					packages: "bundle",
+					nodePaths,
+					external: NODE_BUILTIN_MODULES,
+					banner: COMMONJS_REQUIRE_BANNER,
+				},
+				this.extensionPath,
+			)
 
-		// Copy .env files from the tool's source directory to the tool-specific cache directory.
-		// This allows tools that use dotenv with __dirname to find their .env files,
-		// while ensuring different tools' .env files don't overwrite each other.
-		this.copyEnvFiles(toolDir, toolCacheDir)
+			fs.chmodSync(pendingFile, 0o600)
+			this.validateCachePath(pendingFile, false)
+			this.copyEnvFiles(toolDir, toolCacheDir)
+			// A concurrent cleanup can make esbuild recreate this directory with a loose mode.
+			this.validateCachePath(toolCacheDir, true)
+			// The bundle is the commit marker. Readers only reuse a complete entry.
+			fs.renameSync(pendingFile, tempFile)
+		} catch (error) {
+			if (error instanceof EsbuildSourceError) {
+				this.sourceFailures.set(absolutePath, { mtimeMs: stat.mtimeMs, error })
+			}
+			throw error
+		} finally {
+			fs.rmSync(pendingFile, { force: true })
+		}
 
-		this.tsCache.set(cacheKey, tempFile)
-		return import(`file://${tempFile}`)
+		return import(pathToFileURL(tempFile).href)
 	}
 
 	/**
@@ -348,26 +433,19 @@ export class CustomToolRegistry {
 	 * @param destDir - The tool-specific cache directory to copy .env files to
 	 */
 	private copyEnvFiles(toolDir: string, destDir: string): void {
-		try {
-			const files = fs.readdirSync(toolDir)
-			const envFiles = files.filter((f) => f === ".env" || f.startsWith(".env."))
-
-			for (const envFile of envFiles) {
-				const srcPath = path.join(toolDir, envFile)
-				const destPath = path.join(destDir, envFile)
-
-				// Only copy if source is a file (not a directory).
-				const stat = fs.statSync(srcPath)
-				if (stat.isFile()) {
-					fs.copyFileSync(srcPath, destPath)
-					console.log(`[CustomToolRegistry] copied ${envFile} to tool cache directory`)
-				}
+		const envFiles = fs.readdirSync(toolDir).filter((file) => file === ".env" || file.startsWith(".env."))
+		for (const envFile of envFiles) {
+			const source = path.join(toolDir, envFile)
+			if (!fs.statSync(source).isFile()) continue
+			const pending = path.join(destDir, `${envFile}-${randomUUID()}.tmp`)
+			try {
+				fs.copyFileSync(source, pending, fs.constants.COPYFILE_EXCL)
+				fs.chmodSync(pending, 0o600)
+				this.validateCachePath(pending, false)
+				fs.renameSync(pending, path.join(destDir, envFile))
+			} finally {
+				fs.rmSync(pending, { force: true })
 			}
-		} catch (error) {
-			// Non-fatal: log but don't fail if we can't copy env files.
-			console.warn(
-				`[CustomToolRegistry] failed to copy .env files: ${error instanceof Error ? error.message : String(error)}`,
-			)
 		}
 	}
 

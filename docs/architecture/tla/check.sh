@@ -29,7 +29,7 @@ for spec in $specs; do
 		java -XX:+UseParallelGC -cp "$TLA_JAR" tlc2.TLC -metadir "$(mktemp -d -p "$meta")/s" -config "$cfg" "$module" >"$meta/out" 2>&1
 		got=unknown
 		grep -q "No error has been found" "$meta/out" && got=pass
-		grep -q "violated" "$meta/out" && got=fail
+		grep -Eq 'violated|Error: The invariant of .* is equal to FALSE' "$meta/out" && got=fail
 		states=$(grep -o '[0-9,]* distinct states found' "$meta/out" | head -1)
 		if [ "$got" = "$want" ]; then echo "ok    $cfg ($want, $states)"; else echo "WRONG $cfg (want $want, got $got)"; bad=1; fi
 	done

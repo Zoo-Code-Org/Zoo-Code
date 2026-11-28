@@ -49,6 +49,9 @@ function getModuleDir(): string | undefined {
 
 const moduleDir = getModuleDir()
 
+/** A recognized syntax diagnostic located in the entry source. Other failures remain retryable. */
+export class EsbuildSourceError extends Error {}
+
 export interface EsbuildOptions {
 	/** Entry point file path (absolute) */
 	entryPoint: string
@@ -161,6 +164,7 @@ export async function runEsbuild(options: EsbuildOptions, extensionPath?: string
 
 	const args: string[] = [
 		scriptPath,
+		"--color=false",
 		options.entryPoint,
 		`--outfile=${options.outfile}`,
 		`--format=${options.format ?? "esm"}`,
@@ -204,6 +208,15 @@ export async function runEsbuild(options: EsbuildOptions, extensionPath?: string
 	} catch (error) {
 		const execaError = error as { stderr?: string; stdout?: string; exitCode?: number; message: string }
 		const errorMessage = execaError.stderr || execaError.stdout || `esbuild exited with code ${execaError.exitCode}`
-		throw new Error(`esbuild failed: ${errorMessage}`)
+		// Only recognize syntax errors in the entry file. Unknown diagnostics and dependency errors remain retryable.
+		const syntaxDiagnostics = errorMessage.matchAll(
+			/\[ERROR\] (?:Unexpected|Expected|Unterminated|Syntax error)\b[^\r\n]*\r?\n(?:[ \t]*\r?\n)*[ \t]+(.+):\d+:\d+:[ \t]*(?:\r?\n|$)/g,
+		)
+		const hasSourceError = Array.from(syntaxDiagnostics).some((diagnostic) => {
+			const location = diagnostic[1]
+			return location !== undefined && path.resolve(location) === path.resolve(options.entryPoint)
+		})
+		const ErrorType = execaError.exitCode === 1 && hasSourceError ? EsbuildSourceError : Error
+		throw new ErrorType(`esbuild failed: ${errorMessage}`)
 	}
 }
