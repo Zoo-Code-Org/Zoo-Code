@@ -474,7 +474,9 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 					id: "new-profile-id",
 					apiProvider: providerIdentifiers.anthropic,
 				})
-				const setModeConfigSpy = vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue()
+				const setModeConfigSpy = vi
+					.spyOn(provider.providerSettingsManager, "setModeConfig")
+					.mockResolvedValue(true)
 				await provider.contextProxy.setValue("mode", "architect")
 
 				await provider.activateProviderProfile(
