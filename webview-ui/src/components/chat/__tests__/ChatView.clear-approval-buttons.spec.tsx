@@ -111,13 +111,20 @@ const START_NEW_TASK_BUTTON_LABEL = "chat:startNewTask.title"
 const SEE_NEW_CHANGES_BUTTON_LABEL = "chat:seeNewChanges.title"
 const RESTORE_CHANGES_BUTTON_LABEL = "chat:restoreChanges.title"
 
-const hydrateState = (clineMessages: ClineMessage[]) => {
+interface QueuedMessage {
+	id: string
+	text: string
+	images?: string[]
+}
+
+const hydrateState = (clineMessages: ClineMessage[], messageQueue: QueuedMessage[] = []) => {
 	window.postMessage(
 		{
 			type: "state",
 			state: {
 				version: "1.0.0",
 				clineMessages,
+				messageQueue,
 				taskHistory: [],
 				shouldShowAnnouncement: false,
 				allowedCommands: [],
@@ -950,6 +957,12 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 	const sentTypes = () =>
 		(vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.map(([m]) => (m as { type?: string }).type)
 
+	const queuedPayloads = () =>
+		vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([m]) => (m as { type?: string }).type === "queueMessage")
+			.map(([m]) => m as { type?: string; text?: string })
+
 	const asked = (response: string) =>
 		(vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.some(
 			([m]) =>
@@ -1074,6 +1087,39 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 			expect.objectContaining({ type: "askResponse", askResponse: "messageResponse", text: "do not run this" }),
 		)
 		expect(sentTypes()).not.toContain("queueMessage")
+	})
+
+	it("text feedback routes past a non-empty queue when a command ask waits (review 6088302272 follow-up)", async () => {
+		// The queue-drain clause bows to the same exception as the streaming
+		// guard: with a pending command ask, the reply must answer the ask,
+		// not join the queue. A queued message cannot stand in for this
+		// ask's answer — for a protected ask the queue never drains into it,
+		// and for an unprotected one the host can claim the queued text as
+		// yesButtonClicked, so "do not run this" would approve the command
+		// it was meant to stop.
+		const earlierReply: QueuedMessage[] = [{ id: "q1", text: "earlier queued reply", images: [] }]
+		const { getByRole, queryByText } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("text", 3, true)], earlierReply)
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		await act(async () => {
+			fireEvent.input(getByRole("textbox"), { target: { value: "do not run this" } })
+		})
+		await act(async () => {
+			fireEvent.keyDown(getByRole("textbox"), { key: "Enter" })
+		})
+
+		expect(asked("messageResponse")).toBe(true)
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "askResponse", askResponse: "messageResponse", text: "do not run this" }),
+		)
+		expect(sentTypes()).not.toContain("queueMessage")
+		// The exemption answers the ask; it must not drain or echo the
+		// earlier queued item either.
+		expect(queuedPayloads().every((m) => m.text !== "do not run this")).toBe(true)
 	})
 
 	it("text feedback queues when a newer partial command ask streams over an older cancelled ask (review 6088358220)", async () => {

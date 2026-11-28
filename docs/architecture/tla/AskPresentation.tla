@@ -23,8 +23,10 @@
 \* Not modeled: the Proceed/Kill buttons of ou, response routing of a click, terminal rows.
 \* Gap: thread 4658203883 (Deny must answer the command, not cancel the stream)
 \* and review 6087624965 (text feedback for a recovered ask must route to
-\* messageResponse past the streaming queue guard). The sink here is button
-\* state, not the posted response. Vitest pins the routing.
+\* messageResponse past the streaming queue guard) with its follow-up
+\* 4719513680 (the same routing past the non-empty-queue drain clause).
+\* The sink here is button state, not the posted response. Vitest pins the
+\* routing.
 \* Cost and result lines were written after the TLC runs. See Result below.
 
 EXTENDS Naturals, Sequences
@@ -302,8 +304,16 @@ NoHiddenPendingCaTail ==
 \* changes only RouteMatchCa, so F7 is its one reachable failure and the
 \* comment now names that alone. The batch-approval readiness finding
 \* (4724737729) is test side: the publish-then-arm ordering it asks the
-\* test to observe is the existing OnlyOwnPublishedResponse phase model
-\* here and the Entry/Published phases of AskResponseTargeting.tla, so
-\* no new invariant.
+\* test to observe is the OnlyOwnPublishedResponse invariant of
+\* AskResponseTargeting.tla, whose Entry and Published phases model that
+\* publication and arming order. This module models button state only,
+\* so no new invariant here.
+\* Review round 11 (review 6095654977, finding 4725383492): covered 1,
+\* added 0, gap 0. The round-10 note above said the publish-then-arm
+\* phase model was "here"; OnlyOwnPublishedResponse and the Entry and
+\* Published phases live in AskResponseTargeting.tla, and the note now
+\* points there. The queue-drain clause finding (4719513680, webview
+\* send routing past a non-empty queue) is test side like the streaming
+\* guard sibling recorded in the Gap block below.
 
 ====

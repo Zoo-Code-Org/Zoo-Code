@@ -133,21 +133,31 @@ describe("ask response targeting", () => {
 		await attachQueue(task)
 		const access = task as unknown as AskTargetingTaskAccess
 
-		// The row's publication boundary: addToClineMessages flushes the row to
-		// the webview, arms the ask's token (the beforeEmit hook), then emits
-		// the `created` Message event. A listener that answers at that event
-		// tags with this ask's token and must resolve it. The wrapper binds the
-		// real publication so the beforeEmit hook actually runs.
+		// The row's publication boundary: addToClineMessages flushes the row
+		// to the webview, arms the ask's token (the beforeEmit hook), then
+		// emits the `created` Message event. A REAL listener on that event
+		// must be able to answer the armed ask: if the arm moved after the
+		// event, the listener's response would carry no token and the ask
+		// would stay pending. The fixture mocks emit, so this test transplants
+		// the real EventEmitter emit and answers from a registered listener
+		// (review 6079358113 follow-up 4714138962 -- a beforeEmit injection
+		// cannot observe the arm-versus-event order).
+		const realEmit = Task.prototype.emit.bind(task) as (event: string, payload: unknown) => boolean
+		access.emit = realEmit
+		task.on(RooCodeEventName.Message, ({ action, message }) => {
+			if (action === "created" && message.type === "ask") {
+				task.handleWebviewAskResponse("yesButtonClicked")
+			}
+		})
+
+		// The real publication (flush, arm, emit, save) so the created event
+		// actually fires with the ask row.
 		const realAdd = (
 			Task.prototype as unknown as {
 				addToClineMessages: (message: unknown, beforeEmit?: () => void) => Promise<unknown>
 			}
 		).addToClineMessages.bind(task)
-		access.addToClineMessages = (message: unknown, beforeEmit?: () => void) =>
-			realAdd(message, () => {
-				beforeEmit?.()
-				task.handleWebviewAskResponse("yesButtonClicked")
-			})
+		access.addToClineMessages = realAdd
 
 		const askPromise = task.ask("command", "echo hi", false)
 		const answered = askPromise.then(
@@ -492,6 +502,59 @@ describe("ask response targeting", () => {
 
 		// The interactive notification arms 2s after the ask blocks; the ask
 		// stays pending across that delay here.
+		await new Promise((resolve) => setTimeout(resolve, 2300))
+
+		expect(events).toContain(RooCodeEventName.TaskInteractive)
+
+		setTimeout(() => {
+			task.approveAsk()
+		}, 0)
+		await askPromise
+	}, 15000)
+
+	it("keeps the interactive status timers armed when an orphan lands in the entry window", async () => {
+		const provider = stubProvider()
+		const task = buildTask(provider)
+		await attachQueue(task)
+		const access = task as unknown as AskTargetingTaskAccess & {
+			findMessageByTimestamp: ReturnType<typeof vi.fn>
+		}
+		access.findMessageByTimestamp = vi.fn((ts: number) => ({ ts, type: "ask", ask: "command", text: "echo hi" }))
+		const events: string[] = []
+		access.emit = vi.fn((event: string) => {
+			events.push(event)
+		})
+
+		// The orphan must land inside the publication window: after the entry
+		// reset wiped the response slot and before the beforeEmit hook arms
+		// the ask. A real addToClineMessages wrapper injects the click there,
+		// so the arrival tags with no token and stays an orphan (review
+		// 6079358113 follow-up 4714139700 -- the ownership clause that keeps
+		// the ask blocking must see this orphan, and only this interleaving
+		// reaches it; the pre-ask arrivals the entry reset wipes cannot).
+		const realAdd = (
+			Task.prototype as unknown as {
+				addToClineMessages: (message: unknown, beforeEmit?: () => void) => Promise<unknown>
+			}
+		).addToClineMessages.bind(task)
+		access.addToClineMessages = (message: unknown, beforeEmit?: () => void) =>
+			realAdd(message, () => {
+				task.handleWebviewAskResponse("yesButtonClicked")
+				beforeEmit?.()
+			})
+
+		const askPromise = task.ask("command", "echo hi", false)
+		await vi.waitFor(() => {
+			if (access.awaitingAskTarget === undefined) {
+				throw new Error("ask not armed yet")
+			}
+		})
+
+		// The interactive notification arms 2s after the ask blocks; the ask
+		// stays pending past that delay here. The orphan must not mark the
+		// ask non-blocking: the ownership clause reads the response's tag,
+		// and the orphan's tag is not this ask's token, so the status timers
+		// still arm and TaskInteractive still fires.
 		await new Promise((resolve) => setTimeout(resolve, 2300))
 
 		expect(events).toContain(RooCodeEventName.TaskInteractive)

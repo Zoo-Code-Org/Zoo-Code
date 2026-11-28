@@ -837,14 +837,22 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						? newestAskOrReq
 						: undefined
 
+				// (review 6088302272 follow-up 4719513680) The queue-drain
+				// clause bows to the same exception: a queued message cannot
+				// stand in for this ask's answer. For a protected ask the
+				// queue never drains into it, and for an unprotected one the
+				// host may claim the queued text as yesButtonClicked — either
+				// way the feedback would never resolve the ask it answers.
+				// The earlier queued items stay queued for their own turn.
 				// Queue message if:
 				// - Task is busy (sendingDisabled) or streaming (isStreaming),
 				//   unless a pending command ask waits for the reply
-				// - Queue has items (preserve message order during drain)
+				// - Queue has items (preserve message order during drain),
+				//   unless a pending command ask waits for the reply
 				// - Command is running (command_output) - user's message should be queued for AI, not sent to terminal
 				if (
 					((sendingDisabled || isStreaming) && !pendingCommandAsk) ||
-					messageQueue.length > 0 ||
+					(messageQueue.length > 0 && !pendingCommandAsk) ||
 					clineAskRef.current === "command_output"
 				) {
 					try {
