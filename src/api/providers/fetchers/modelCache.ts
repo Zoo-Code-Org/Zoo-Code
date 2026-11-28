@@ -520,13 +520,24 @@ export async function initializeModelCacheRefresh(buildHandler: (provider: Route
  *
  * @param options - The options for fetching models, including provider, apiKey, and baseUrl
  * @param refresh - If true, immediately fetch fresh data from API
+ * @param fresh - Wait for pre-existing discovery before starting the refresh after a server mutation
  */
 export const flushModels = async (
 	options: GetModelsOptions,
 	handler: ApiHandler,
 	refresh: boolean = false,
+	fresh: boolean = false,
 ): Promise<void> => {
 	if (refresh) {
+		if (fresh) {
+			const cacheKey = getCacheKey(options, handler)
+			// Drain requests that started before the server mutation before fetching its result.
+			const existing = inFlightRefresh.get(cacheKey)
+			if (existing) {
+				await joinFlight(cacheKey, existing, options.signal).catch(() => {})
+				throwIfAborted(options.signal)
+			}
+		}
 		// Don't delete memory cache - let refreshModels atomically replace it
 		// This prevents a race condition where getModels() might be called
 		// before refresh completes, avoiding a gap in cache availability

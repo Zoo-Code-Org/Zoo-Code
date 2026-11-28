@@ -1827,3 +1827,27 @@ it("ignores the caller signal on the auth-scoped bypass without entering the fli
 		boundSpy.mockRestore()
 	}
 })
+
+// A load must not reuse a catalog request that started before the server mutation.
+it.each([false, true])("fresh flush follows an older flight (failure=%s)", async (failure) => {
+	const { flushModels, refreshModels } = await import("../modelCache")
+	let resolveOld!: (models: ModelRecord) => void
+	let rejectOld!: (error: Error) => void
+	const old = new Promise<ModelRecord>((resolve, reject) => {
+		resolveOld = resolve
+		rejectOld = reject
+	})
+	const fetch = vi
+		.fn()
+		.mockReturnValueOnce(old)
+		.mockResolvedValueOnce({ fresh: { contextWindow: 8192, supportsPromptCache: false } })
+	const handler = makeHandler(LITELLM_SCOPE, fetch)
+	const options = { provider: providerIdentifiers.litellm, baseUrl: `http://fresh-${failure}:4000` } as const
+	const first = refreshModels(options, handler)
+	const flush = flushModels(options, handler, true, true)
+	expect(fetch).toHaveBeenCalledTimes(1)
+	if (failure) rejectOld(new Error("old discovery failed"))
+	else resolveOld({ stale: { contextWindow: 1024, supportsPromptCache: false } })
+	await Promise.all([first, flush])
+	expect(fetch).toHaveBeenCalledTimes(2)
+})

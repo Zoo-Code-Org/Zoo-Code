@@ -1226,38 +1226,70 @@ describe("ClineProvider", () => {
 		})
 	})
 
-	test("loads full model details when preparing an LM Studio task", async () => {
-		// buildApiHandler is a module-level mock shared across describes; pin its return value
-		// so this test always passes a handler double to forceFullModelDetailsLoad.
-		const { buildApiHandler } = await import("../../../api")
-		vi.mocked(buildApiHandler).mockReturnValue({
-			getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
-		} as unknown as ReturnType<typeof buildApiHandler>)
+	test.each([undefined, "http://localhost:1234"])(
+		"loads full model details when preparing an LM Studio task at %s",
+		async (lmStudioBaseUrl) => {
+			// buildApiHandler is a module-level mock shared across describes; pin its return value
+			// so this test always passes a handler double to forceFullModelDetailsLoad.
+			const { buildApiHandler } = await import("../../../api")
+			vi.mocked(buildApiHandler).mockReturnValue({
+				getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+			} as unknown as ReturnType<typeof buildApiHandler>)
 
-		await provider.performPreparationTasks({
-			apiConfiguration: {
-				apiProvider: providerIdentifiers.lmstudio,
-				lmStudioBaseUrl: "http://localhost:1234",
-				lmStudioModelId: "test-model",
-			},
-		} as Task)
+			await provider.performPreparationTasks({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.lmstudio,
+					lmStudioBaseUrl,
+					lmStudioModelId: "test-model",
+				},
+			} as Task)
 
-		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model", expect.anything())
+			expect(forceFullModelDetailsLoad).toHaveBeenCalledWith(
+				lmStudioBaseUrl,
+				"test-model",
+				expect.anything(),
+				expect.any(AbortSignal),
+			)
+		},
+	)
+
+	test.each([false, true])("releases only its own preparation controller (replaced=%s)", async (replaced) => {
+		// Preparation uses only the configuration and metadata controller of this task double.
+		const task = {
+			apiConfiguration: { apiProvider: providerIdentifiers.lmstudio, lmStudioModelId: "test-model" },
+			metadataFetchAbortController: undefined,
+		} as unknown as Task
+		let ownedSignal: AbortSignal | undefined
+		const replacement = new AbortController()
+		vi.mocked(forceFullModelDetailsLoad).mockImplementationOnce(async (_url, _model, _handler, signal) => {
+			ownedSignal = signal
+			expect(signal).toBe(task.metadataFetchAbortController?.signal)
+			expect(signal?.aborted).toBe(false)
+			if (replaced) task.metadataFetchAbortController = replacement
+		})
+		await provider.performPreparationTasks(task)
+		expect(ownedSignal?.aborted).toBe(true)
+		expect(task.metadataFetchAbortController).toBe(replaced ? replacement : undefined)
+		expect(replacement.signal.aborted).toBe(false)
 	})
 
-	test("does not reload full model details when the LM Studio model is already loaded", async () => {
-		vi.mocked(hasLoadedFullDetails).mockReturnValue(true)
+	test.each([undefined, "http://localhost:1234"])(
+		"does not reload full model details already loaded at %s",
+		async (lmStudioBaseUrl) => {
+			vi.mocked(hasLoadedFullDetails).mockReturnValue(true)
 
-		await provider.performPreparationTasks({
-			apiConfiguration: {
-				apiProvider: providerIdentifiers.lmstudio,
-				lmStudioBaseUrl: "http://localhost:1234",
-				lmStudioModelId: "test-model",
-			},
-		} as Task)
+			await provider.performPreparationTasks({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.lmstudio,
+					lmStudioBaseUrl,
+					lmStudioModelId: "test-model",
+				},
+			} as Task)
 
-		expect(forceFullModelDetailsLoad).not.toHaveBeenCalled()
-	})
+			expect(hasLoadedFullDetails).toHaveBeenCalledWith("test-model", lmStudioBaseUrl)
+			expect(forceFullModelDetailsLoad).not.toHaveBeenCalled()
+		},
+	)
 
 	test("resolveWebviewView hydrates the saved terminalProfile into the process-wide Terminal state", async () => {
 		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
