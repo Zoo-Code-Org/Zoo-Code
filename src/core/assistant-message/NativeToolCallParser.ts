@@ -386,6 +386,87 @@ export class NativeToolCallParser {
 		return finalToolUse
 	}
 
+	/**
+	 * Recover a follow_up array from legacy XML tool-call markup that some
+	 * models emit inside the question text (issue 1034). Two forms are read:
+	 * `<follow_up>[...]</follow_up>` and `<parameter name="follow_up">[...]
+	 * </parameter>`. Returns the recovered array and the question text with
+	 * the legacy markup removed, or null when no parseable array is found.
+	 */
+	private static recoverFollowUpFromLegacyXml(question: string): { followUp: unknown[]; question: string } | null {
+		const patterns = [
+			{ open: /<follow_up>/, close: /<\/follow_up>/g },
+			{ open: /<parameter\s+name=["']follow_up["']>/, close: /<\/parameter>/g },
+		]
+
+		// Select the enclosing wrapper before tags inside its JSON payload
+		// (review thread 4658490177). Match both forms and process the
+		// earliest opening tag: a wrapper tag that appears inside another
+		// form's payload opens later and must not be recovered first.
+		const candidates = patterns
+			.map((pattern) => ({ pattern, open: pattern.open.exec(question) }))
+			.filter(
+				(candidate): candidate is { pattern: (typeof patterns)[number]; open: RegExpExecArray } =>
+					candidate.open !== null,
+			)
+			.sort((a, b) => a.open.index - b.open.index)
+
+		// Opening candidates nested inside a rejected enclosing payload are
+		// its string content, not recoverable wrappers (review thread
+		// 4661230351): a non-array payload excludes them, while standalone
+		// wrappers outside the rejected span still recover.
+		const rejectedSpans: Array<[number, number]> = []
+
+		for (const { pattern, open: openMatch } of candidates) {
+			if (rejectedSpans.some(([start, end]) => openMatch.index >= start && openMatch.index < end)) {
+				continue
+			}
+
+			// A closing tag inside a JSON string is payload content, not a
+			// boundary (review thread 4658157957). Try every closing-tag
+			// candidate until one yields a payload that parses to an array.
+			const payloadStart = openMatch.index + openMatch[0].length
+			const tail = question.slice(payloadStart)
+			let closeMatch: RegExpExecArray | null
+
+			while ((closeMatch = pattern.close.exec(tail)) !== null) {
+				let parsed: unknown
+
+				try {
+					parsed = JSON.parse(tail.slice(0, closeMatch.index).trim())
+				} catch {
+					continue
+				}
+
+				const matchedEnd = payloadStart + closeMatch.index + closeMatch[0].length
+
+				if (!Array.isArray(parsed)) {
+					// A well-formed enclosing wrapper whose payload is valid
+					// JSON but not an array rejects its own recovery: tags
+					// nested inside that payload are its content, not
+					// wrappers (review thread 4661230351).
+					rejectedSpans.push([openMatch.index, matchedEnd])
+					break
+				}
+
+				// Remove the XML block and the remaining legacy wrapper tags.
+				// The `\s` (not `\s+`) before the attribute is enough: the
+				// `[^>]*` that follows absorbs any further whitespace.
+				const matchedBlock = question.slice(openMatch.index, matchedEnd)
+				const cleaned = question
+					.replace(matchedBlock, "")
+					.replace(/<\/?question>/g, "")
+					.replace(/<\/?invoke(?:\s[^>]*)?>/g, "")
+					.replace(/<\/?parameter(?:\s[^>]*)?>/g, "")
+					.trim()
+
+				return { followUp: parsed, question: cleaned }
+			}
+		}
+
+		return null
+	}
+
 	private static coerceOptionalNumber(value: unknown): number | undefined {
 		if (typeof value === "number" && Number.isFinite(value)) {
 			return value
@@ -893,20 +974,40 @@ export class NativeToolCallParser {
 					}
 					break
 
-				case "ask_followup_question":
+				case "ask_followup_question": {
+					// Some models trained on the removed XML tool-call format put the
+					// follow_up data as XML markup inside the question text and send no
+					// follow_up field (issue 1034). Recover it before the checks below.
+					let question = args.question as string | undefined
+					let followUp = args.follow_up as unknown
+
+					if (question !== undefined && (followUp === undefined || followUp === null)) {
+						const recovered = this.recoverFollowUpFromLegacyXml(question)
+
+						// Stryker disable next-line ConditionalExpression: recovered is null only
+						// when recovery already failed; forcing the branch dereferences null,
+						// which the parseToolCall catch maps to the same null reject.
+						if (recovered) {
+							followUp = recovered.followUp
+							question = recovered.question
+							usedLegacyFormat = true
+						}
+					}
+
 					// Require a question and a present follow_up. When follow_up is
 					// present-but-not-an-array (e.g. an object/string/number produced by
 					// incremental JSON parsing), we still construct nativeArgs and forward
 					// the raw value so the tool can emit a precise "must be an array" error
 					// instead of the generic parser failure, which would surface as a
 					// misleading "Missing value for required parameter 'follow_up'" error.
-					if (args.question !== undefined && args.follow_up !== undefined) {
+					if (question !== undefined && followUp !== undefined) {
 						nativeArgs = {
-							question: args.question,
-							follow_up: args.follow_up,
+							question,
+							follow_up: followUp,
 						} as NativeArgsFor<TName>
 					}
 					break
+				}
 
 				case "codebase_search":
 					if (args.query !== undefined) {
