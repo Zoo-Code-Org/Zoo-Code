@@ -3132,6 +3132,34 @@ describe("webviewMessageHandler - renameTaskWithId", () => {
 	})
 })
 
+describe("webviewMessageHandler - non-portable settings keys", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("refuses viewStates while applying the portable keys of the same payload", async () => {
+		// The per-view selections and the claim token that binds them are minted by the host, and the
+		// settings-file path already refuses them. A posted updateSettings is the same untrusted input,
+		// so writing them straight into the shared store would let a webview choose which persisted view
+		// entry - and with which identity - it owns.
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: {
+				viewStates: { "some-view": { claimToken: "webview-minted", mode: "code", updatedAt: 1 } },
+				customInstructions: "carry on",
+			},
+		})
+
+		// The filter's full output is the contract: exactly one write, the portable pair intact.
+		expect(vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls).toEqual([
+			["customInstructions", "carry on"],
+		])
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring non-portable settings key viewStates"),
+		)
+	})
+})
+
 // The display settings are written like any other setting, but the webview is not trusted: a value that its own
 // controls cannot produce (a hand-written message) is ignored before anything is done for it.
 describe("updateSettings with the display settings", () => {

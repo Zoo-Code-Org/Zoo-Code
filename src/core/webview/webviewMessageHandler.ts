@@ -82,6 +82,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { playTts, setTtsEnabled, setTtsSpeed, stopTts } from "../../utils/tts"
 import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
+import { isNonPortableSettingsKey } from "../config/ContextProxy"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
 import { getGitHubCopilotViewState } from "../../services/language-models/copilotViewState"
@@ -794,6 +795,17 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					if (isNonPortableSettingsKey(key)) {
+						// Per-view selections and the claim token that binds them are minted and held by the host,
+						// and the settings-file path already refuses them. A posted updateSettings is the same
+						// untrusted input, so writing them here would let a webview choose which persisted view
+						// entry - and with which identity - it owns, bypassing the claim check in setViewStateId.
+						provider.log(
+							`[updateSettings] Ignoring non-portable settings key ${key} posted by the webview.`,
+						)
+
+						continue
+					}
 					// An invalid display value is ignored, before anything is done for it.
 					if (isInvalidDisplayValue(key, value)) {
 						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
