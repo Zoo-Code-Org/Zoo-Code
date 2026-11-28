@@ -38,7 +38,11 @@ function buildTask(provider: ProviderStub, taskCwd: string) {
 	task["askResponseText"] = undefined
 	task["askResponseImages"] = undefined
 	task["lastMessageTs"] = undefined
-	task["addToClineMessages"] = vi.fn(async () => {})
+	task["addToClineMessages"] = vi.fn(async (_message: unknown, beforeEmit?: () => void) => {
+		// Stand-in for the publication boundary: run the arm hook the real
+		// method runs just before its Message event.
+		beforeEmit?.()
+	})
 	task["saveClineMessages"] = vi.fn(async () => true)
 	task["updateClineMessage"] = vi.fn(async () => {})
 	task["cancelAutoApprovalTimeout"] = vi.fn(() => {})
@@ -101,7 +105,8 @@ const TASK_CWD = "/path/to/task-workspace"
  * row and the interactive emit can actually run.
  */
 function recordClineMessages(task: Task) {
-	const addToClineMessages = vi.fn(async (message: ClineMessage) => {
+	const addToClineMessages = vi.fn(async (message: ClineMessage, beforeEmit?: () => void) => {
+		beforeEmit?.()
 		task["clineMessages"].push(message)
 	})
 	task["addToClineMessages"] = addToClineMessages

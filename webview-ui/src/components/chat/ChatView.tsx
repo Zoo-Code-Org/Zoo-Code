@@ -91,6 +91,17 @@ const CHAT_VIEWPORT_BUFFER = {
 
 const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
 
+// A command ask that still waits for a Run or Deny answer (#998). A partial
+// ask, a host-stamped ask, and the ts that the user answered locally do not
+// count. A say never carries an ask, but a legacy record can. Only type
+// "ask" counts.
+const isPendingCommandAsk = (message: ClineMessage, answeredTs: number | null): boolean =>
+	message.type === "ask" &&
+	message.ask === "command" &&
+	message.isAnswered !== true &&
+	message.partial !== true &&
+	message.ts !== answeredTs
+
 const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewProps> = (
 	{ isHidden, showAnnouncement, hideAnnouncement },
 	ref,
@@ -230,6 +241,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 	const autoApproveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 	const userRespondedRef = useRef<boolean>(false)
+	// ts of the command ask the user answered locally (#998). A say can arrive
+	// before the host stamps isAnswered on the ask, so the webview remembers it.
+	const answeredCommandAskTsRef = useRef<number | null>(null)
 	// Origin of each part of the chat box value. Null means all of it is user text.
 	const segmentsRef = useRef<MentionSegment[] | null>(null)
 	// Trimmed chat box segments for the text. A value that does not match the text is all generated.
@@ -422,6 +436,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							}
 							break
 						case "command":
+							// (#998 review r9) A cost update on a preceding row
+							// re-runs this effect while the locally answered command
+							// ask still waits for the host stamp. The recorded local
+							// answer, not the host stamp alone, decides liveness;
+							// a different unanswered command stays eligible.
+							if (lastMessage.ts === answeredCommandAskTsRef.current) {
+								break
+							}
 							setSendingDisabled(isPartial)
 							setClineAsk("command")
 							setEnableButtons(!isPartial)
@@ -529,10 +551,101 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "completion_result":
 							break
 					}
+					{
+						// A full-state snapshot can end in a say while a command ask
+						// still waits for an answer (#998). The say must not mask
+						// the ask's Run/Deny buttons. Scan back to the newest ask.
+						// An api_req_started say supersedes it; so does any newer ask.
+						const maskedAsk = findLast(
+							messages,
+							(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+						)
+						// The newest ask is a live command ask when it is pending.
+						const maskedCommandAskPending =
+							maskedAsk !== undefined && isPendingCommandAsk(maskedAsk, answeredCommandAskTsRef.current)
+						if (maskedCommandAskPending) {
+							// Mirror the ask branch's command presentation. This also
+							// re-enables the controls when a partial command ask
+							// completes (#998 review): the partial ask disabled
+							// Run/Deny, and the completed ask must restore them even
+							// though clineAskRef.current is already "command".
+							setSendingDisabled(false)
+							setClineAsk("command")
+							setEnableButtons(true)
+							setPrimaryButtonKey("chat:runCommand.title")
+							setSecondaryButtonKey("chat:reject.title")
+						} else if (clineAskRef.current === "command") {
+							// Reconcile a recovered command ask with the host state:
+							// the controls stay up only while that ask stays live.
+							// A newer ask must clear them, not leave them lingering (#998).
+							setSendingDisabled(true)
+							setClineAsk(undefined)
+							setEnableButtons(false)
+							setPrimaryButtonKey(undefined)
+							setSecondaryButtonKey(undefined)
+						}
+						break
+					}
 					break
 			}
 		}
 	}, [lastMessage, secondLastMessage])
+
+	// (#998) A host answer can settle the ask without a click: the
+	// dwell-timeout approval and a queued reply stamp isAnswered through
+	// messageUpdated. The trailing say stays the last message, so the effect
+	// above cannot see the stamp. Reconcile from the messages array: clear
+	// the controls when the newest command ask is settled.
+	useEffect(() => {
+		// (#998 review r8) The lastMessage effect above is a
+		// useDeepCompareEffect on the last two rows, so a command ask that
+		// completes behind two unchanged say rows never re-runs it and the
+		// completed ask keeps no usable Run/Deny controls. Present the newest
+		// ask-or-api_req_started row when it is a pending command ask. The
+		// scan keeps the newest-row guard (a newer ask or a streaming
+		// api_req_started suppresses the restore) and the isPendingCommandAsk
+		// guards (answered, partial, locally answered ts).
+		const newestAskRow = findLast(
+			messagesRef.current,
+			(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+		)
+		if (newestAskRow !== undefined && isPendingCommandAsk(newestAskRow, answeredCommandAskTsRef.current)) {
+			// Mirror the ask branch's command presentation. The setters are
+			// idempotent, so re-presenting live controls is a no-op.
+			setSendingDisabled(false)
+			setClineAsk("command")
+			setEnableButtons(true)
+			setPrimaryButtonKey("chat:runCommand.title")
+			setSecondaryButtonKey("chat:reject.title")
+			return
+		}
+		if (clineAskRef.current !== "command") {
+			return
+		}
+		// Guard by the newest ask overall (#998 review): when a newer ask
+		// (for example a tool ask) is already scheduled, React has not yet
+		// flushed its setClineAsk, so clineAskRef still reads "command".
+		// The older answered command must not clear the newer ask's controls.
+		const newestAsk = findLast(messagesRef.current, (message: ClineMessage) => message.type === "ask")
+		const newestCommandAsk = findLast(
+			messagesRef.current,
+			(message: ClineMessage) => message.type === "ask" && message.ask === "command",
+		)
+		if (newestCommandAsk && newestCommandAsk.isAnswered) {
+			// (#998 review r9) A newer PENDING ask owns the presentation and
+			// installs its own controls, so leave them alone. Any other newer
+			// ask (an auto-answered tool ask, for one) installs nothing and
+			// must not leave the answered command's controls lingering.
+			const newerAskIsPending = newestAsk !== undefined && newestAsk !== newestCommandAsk && !newestAsk.isAnswered
+			if (!newerAskIsPending) {
+				setSendingDisabled(true)
+				setClineAsk(undefined)
+				setEnableButtons(false)
+				setPrimaryButtonKey(undefined)
+				setSecondaryButtonKey(undefined)
+			}
+		}
+	}, [messages])
 
 	// Update button text when messages change (e.g., completion_result is added) for subtasks in resume_task state
 	useEffect(() => {
@@ -571,6 +684,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			autoApproveTimeoutRef.current = null
 		}
 		userRespondedRef.current = false
+		answeredCommandAskTsRef.current = null
 	}, [currentTaskId])
 
 	const taskTs = task?.ts
@@ -707,15 +821,46 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					return
 				}
 
+				// (#998 review 6087624965) A recovered command ask can sit
+				// behind a partial text say: isStreaming is true while the
+				// ask still waits. Its text feedback must fall through to the
+				// messageResponse branch, not the queue — the host can claim
+				// a queued message for an unprotected command ask as
+				// yesButtonClicked, so text like "do not run this" would
+				// approve the command. Queueing stays when no command ask
+				// waits. This mirrors the Deny handler's pending-command
+				// exception.
+				// (review 6088358220) The lookup reads the newest ask or
+				// api_req_started row, like the presentation scan: an older
+				// cancelled ask must not match past a newer partial ask. A
+				// text say is not api_req_started, so the recovered ask keeps
+				// matching.
+				const newestAskOrReq = messagesRef.current.findLast(
+					(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+				)
+				const pendingCommandAsk =
+					clineAskRef.current === "command" &&
+					newestAskOrReq !== undefined &&
+					isPendingCommandAsk(newestAskOrReq, answeredCommandAskTsRef.current)
+						? newestAskOrReq
+						: undefined
+
+				// (review 6088302272 follow-up 4719513680) The queue-drain
+				// clause bows to the same exception: a queued message cannot
+				// stand in for this ask's answer. For a protected ask the
+				// queue never drains into it, and for an unprotected one the
+				// host may claim the queued text as yesButtonClicked — either
+				// way the feedback would never resolve the ask it answers.
+				// The earlier queued items stay queued for their own turn.
 				// Queue message if:
-				// - Task is busy (sendingDisabled)
-				// - API request in progress (isStreaming)
-				// - Queue has items (preserve message order during drain)
+				// - Task is busy (sendingDisabled) or streaming (isStreaming),
+				//   unless a pending command ask waits for the reply
+				// - Queue has items (preserve message order during drain),
+				//   unless a pending command ask waits for the reply
 				// - Command is running (command_output) - user's message should be queued for AI, not sent to terminal
 				if (
-					sendingDisabled ||
-					isStreaming ||
-					messageQueue.length > 0 ||
+					((sendingDisabled || isStreaming) && !pendingCommandAsk) ||
+					(messageQueue.length > 0 && !pendingCommandAsk) ||
 					clineAskRef.current === "command_output"
 				) {
 					try {
@@ -758,13 +903,30 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "resume_task":
 						case "resume_completed_task":
 						case "mistake_limit_reached":
-							vscode.postMessage({
-								type: "askResponse",
-								askResponse: "messageResponse",
-								text,
-								images,
-								segments,
-							})
+							// (#998 review, thread 4680322926) A direct text reply
+							// answers a pending command ask. Record its ts before the
+							// dispatch so a say that arrives before the host stamps
+							// isAnswered cannot restore the Run/Deny buttons. This
+							// mirrors the Run and Deny handlers. A block scopes the
+							// declaration for the shared switch clause.
+							{
+								const answeredCommandAsk =
+									clineAskRef.current === "command"
+										? messagesRef.current.findLast((message: ClineMessage) =>
+												isPendingCommandAsk(message, answeredCommandAskTsRef.current),
+											)
+										: undefined
+								if (answeredCommandAsk) {
+									answeredCommandAskTsRef.current = answeredCommandAsk.ts
+								}
+								vscode.postMessage({
+									type: "askResponse",
+									askResponse: "messageResponse",
+									text,
+									images,
+									segments,
+								})
+							}
 							break
 						// There is no other case that a textfield should be enabled.
 					}
@@ -884,6 +1046,20 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			const trimmedInput = text?.trim()
 
+			// (#998) The user answered the pending command ask. Remember its ts
+			// so a say that arrives before the host stamps isAnswered cannot
+			// re-show the Run/Deny buttons.
+			// Stryker disable next-line ConditionalExpression: a non-command Run click cannot make the recorded ts observable. The recorded ts is read only while a command ask is the newest ask, and a non-command click implies that a different ask is the newest one. The memory is reset on task change.
+			const answeredCommandAsk =
+				clineAsk === "command"
+					? messagesRef.current.findLast((message: ClineMessage) =>
+							isPendingCommandAsk(message, answeredCommandAskTsRef.current),
+						)
+					: undefined
+			if (answeredCommandAsk) {
+				answeredCommandAskTsRef.current = answeredCommandAsk.ts
+			}
+
 			switch (clineAsk) {
 				case "api_req_failed":
 				case "command":
@@ -944,10 +1120,33 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			const trimmedInput = text?.trim()
 
-			if (isStreaming) {
+			// (#998) The user answered the pending command ask. Remember its ts
+			// so a say that arrives before the host stamps isAnswered cannot
+			// re-show the Run/Deny buttons. A recovered command ask can also
+			// sit behind a partial text say, so isStreaming is true while the
+			// ask still waits: the buttons must answer the command, and Deny
+			// must not take the streaming-cancel branch.
+			// (review 6088358220) The same newest-row rule as the send path: the
+			// lookup reads the newest ask or api_req_started row, so an older
+			// cancelled ask cannot match past a newer partial ask.
+			const newestAskOrReq = messagesRef.current.findLast(
+				(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+			)
+			const pendingCommandAsk =
+				clineAsk === "command" &&
+				newestAskOrReq !== undefined &&
+				isPendingCommandAsk(newestAskOrReq, answeredCommandAskTsRef.current)
+					? newestAskOrReq
+					: undefined
+
+			if (isStreaming && !pendingCommandAsk) {
 				vscode.postMessage({ type: "cancelTask" })
 				setDidClickCancel(true)
 				return
+			}
+
+			if (pendingCommandAsk) {
+				answeredCommandAskTsRef.current = pendingCommandAsk.ts
 			}
 
 			switch (clineAsk) {
