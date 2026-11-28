@@ -21,13 +21,13 @@ import { handleOpenAIError } from "./utils/error-handler"
 import {
 	bridgeExternalAbortSignal,
 	createAbortError,
-	createTimeoutError,
 	hasUsableTimeout,
 	isRequestAborted,
 	isTimeoutAbort,
 	mergeAbortSignalAndTimeout,
 	toSdkTimeoutMs,
 } from "./utils/abort-signal"
+import { createTimeoutError } from "./utils/request-timeout"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { getFriendliModels } from "./fetchers/friendli"
@@ -109,7 +109,8 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		} catch {
 			// Classified below: only a cut-short wait is fatal.
 		}
-		if (isTimeoutAbort(signal)) throw createTimeoutError(this.providerName)
+		// The wait is the model catalog load, so a deadline seen here is model discovery.
+		if (isTimeoutAbort(signal)) throw createTimeoutError(this.providerName, "model discovery")
 		if (signal?.aborted) throw createAbortError(this.providerName)
 	}
 
@@ -272,7 +273,10 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		const deadline = hasUsableTimeout(timeoutMs) ? Date.now() + timeoutMs : undefined
 		await this.waitForCatalog(options?.abortSignal, timeoutMs)
 		const remainingMs = deadline === undefined ? undefined : deadline - Date.now()
-		if (remainingMs !== undefined && remainingMs <= 0) throw createTimeoutError(this.providerName)
+		// The wait succeeded but spent the shared deadline: the completion never got a turn.
+		if (remainingMs !== undefined && remainingMs <= 0) {
+			throw createTimeoutError(this.providerName, "completion request")
+		}
 		const { id: modelId } = this.getModel()
 		const friendliExtra = this.buildFriendliReasoningParams()
 
