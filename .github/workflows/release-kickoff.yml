@@ -23,9 +23,13 @@ name: Weekly release kickoff
 
 on:
     schedule:
-        # Friday at 12:00pm EST (17:00 UTC).
-        # This fixed UTC cron fires at 1:00pm ET while the US is on EDT.
-        - cron: "0 17 * * 5"
+        # Friday at 12:23pm EST (17:23 UTC).
+        # This fixed UTC cron fires at 1:23pm ET while the US is on EDT.
+        # Off the top of the hour on purpose: GitHub documents scheduled-run
+        # delays under high load as worst at the start of each hour. The
+        # previous 17:00 cron ran 4-8 hours late for five straight weeks and
+        # did not run at all once (issue #2767).
+        - cron: "23 17 * * 5"
     workflow_dispatch:
 
 permissions: {}
