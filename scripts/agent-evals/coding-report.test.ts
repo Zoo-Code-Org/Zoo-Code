@@ -355,11 +355,13 @@ describe("side result validation", () => {
 		const check = (change: Record<string, unknown>) => {
 			const file = validatedFile("baseline", "a".repeat(40))
 			Object.assign(file.runs[0].metrics, change)
-			return () => validateSideResultFile(file, "baseline", "a".repeat(40))
+			const parsed: unknown = JSON.parse(JSON.stringify(file))
+			return () => validateSideResultFile(parsed, "baseline", "a".repeat(40))
 		}
 		const cost = (usd: unknown) => ({ cost: { accountingComplete: true, estimated: { available: true, usd } } })
-		for (const valid of [{ durationMs: undefined }, { durationMs: 0 }, cost(0)])
-			assert.doesNotThrow(check(JSON.parse(JSON.stringify(valid))))
+		for (const valid of [{ durationMs: undefined }, { durationMs: 0 }, cost(0)]) assert.doesNotThrow(check(valid))
+		const absent = check({ durationMs: undefined })()
+		assert.equal(Object.hasOwn(absent.runs[0]!.metrics, "durationMs"), false)
 		// JSON.parse reads 1e999 as Infinity.
 		const infinite: unknown = JSON.parse("1e999")
 		for (const value of [null, "5", -1, infinite, true, {}, []]) {

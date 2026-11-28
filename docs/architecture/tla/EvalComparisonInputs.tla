@@ -32,6 +32,16 @@
 \* Gate: 408 eval tests, eval type check, and shared ESLint pass.
 \* Lint: src ESLint excludes scripts. Suppression counts did not change.
 \* Cost: about 10 agent minutes for both fixes. Each TLC run took under 1 second.
+\* PR 2154 discussion_r4725130159: the test helper kept an absent duration.
+\* Review: 0 covered, 0 added, 1 gap. This model cannot check test fixture creation.
+\* Source: coding-report.test.ts check helper. Sink: validateSideResultFile.
+\* Expect: no model change. ValueOk already permits an absent duration.
+\* Property: serialize the whole fixture, then assert that durationMs is absent.
+\* Sabotage: the old helper fails the absence assertion. The fixed helper passes.
+\* Result: fixed passes in 696 states. All three controls fail their invariants.
+\* Findings: no new code bug or false alarm was found. No model state was added.
+\* Gate: 410 eval tests, eval and extension type checks, and shared ESLint pass.
+\* Cost: shared with the EvalComparisonRelease review, about 10 agent minutes.
 EXTENDS Naturals, Sequences, FiniteSets
 CONSTANTS Inputs, Minutes, ExpectedKeys, CheckKeys, CheckTimer, CheckValues
 VARIABLES keys, agrees, minutes, metric, result

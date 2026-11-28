@@ -325,17 +325,17 @@ const executeOwnedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise
 			{ cause: error },
 		)
 	}
-	let outcome: ComparisonFlowOutcome | undefined
+	let report: ComparisonReport | undefined
 	const errors: unknown[] = []
+	const removeOwnedReport = () => removeComparisonReport(canonicalOut).catch((error) => errors.push(error))
 	try {
-		outcome = await executeLockedComparisonFlow({ ...wiring, out: canonicalOut })
+		report = await executeLockedComparisonFlow({ ...wiring, out: canonicalOut }, errors)
 	} catch (error) {
 		errors.push(error)
 	}
-	const removeOwnedReport = () => removeComparisonReport(canonicalOut).catch((error) => errors.push(error))
+	if (errors.length || wiring.interruptedSignal()) await removeOwnedReport()
 	// EvalComparisonRelease.tla: with no interrupt, there is no await from this
 	// check to the end. The release is synchronous for that reason.
-	if (wiring.interruptedSignal() && outcome?.status !== "interrupted") await removeOwnedReport()
 	try {
 		rmdirSync(lock)
 	} catch (error) {
@@ -349,14 +349,18 @@ const executeOwnedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise
 		return { status: "interrupted", signal }
 	}
 	if (errors.length === 1) throw errors[0]
-	if (errors.length || !outcome) throw new AggregateError(errors, "comparison failed and lock release failed")
-	return outcome
+	if (errors.length) throw new AggregateError(errors, "comparison terminal cleanup failed")
+	if (!report) throw new Error("comparison ended without a report or a failure")
+	return { status: "completed", report }
 }
 
-const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
+// Collect body and resource cleanup errors in order. The lock owner alone
+// decides the terminal outcome and invalidates publication before release.
+const executeLockedComparisonFlow = async (
+	wiring: ComparisonFlowWiring,
+	errors: unknown[],
+): Promise<ComparisonReport | undefined> => {
 	let completed: ComparisonReport | undefined
-	let failure: unknown
-	const cleanupErrors: unknown[] = []
 	try {
 		await removeComparisonReport(wiring.out)
 		const report = buildComparisonReport({
@@ -373,13 +377,11 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 		}
 		completed = report
 	} catch (error) {
-		// Deferred, not swallowed: the cleanup below runs first, then the
-		// failure rethrows unless the run was interrupted.
-		failure = error
+		errors.push(error)
 	} finally {
 		// An interrupt escalation must finish before the worktrees go away,
 		// so no child is still writing while its tree is deleted.
-		await wiring.interruptKill().catch((error) => cleanupErrors.push(error))
+		await wiring.interruptKill().catch((error) => errors.push(error))
 		// Acquire both output locks before removing any scratch content. A
 		// standalone side may still own one after the comparison child exits.
 		const releases: (() => void)[] = []
@@ -391,38 +393,24 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 						wiring.cleanupLockWaitMs ?? 35_000,
 					),
 				)
-			await execFileAsync(
-				"git",
-				[
-					"--git-dir",
-					path.join(wiring.scratchDir, "baseline.git-source"),
-					"worktree",
-					"remove",
-					"--force",
-					path.join(wiring.scratchDir, "baseline"),
-				],
-				{
-					cwd: wiring.root,
-					timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-					env: buildWorktreeEnvironment(process.env),
-				},
-			).catch(() => {})
-			await execFileAsync(
-				"git",
-				[
-					"--git-dir",
-					path.join(wiring.scratchDir, "candidate.git-source"),
-					"worktree",
-					"remove",
-					"--force",
-					path.join(wiring.scratchDir, "candidate"),
-				],
-				{
-					cwd: wiring.root,
-					timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-					env: buildWorktreeEnvironment(process.env),
-				},
-			).catch(() => {})
+			for (const side of ["baseline", "candidate"]) {
+				await execFileAsync(
+					"git",
+					[
+						"--git-dir",
+						path.join(wiring.scratchDir, `${side}.git-source`),
+						"worktree",
+						"remove",
+						"--force",
+						path.join(wiring.scratchDir, side),
+					],
+					{
+						cwd: wiring.root,
+						timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+						env: buildWorktreeEnvironment(process.env),
+					},
+				).catch(() => {})
+			}
 			// Keep the lock directories in place until their owners release them.
 			// A new writer after release can recreate its output; the final
 			// nonrecursive rmdir then leaves that writer's directory intact.
@@ -431,43 +419,19 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 					await fs.rm(path.join(wiring.scratchDir, entry), { recursive: true, force: true })
 			}
 		} catch (error) {
-			cleanupErrors.push(error)
-			await removeComparisonReport(wiring.out).catch((error) => cleanupErrors.push(error))
+			errors.push(error)
 		} finally {
 			for (const release of releases.reverse()) {
 				try {
 					release()
 				} catch (error) {
-					cleanupErrors.push(error)
+					errors.push(error)
 				}
 			}
 		}
 		await fs.rmdir(wiring.scratchDir).catch(() => {})
 	}
-	const signal = wiring.interruptedSignal()
-	if (signal === "SIGINT" || signal === "SIGTERM") {
-		await removeComparisonReport(wiring.out).catch((error) => cleanupErrors.push(error))
-		if (cleanupErrors.length)
-			console.error("comparison interrupted; cleanup errors:", new AggregateError(cleanupErrors))
-		return { status: "interrupted", signal }
-	}
-	if (cleanupErrors.length) {
-		if (failure !== undefined)
-			throw new AggregateError([failure, ...cleanupErrors], "comparison failed and cleanup failed")
-		throw cleanupErrors.length === 1
-			? cleanupErrors[0]
-			: new AggregateError(cleanupErrors, "comparison cleanup failed")
-	}
-	if (failure !== undefined) {
-		try {
-			await removeComparisonReport(wiring.out)
-		} catch (cleanupError) {
-			throw new AggregateError([failure, cleanupError], "comparison failed and report cleanup failed")
-		}
-		throw failure
-	}
-	if (completed === undefined) throw new Error("comparison ended without a report or a failure")
-	return { status: "completed", report: completed }
+	return completed
 }
 
 const execFileAsync = promisify(execFile)

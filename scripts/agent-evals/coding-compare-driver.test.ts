@@ -1069,3 +1069,89 @@ for (const signal of [undefined, "SIGTERM"] as const) {
 		}
 	})
 }
+
+// SafeOutcome in EvalComparisonRelease: a failed locked flow leaves no complete report.
+for (const rollbackFails of [false, true]) {
+	it(`invalidates publication after cleanup fails (rollback failure: ${rollbackFails})`, async (t) => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-flow-failure-"))
+		const rm = fs.rm.bind(fs)
+		try {
+			const out = path.join(dir, "out")
+			const failure = new Error("interrupt kill failed")
+			const rollbackError = new Error("report rollback failed")
+			let published = false
+			let rollbackOwned = false
+			const wiring = flowWiring({
+				flag: createInterruptFlag(),
+				out,
+				scratchDir: path.join(dir, "scratch"),
+				runSide: async (side) => record(side, COMMIT),
+			})
+			wiring.interruptKill = async () => {
+				published = (await publishedComparisonGeneration(out)) !== undefined
+				throw failure
+			}
+			t.mock.method(fs, "rm", async (...args: Parameters<typeof fs.rm>) => {
+				if (published && args[0] === path.join(out, "comparison-report.complete")) {
+					rollbackOwned = (await fs.readdir(dir)).some((name) => name.startsWith(".coding-comparison-"))
+					if (rollbackFails) throw rollbackError
+				}
+				return rm(...args)
+			})
+			await assert.rejects(executeComparisonFlow(wiring), (error: unknown) => {
+				if (rollbackFails) {
+					assert.ok(error instanceof AggregateError)
+					assert.equal(error.errors[0], failure)
+					assert.ok(error.errors[1] instanceof AggregateError)
+					assert.deepEqual(error.errors[1].errors, [rollbackError])
+				} else assert.equal(error, failure)
+				return true
+			})
+			assert.equal(published, true)
+			assert.equal(rollbackOwned, true)
+			assert.deepEqual(await fs.readdir(out), rollbackFails ? ["comparison-report.complete"] : [])
+			assert.deepEqual(await fs.readdir(dir), ["out"])
+		} finally {
+			await rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+// A body failure must survive cleanup, including values that are not Error objects.
+it("preserves each thrown body value and subsequent cleanup error in order", async (t) => {
+	for (const failure of [new Error("side failed"), undefined, null, 0]) {
+		for (const cleanupFails of [false, true]) {
+			await t.test(`${String(failure)}; cleanup failure: ${cleanupFails}`, async () => {
+				const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-error-order-"))
+				try {
+					const out = path.join(dir, "out")
+					const cleanupError = new Error("kill cleanup failed")
+					const wiring = flowWiring({
+						flag: createInterruptFlag(),
+						out,
+						scratchDir: path.join(dir, "scratch"),
+						runSide: async () => {
+							throw failure
+						},
+					})
+					wiring.interruptKill = async () => {
+						if (cleanupFails) throw cleanupError
+					}
+					await assert.rejects(executeComparisonFlow(wiring), (error: unknown) => {
+						if (cleanupFails) {
+							assert.ok(error instanceof AggregateError)
+							assert.deepEqual(error.errors, [failure, cleanupError])
+							assert.equal(error.errors[0], failure)
+							assert.equal(error.errors[1], cleanupError)
+						} else assert.equal(error, failure)
+						return true
+					})
+					assert.deepEqual(await fs.readdir(out), [])
+					assert.deepEqual(await fs.readdir(dir), ["out"])
+				} finally {
+					await fs.rm(dir, { recursive: true, force: true })
+				}
+			})
+		}
+	}
+})
