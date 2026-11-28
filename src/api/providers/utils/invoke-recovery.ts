@@ -21,11 +21,14 @@ import type { OpenAI } from "openai"
  *   open block runs before that block's recovered call, and a block that
  *   closed before a native arrival recovers first.
  * - A block quoted by markdown context (an open fenced code block,
- *   including one behind a block-quote or list-item container, or an
- *   inline code span open on the opener's line) is never recovered; its
- *   bytes flush as text. An unterminated block or an unknown tool name
- *   also stays text. Wrapper tags are dropped only around a recovered
- *   call, together with the whitespace directly inside the skeleton.
+ *   including one behind a block-quote or list-item container chain,
+ *   or an inline code span open on the opener's line) is never
+ *   recovered; its bytes flush as text. An unterminated block, an
+ *   unknown tool name, an opener head that can never match the
+ *   name-attribute grammar, and a block whose interior the parameter
+ *   parser cannot consume completely also stay text. Wrapper tags are
+ *   dropped only around a recovered call, together with the whitespace
+ *   directly inside the skeleton.
  * - The verdict depends only on the byte content, so any chunking of the
  *   same response yields the same events.
  *
@@ -61,7 +64,66 @@ const INVOKE_CLOSE = "</invoke>"
 type Phase = "safe" | "opener" | "wrapper" | "block" | "tail"
 
 const INVOKE_OPENER = /^<invoke\s+name\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>/i
-const PARAMETER = /<parameter\s+name\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>([\s\S]*?)<\/parameter>/gi
+const PARAMETER_ANCHORED = /<parameter\s+name\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>([\s\S]*?)<\/parameter>/iy
+/** The bytes behind `<invoke` the opener grammar fixes before the value. */
+const INVOKE_HEAD = "<invoke"
+const NAME_ATTR = "name"
+
+/**
+ * True when the bytes behind `<invoke` can still grow into the opener
+ * grammar INVOKE_OPENER accepts: whitespace, the `name` attribute, `=`,
+ * a quoted value, then optional whitespace and `>`. A byte that
+ * contradicts a fixed grammar position (a name that is not `name`, an
+ * unquoted value, an unparsable tail) makes the candidate dead: no
+ * later byte can complete it, so the hold must not wait for `>`.
+ */
+function canBecomeInvokeOpener(after: string): boolean {
+	let i = 0
+	while (i < after.length && /\s/.test(after[i])) {
+		i += 1
+	}
+	for (let k = 0; k < NAME_ATTR.length; k++) {
+		if (i >= after.length) {
+			return true
+		}
+		if (after[i].toLowerCase() !== NAME_ATTR[k]) {
+			return false
+		}
+		i += 1
+	}
+	while (i < after.length && /\s/.test(after[i])) {
+		i += 1
+	}
+	if (i >= after.length) {
+		return true
+	}
+	if (after[i] !== "=") {
+		return false
+	}
+	i += 1
+	while (i < after.length && /\s/.test(after[i])) {
+		i += 1
+	}
+	if (i >= after.length) {
+		return true
+	}
+	const quote = after[i]
+	if (quote !== '"' && quote !== "'") {
+		return false
+	}
+	const close = after.indexOf(quote, i + 1)
+	if (close === -1) {
+		return true
+	}
+	let tail = close + 1
+	while (tail < after.length && /\s/.test(after[tail])) {
+		tail += 1
+	}
+	// Past the value only whitespace then `>` can follow; any other
+	// byte contradicts the grammar (a `>` here would have matched
+	// INVOKE_OPENER, so the full-opener path is not this one).
+	return tail >= after.length
+}
 
 /** True when `text` is a proper prefix of some marker. */
 function isMarkerPrefix(text: string): boolean {
@@ -103,53 +165,82 @@ interface FenceState {
 }
 
 /**
- * The Markdown container a fence lives in. CommonMark: the closing
- * fence is read behind the same container prefix, and an unclosed
- * fence ends when its container ends. A top-level fence has none, so
- * a quote-prefixed line inside it is literal content, never a closer.
+ * The Markdown container chain a fence lives in, outermost first: a
+ * fence can sit in a block quote AND in a list item at once (`> - ~~~`),
+ * and the closing fence is read behind the same chain, while an
+ * unclosed fence ends when any level of its chain ends. A top-level
+ * fence has no levels, so a quote-prefixed line inside it is literal
+ * content, never a closer.
  */
-type FenceContainer = { kind: "none" } | { kind: "quote"; depth: number } | { kind: "list"; indent: number }
+type FenceContainer =
+	{ kind: "none" } | { kind: "quote"; depth: number; inner: FenceContainer } | { kind: "list"; indent: number }
 
 const QUOTE_PREFIX = /^(?: {0,3}> ?)+/
 const QUOTE_LEVEL = /^ {0,3}> ?/
 const LIST_MARKER = /^ {0,3}(?:[-+*]|\d{1,9}[.)])( +)/
 
 /**
- * The container prefix of a complete line: how many bytes to strip
- * before reading the line's own block content, and which container
- * those bytes belong to. `column` is the document column the strip
- * point reaches and `base` the column the content region starts at,
- * so the fenced-opener check can measure indentation in columns. A
- * tab partly consumed by the strip keeps its residual columns in
- * the content region.
+ * The container prefix chain of a complete line: how many bytes to
+ * strip before reading the line's own block content, and which
+ * container levels those bytes belong to. `column` is the document
+ * column the strip point reaches and `base` the column the content
+ * region starts at, so the fenced-opener check can measure
+ * indentation in columns. A tab partly consumed by the strip keeps
+ * its residual columns in the content region. Quote and list
+ * prefixes chain: `> - ~~~` opens its fence inside the quoted list
+ * item, and continuation lines must carry the same chain.
  */
 function lineContainer(line: string): { strip: number; container: FenceContainer; column: number; base: number } {
-	const quote = QUOTE_PREFIX.exec(line)
-	if (quote !== null) {
-		const depth = (quote[0].match(/>/g) ?? []).length
-		let strip = quote[0].length
-		let column = strip
-		let base = column
-		if (quote[0].endsWith(">") && line.startsWith(quote[0] + "\t")) {
-			// CommonMark: the optional space behind the marker may be
-			// one column of a tab; the tab's remaining columns stay in
-			// the content region, the same accounting the fenced-closer
-			// path applies.
-			strip += 1
-			base = column + 1
-			column += 4 - (column % 4)
+	let rest = line
+	let strip = 0
+	let column = 0
+	let base = 0
+	const levels: Array<{ kind: "quote"; depth: number } | { kind: "list"; indent: number }> = []
+	for (;;) {
+		const quote = QUOTE_PREFIX.exec(rest)
+		if (quote !== null) {
+			const depth = (quote[0].match(/>/g) ?? []).length
+			strip += quote[0].length
+			column += quote[0].length
+			base = column
+			rest = rest.slice(quote[0].length)
+			if (quote[0].endsWith(">") && rest.startsWith("\t")) {
+				// CommonMark: the optional space behind the marker may be
+				// one column of a tab; the tab's remaining columns stay in
+				// the content region, the same accounting the fenced-closer
+				// path applies.
+				strip += 1
+				base = column + 1
+				column += 4 - (column % 4)
+				rest = rest.slice(1)
+			}
+			levels.push({ kind: "quote", depth })
+			continue
 		}
-		return { strip, container: { kind: "quote", depth }, column, base }
+		const list = LIST_MARKER.exec(rest)
+		if (list !== null) {
+			// CommonMark: 1-4 spaces after the marker set the content
+			// indent; a wider run indents the content by marker width + 1.
+			const markerWidth = list[0].length - list[1].length
+			const indent = list[1].length <= 4 ? list[0].length : markerWidth + 1
+			levels.push({ kind: "list", indent })
+			strip += indent
+			column += indent
+			base += indent
+			rest = rest.slice(list[0].length)
+			continue
+		}
+		break
 	}
-	const list = LIST_MARKER.exec(line)
-	if (list !== null) {
-		// CommonMark: 1-4 spaces after the marker set the content
-		// indent; a wider run indents the content by marker width + 1.
-		const markerWidth = list[0].length - list[1].length
-		const indent = list[1].length <= 4 ? list[0].length : markerWidth + 1
-		return { strip: indent, container: { kind: "list", indent }, column: indent, base: indent }
+	let container: FenceContainer = { kind: "none" }
+	for (let i = levels.length - 1; i >= 0; i--) {
+		const level = levels[i]
+		container =
+			level.kind === "quote"
+				? { kind: "quote", depth: level.depth, inner: container }
+				: { kind: "list", indent: level.indent }
 	}
-	return { strip: 0, container: { kind: "none" }, column: 0, base: 0 }
+	return { strip, container, column, base }
 }
 
 /**
@@ -179,20 +270,25 @@ function whitespaceRun(line: string, start: number, column: number): { at: numbe
  * container's content region starts at, or null when the line carries
  * no container prefix and so leaves the container. A tab partly
  * consumed by the strip keeps its residual columns in the content
- * region, which the fenced-closer check must count.
+ * region, which the fenced-closer check must count. `column` and
+ * `base` carry the enclosing region's columns across the chain walk;
+ * `lenientBlank` keeps a blank line inside a list item (a complete
+ * blank line neither leaves the item nor closes the fence), while a
+ * mid-line verdict passes false: its line is known to hold content.
  */
 function containerStrip(
 	container: FenceContainer,
 	line: string,
+	column = 0,
+	base = 0,
+	lenientBlank = true,
 ): { strip: number; column: number; base: number } | null {
 	switch (container.kind) {
 		case "none":
-			return { strip: 0, column: 0, base: 0 }
+			return { strip: 0, column, base }
 		case "quote": {
 			let rest = line
 			let stripped = 0
-			let column = 0
-			let base = 0
 			for (let level = 0; level < container.depth; level++) {
 				const match = QUOTE_LEVEL.exec(rest)
 				if (match === null) {
@@ -220,20 +316,23 @@ function containerStrip(
 					rest = rest.slice(1)
 				}
 			}
-			return { strip: stripped, column, base }
+			const inner = containerStrip(container.inner, rest, column, base, lenientBlank)
+			return inner === null ? null : { strip: stripped + inner.strip, column: inner.column, base: inner.base }
 		}
 		case "list": {
-			if (/^\s*$/.test(line)) {
+			if (lenientBlank && /^\s*$/.test(line)) {
 				// A blank line neither leaves the item nor closes the fence.
-				return { strip: 0, column: 0, base: 0 }
+				return { strip: 0, column, base }
 			}
 			// CommonMark expands a tab to the next four-column tab stop, so
 			// a tab-indented line can satisfy the item's content indent:
 			// measure columns, and strip the bytes that carry them. A tab
 			// overshooting the indent leaves its residual columns to the
 			// content region.
-			const run = whitespaceRun(line, 0, 0)
-			return run.column >= container.indent ? { strip: run.at, column: run.column, base: container.indent } : null
+			const run = whitespaceRun(line, 0, column)
+			return run.column - base >= container.indent
+				? { strip: run.at, column: run.column, base: base + container.indent }
+				: null
 		}
 	}
 }
@@ -251,6 +350,8 @@ export class InvokeRecoveryScanner {
 	private fence: FenceState | null = null
 	/** Bytes of the current (still incomplete) line already consumed. */
 	private linePrefix = ""
+	/** Bytes of the open block interior already searched for the close. */
+	private blockScanned = 0
 
 	constructor(toolNames: ReadonlySet<string>) {
 		this.toolNames = toolNames
@@ -341,7 +442,19 @@ export class InvokeRecoveryScanner {
 	private decideInvokeOpener(): [boolean, ...RecoveryEvent[]] {
 		const opener = INVOKE_OPENER.exec(this.pending)
 		if (!opener) {
-			// No closing '>' yet: wait; malformed: flush through the tag.
+			// The dead-candidate verdict runs first and depends only on
+			// the bytes seen: a candidate that contradicts the opener
+			// grammar (e.g. `<invoke nope`) can never match, so the
+			// head flushes at once whether or not a '>' has arrived -
+			// waiting would hold the rest of the stream until the
+			// finish, and a '>' cut would let the verdict depend on the
+			// chunking. A later '<' starts a fresh candidate.
+			if (!canBecomeInvokeOpener(this.pending.slice(INVOKE_HEAD.length))) {
+				const nextTag = this.pending.indexOf("<", 1)
+				return [true, ...this.flushHead(nextTag === -1 ? this.pending.length : nextTag)]
+			}
+			// No closing '>' yet: wait for the tag to complete; a '>'
+			// behind a grammar-consistent candidate is handled above.
 			if (!this.pending.includes(">")) {
 				return [false]
 			}
@@ -354,6 +467,7 @@ export class InvokeRecoveryScanner {
 		}
 		this.advance(opener[0].length)
 		this.openName = name
+		this.blockScanned = 0
 		this.phase = "block"
 		return [true]
 	}
@@ -373,6 +487,13 @@ export class InvokeRecoveryScanner {
 		}
 		const opener = INVOKE_OPENER.exec(rest)
 		if (!opener) {
+			// The same byte-content verdict as the bare path, first:
+			// a dead candidate flushes the skeleton plus its head at
+			// once, whatever a '>' is doing behind it.
+			if (!canBecomeInvokeOpener(rest.slice(INVOKE_HEAD.length))) {
+				const nextTag = rest.indexOf("<", 1)
+				return [true, ...this.flushHead(nextTag === -1 ? this.pending.length : wsEnd + nextTag)]
+			}
 			const tagEnd = rest.indexOf(">")
 			if (tagEnd === -1) {
 				// The tag is still forming; wait for its end.
@@ -388,6 +509,7 @@ export class InvokeRecoveryScanner {
 		}
 		this.advance(wsEnd - this.cursor + opener[0].length)
 		this.openName = name
+		this.blockScanned = 0
 		this.phase = "block"
 		return [true]
 	}
@@ -397,14 +519,28 @@ export class InvokeRecoveryScanner {
 		// Case-insensitive search on the ORIGINAL string: a lowercased
 		// copy can change length (U+0130 lowercases to two code points),
 		// which shifts the offset and makes slice/drop cut extra bytes.
-		const closeMatch = /<\/invoke>/i.exec(this.pending.slice(this.cursor))
-		const closeAt = closeMatch === null ? -1 : this.cursor + closeMatch.index
+		// Each delta resumes behind the last searched offset minus an
+		// INVOKE_CLOSE.length - 1 overlap, so a close split across
+		// deltas is still found without re-searching the whole body.
+		const from = Math.max(0, this.blockScanned - (INVOKE_CLOSE.length - 1))
+		const closeMatch = /<\/invoke>/i.exec(this.pending.slice(this.cursor + from))
+		const closeAt = closeMatch === null ? -1 : this.cursor + from + closeMatch.index
 		if (closeAt === -1) {
+			this.blockScanned = this.pending.length - this.cursor
 			return [false]
 		}
 		const name = this.openName ?? ""
 		const body = this.pending.slice(this.cursor, closeAt)
-		const args = parseInvokeParameters(body)
+		const args = parseInvokeParametersComplete(body)
+		this.blockScanned = 0
+		if (args === null) {
+			// A body the parameter parser cannot consume completely is
+			// a malformed candidate: the whole block, tags included,
+			// stays text. The parser is the verdict, not a best-effort
+			// extraction that drops source bytes.
+			this.openName = null
+			return [true, ...this.flushHead(closeAt + INVOKE_CLOSE.length)]
+		}
 		this.drop(closeAt + INVOKE_CLOSE.length)
 		this.phase = "tail"
 		return [true, { kind: "call", name, arguments: args }]
@@ -493,7 +629,14 @@ export class InvokeRecoveryScanner {
 	 * fence syntax, never span delimiters.
 	 */
 	private isQuotedAtOpener(): boolean {
-		if (this.fence !== null) {
+		// CommonMark: an unclosed fence ends when the current line
+		// leaves its container (a fenced block has no lazy
+		// continuation), so the stored fence state quotes this opener
+		// only while the line so far still strips into that container.
+		// The verdict line is known to hold content, so the blank-line
+		// leniency is off: an empty prefix leaves a quoted or list
+		// container instead of staying inside it.
+		if (this.fence !== null && containerStrip(this.fence.container, this.linePrefix, 0, 0, false) !== null) {
 			return true
 		}
 		if (this.fenceOpenerOf(this.linePrefix) !== null) {
@@ -617,20 +760,40 @@ export class InvokeRecoveryScanner {
 
 /**
  * Parses the `<parameter name="k">v</parameter>` pairs of a block body
- * into a JSON arguments string. Values stay strings; the caller owns the
- * schema typing.
+ * into a JSON arguments string, or null when the pairs do not consume
+ * the complete body: a malformed interior is a failed candidate whose
+ * block stays text. Only whitespace may sit between and around the
+ * pairs, and an empty interior is the valid parameterless block.
+ * Values stay strings; the caller owns the schema typing. The sticky
+ * flag alone anchors each pair at the scan position: a `^` inside a
+ * sticky regex would keep asserting the string start and only the
+ * first pair could ever match.
  */
-export function parseInvokeParameters(body: string): string {
+function parseInvokeParametersComplete(body: string): string | null {
 	// A null prototype keeps a "__proto__" parameter name an own
 	// property: an ordinary object's inherited setter would swallow
 	// the assignment and drop the value. Duplicate keys keep the
 	// last-value rule.
 	const args: Record<string, string> = Object.create(null)
-	for (const match of body.matchAll(PARAMETER)) {
+	let at = 0
+	const skipWhitespace = () => {
+		while (at < body.length && /\s/.test(body[at])) {
+			at += 1
+		}
+	}
+	skipWhitespace()
+	while (at < body.length) {
+		PARAMETER_ANCHORED.lastIndex = at
+		const match = PARAMETER_ANCHORED.exec(body)
+		if (match === null) {
+			return null
+		}
 		const key = match[1] ?? match[2] ?? ""
 		if (key) {
 			args[key] = match[3] ?? ""
 		}
+		at = PARAMETER_ANCHORED.lastIndex
+		skipWhitespace()
 	}
 	return JSON.stringify(args)
 }

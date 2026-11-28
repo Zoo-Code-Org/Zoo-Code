@@ -575,6 +575,17 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				return emitToolCallPartial(event)
 			}
 
+			// The signal can fire while the consumer holds one event of a
+			// batch this loop already buffered. Each remaining yield of that
+			// batch re-checks the signal, so nothing reaches a cancelled
+			// consumer (the handler throws the same abort error the POST
+			// check throws).
+			const checkAborted = () => {
+				if (externalAbortSignal?.aborted) {
+					throw createAbortError("Ollama")
+				}
+			}
+
 			try {
 				for await (const chunk of stream) {
 					// Process Ollama's native thinking field. When the think
@@ -583,6 +594,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					// from message.content. Surface it as a reasoning chunk so
 					// it is rendered and preserved like other providers.
 					if (typeof chunk.message.thinking === "string" && chunk.message.thinking.length > 0) {
+						checkAborted()
 						yield {
 							type: "reasoning",
 							text: chunk.message.thinking,
@@ -596,9 +608,11 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 								// Recover pseudo calls from the text; chunks
 								// outside a marker candidate pass through.
 								for (const event of recoveryScanner.onText(matcherChunk.text)) {
+									checkAborted()
 									yield emitRecoveryEvent(event)
 								}
 							} else {
+								checkAborted()
 								yield matcherChunk
 							}
 						}
@@ -610,6 +624,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 							// Native calls emit on arrival through the shared
 							// emitter, so their ids and indices stay ordered
 							// against recovered calls.
+							checkAborted()
 							yield emitToolCallPartial({
 								name: toolCall.function.name,
 								arguments: JSON.stringify(toolCall.function.arguments),
@@ -632,9 +647,11 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				for (const chunk of matcher.final()) {
 					if (recoveryScanner && chunk.type === "text") {
 						for (const event of recoveryScanner.onText(chunk.text)) {
+							checkAborted()
 							yield emitRecoveryEvent(event)
 						}
 					} else {
+						checkAborted()
 						yield chunk
 					}
 				}
@@ -642,11 +659,13 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				if (recoveryScanner) {
 					// Flush the final hold: an unterminated block stays text.
 					for (const event of recoveryScanner.finish()) {
+						checkAborted()
 						yield emitRecoveryEvent(event)
 					}
 				}
 
 				for (const toolCallId of toolCallIds) {
+					checkAborted()
 					yield {
 						type: "tool_call_end",
 						id: toolCallId,
@@ -655,6 +674,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 				// Yield usage information if available
 				if (totalInputTokens > 0 || totalOutputTokens > 0) {
+					checkAborted()
 					yield {
 						type: "usage",
 						inputTokens: totalInputTokens,

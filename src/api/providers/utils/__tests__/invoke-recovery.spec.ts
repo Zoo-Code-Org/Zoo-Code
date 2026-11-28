@@ -68,8 +68,10 @@ describe("InvokeRecoveryScanner", () => {
 
 	// Chunk-split invariance (property test): the events for a response
 	// must not depend on where the deltas split the bytes. Compare the
-	// joined text and the calls; text CHUNK shapes may differ with the
-	// delta sizes by design.
+	// full event sequence with adjacent text events merged: text CHUNK
+	// shapes may differ with the delta sizes by design, but the ORDER
+	// must not, so a split that moves a call before its preceding text
+	// fails here instead of hiding behind the joined strings.
 	const invarianceFixtures = [
 		`Running now ${weatherCall("Berlin")}\ndone`,
 		`plain prose only, no markers at all`,
@@ -97,11 +99,24 @@ ${bareWeatherCall("Rome")}`,
 		`<invoke name="write_to_file"><parameter name="content">line1
 ~~~
 line2</parameter></invoke><invoke name="read_file"><parameter name="path">a.ts</parameter></invoke>`,
+		`> - ~~~\n>   ${bareWeatherCall("Rome")}\n>   ~~~\nafter`,
+		`> ~~~\n> example\n${bareWeatherCall("Rome")}`,
+		`<invoke nope dead ${bareWeatherCall("Rome")}`,
+		`<function_calls> <invoke nope tail`,
+		`<invoke name="get_weather"><parameter name="location">Rome</invoke>`,
 	]
-	const normalize = (events: RecoveryEvent[]) => ({
-		text: text(events),
-		calls: calls(events),
-	})
+	const normalize = (events: RecoveryEvent[]): RecoveryEvent[] => {
+		const merged: RecoveryEvent[] = []
+		for (const event of events) {
+			const last = merged[merged.length - 1]
+			if (event.kind === "text" && last !== undefined && last.kind === "text") {
+				merged[merged.length - 1] = { kind: "text", text: last.text + event.text }
+				continue
+			}
+			merged.push(event)
+		}
+		return merged
+	}
 	const splitSizes = [1, 2, 3, 7, 16, 64] as const
 
 	it.each(
@@ -591,6 +606,118 @@ line2</parameter></invoke><invoke name="read_file"><parameter name="path">a.ts</
 		const events = scanChunked(fixture, [6, 30, 10])
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(fixture)
+	})
+
+	it("keeps a block whose parameter pair never closes as text", () => {
+		// The parser must consume the complete interior before the block
+		// becomes a call: an unterminated <parameter> is a malformed
+		// candidate, and dropping its source bytes for an empty-arguments
+		// call would lose user-visible text.
+		const fixture = `<invoke name="get_weather"><parameter name="location">Rome</invoke>`
+		const events = scanChunked(fixture, [20, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("keeps a block with stray bytes between parameter pairs as text", () => {
+		// Whitespace between pairs is skeleton the parser skips; any
+		// other unconsumed byte fails the complete-body parse and the
+		// whole block stays text.
+		const fixture = `<invoke name="get_weather"><parameter name="a">1</parameter> junk <parameter name="b">2</parameter></invoke>`
+		const events = scanChunked(fixture, [30, 30, 30])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("parses pairs separated and padded by newlines", () => {
+		// Real writers put the pairs on their own lines: the strict
+		// parse must still accept whitespace-separated complete pairs.
+		const fixture = `<invoke name="write_to_file">\n<parameter name="path">a.ts</parameter>\n<parameter name="content">x</parameter>\n</invoke>`
+		const events = scanChunked(fixture, [20, 40, 20])
+		expect(calls(events)).toStrictEqual([
+			{ kind: "call", name: "write_to_file", arguments: '{"path":"a.ts","content":"x"}' },
+		])
+		expect(text(events)).toBe("")
+	})
+
+	it("keeps a fence inside a quoted list item as text", () => {
+		// CommonMark: a fence can open inside a list item inside a
+		// block quote (`> - ~~~`). The opener line carries the quote
+		// AND the list prefix, so the example below stays fence text
+		// and recovers nothing.
+		const fixture = `> - ~~~\n>   ${bareWeatherCall("Rome")}\n>   ~~~\nafter`
+		const events = scanChunked(fixture, [8, 40, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("recovers an invoke on the first unquoted line after a quoted fence", () => {
+		// CommonMark: a fenced block has no lazy continuation, so the
+		// first unquoted line ends the block quote and the fence it
+		// held. The stored fence state must not quote the call on that
+		// line.
+		const fixture = `> ~~~\n> example\n${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [6, 30, 30])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe(`> ~~~\n> example\n`)
+	})
+
+	it("keeps an invoke still prefixed with the quote marker quoted", () => {
+		// Control for the container-exit check: the line behind the
+		// quote marker stays inside the fence's container, so the
+		// unclosed fence keeps quoting it to the finish.
+		const fixture = `> ~~~\n> example\n> ${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [6, 30, 30])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("flushes a dead opener head without waiting for a close angle bracket", () => {
+		// `<invoke nope` can never grow into the opener grammar (the
+		// attribute must be `name`), so the hold must release at once:
+		// waiting for `>` would buffer the rest of the stream until the
+		// finish.
+		const scanner = new InvokeRecoveryScanner(WEATHER_TOOLS)
+		expect(scanner.onText("<invoke nope held")).toStrictEqual([{ kind: "text", text: "<invoke nope held" }])
+	})
+
+	it("flushes a dead wrapper candidate head without waiting for a close angle bracket", () => {
+		// The wrapper path applies the same grammar check: a dead
+		// invoke behind the wrapper opener flushes the whole skeleton
+		// head instead of holding for a `>` that may never come.
+		const scanner = new InvokeRecoveryScanner(WEATHER_TOOLS)
+		expect(scanner.onText("<function_calls> <invoke nope tail")).toStrictEqual([
+			{ kind: "text", text: "<function_calls> <invoke nope tail" },
+		])
+	})
+
+	it("keeps holding a valid partial opener until the tag completes", () => {
+		// Control for the grammar check: `<invoke na` is a proper
+		// prefix of a valid opener, so the hold must wait - and the
+		// completion still recovers the call.
+		const scanner = new InvokeRecoveryScanner(WEATHER_TOOLS)
+		expect(scanner.onText("<invoke na")).toStrictEqual([])
+		const events = scanner.onText(`me="get_weather"></invoke>`)
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: "{}" }])
+	})
+
+	it("re-scans a fresh candidate behind a dead opener head", () => {
+		// The dead head flushes only up to the next '<': the bytes
+		// behind it start a new candidate and recover normally.
+		const fixture = `<invoke nope dead ${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [13, 30, 20])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("<invoke nope dead ")
+	})
+
+	it("recovers a close tag split across the resumed search boundary", () => {
+		// The close search resumes behind the last searched offset with
+		// an INVOKE_CLOSE.length - 1 overlap: a close split exactly at
+		// that seam must still resolve the call.
+		const fixture = `<invoke name="get_weather"><parameter name="city">Rome</parameter></inv` + `oke>`
+		const events = scanChunked(fixture, [fixture.length - 4, 4])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"city":"Rome"}' }])
+		expect(text(events)).toBe("")
 	})
 
 	it("offeredToolNames reads only usable function tools", () => {

@@ -37,6 +37,8 @@
 \* Unfixed recovers nothing. NoGuard ignores the quote verdict. NoSuppress
 \* leaks recovered tokens to the text sink. NoFinishFlush drops the hold at
 \* the finish. EarlyEmit emits the call at the hold start, not at the close.
+\* EmitMalformed emits the call of a malformed interior at its close
+\* instead of keeping the block as text.
 \* LateFlush holds a rejected opener until the resolve, the pre-review
 \* machine whose quotedNat sink put the held opener text behind the
 \* native that arrived while the hold sat.
@@ -157,6 +159,21 @@
 \* structure - pinned by scanner unit tests), and the parameter-key
 \* dictionary (__proto__ below the token abstraction - pinned by a
 \* scanner unit test).
+\* Review round on 38480cdaf: a block interior the parameter parser cannot
+\* consume completely is a failed candidate like an unknown name - the whole
+\* block, tags included, stays text, and a dead opener head (a byte that
+\* contradicts the name-attribute grammar) flushes at once instead of
+\* waiting for '>'. Added: the T_PARAMX token, the malformed and bareEmpty
+\* runs (an empty interior is the valid parameterless block), the
+\* MalformedBody oracle, and the EmitMalformed saboteur, which emits the
+\* call anyway and fails NoPhantomCall and SinkOrder. Covered: a dead
+\* opener head is a rejected opener (EffOpenerReject), and a quoted-list
+\* fence or a container exit is the Quoted oracle - unit tests added for
+\* both. Gap (below the token abstraction, pinned by scanner unit tests):
+\* the byte grammar behind the dead-opener verdict, the quote+list
+\* container chain, the container-exit line check, and the resumed close
+\* search with its overlap; the per-yield abort guard is a handler-loop
+\* property outside this machine, pinned by a handler test.
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
@@ -166,6 +183,7 @@ T_PROSE == "p"          \* plain text outside markup
 T_OPNK == "o"           \* <invoke name="known-tool">
 T_OPNU == "x"           \* <invoke name="unknown-tool">
 T_PARAM == "r"          \* well-formed <parameter>...</parameter>
+T_PARAMX == "R"         \* a block interior the parameter parser cannot consume
 T_INVC == "c"           \* </invoke>
 T_WRPO == "W"           \* <function_calls>
 T_WRPC == "w"           \* </function_calls>
@@ -175,7 +193,7 @@ T_NATIVE == "n"         \* a native tool_call arrival
 
 Runs == {"wrap", "wrapTwice", "split", "fence", "carry", "natAfter",
          "natMid", "natFirst", "natTail", "quotedNat", "unfin",
-         "unknown", "unknownWrap", "prose"}
+         "unknown", "unknownWrap", "prose", "malformed", "bareEmpty"}
 
 \* ---- Per-run inputs (truth-table data, not rules) ----
 Tokens(r) ==
@@ -193,6 +211,8 @@ Tokens(r) ==
     []  r = "unknown"   -> <<T_OPNU, T_PARAM, T_PARAM>>
     []  r = "unknownWrap" -> <<T_WRPO, T_OPNU, T_PARAM, T_INVC, T_WRPC>>
     []  r = "prose"     -> <<T_PROSE, T_PROSE>>
+    []  r = "malformed" -> <<T_OPNK, T_PARAMX, T_INVC>>
+    []  r = "bareEmpty" -> <<T_OPNK, T_INVC>>
     []  OTHER -> <<>>
 
 RunLen(r) == Len(Tokens(r))
@@ -201,23 +221,34 @@ RunLen(r) == Len(Tokens(r))
 \* the quoted runs too; the quote verdict is what keeps them as text.
 HasCall(r) ==
     r \in {"wrap", "wrapTwice", "split", "fence", "carry",
-           "natAfter", "natMid", "natFirst", "natTail", "quotedNat"}
+           "natAfter", "natMid", "natFirst", "natTail", "quotedNat",
+           "malformed", "bareEmpty"}
 
 \* Oracle: the block sits inside a fence or an inline code span, so the
 \* guard keeps it as text.
 Quoted(r) == r \in {"fence", "carry", "quotedNat"}
 
-TruthRecovered(r) == HasCall(r) /\ ~Quoted(r)
+\* Oracle: the block interior fails the complete parameter parse, so the
+\* fixed machine keeps the whole block, tags included, as text. An empty
+\* interior is the valid parameterless block, not a malformed one.
+MalformedBody(r) == r = "malformed"
+
+TruthRecovered(r) == HasCall(r) /\ ~Quoted(r) /\ ~MalformedBody(r)
 
 \* The verdict the machine applies. NoGuard drops the quote guard.
-EffRecov(r) == IF Mode = "NoGuard" THEN HasCall(r) ELSE TruthRecovered(r)
+\* EmitMalformed drops the malformed-interior guard.
+EffRecov(r) ==
+    IF Mode = "NoGuard" THEN HasCall(r)
+    ELSE IF Mode = "EmitMalformed" THEN HasCall(r) /\ ~Quoted(r)
+    ELSE TruthRecovered(r)
 
 \* Oracle: the run's opener carries a name the scanner can accept. TRUE
 \* for the unfinished run too - its opener is accepted and the block
 \* holds to the finish - so HasCall = FALSE is not a rejection verdict.
 KnownOpener(r) ==
     r \in {"wrap", "wrapTwice", "split", "fence", "carry", "natAfter",
-           "natMid", "natFirst", "natTail", "quotedNat", "unfin"}
+           "natMid", "natFirst", "natTail", "quotedNat", "unfin",
+           "malformed", "bareEmpty"}
 
 \* The verdict the machine applies at the opener. HoldAll and Unfixed
 \* never consult a mid-stream verdict. NoGuard drops the quote part.
@@ -246,6 +277,8 @@ HoldStart(r) ==
     []  r = "unfin"     -> 2
     []  r = "unknown"   -> 1
     []  r = "unknownWrap" -> 1
+    []  r = "malformed" -> 1
+    []  r = "bareEmpty" -> 1
     []  OTHER -> RunLen(r) + 1
 
 \* Position where the hold resolves: the invoke close. The wrapper close
@@ -261,6 +294,8 @@ ResolvePos(r) ==
     []  r = "natFirst"  -> 4
     []  r = "natTail"   -> 4
     []  r = "quotedNat" -> 5
+    []  r = "malformed" -> 3
+    []  r = "bareEmpty" -> 2
     []  OTHER -> RunLen(r) + 1
 
 \* Positions the machine swallows when a run recovers. Native tokens never
@@ -289,6 +324,8 @@ Events(r) ==
     []  r = "natFirst"  -> << <<"nat", 1>>, <<"call", 4>> >>
     []  r = "natTail"   -> << <<"call", 4>>, <<"nat", 5>> >>
     []  r = "quotedNat" -> << <<"nat", 3>> >>
+    []  r = "malformed" -> <<>>
+    []  r = "bareEmpty" -> << <<"call", 2>> >>
     []  OTHER -> <<>>
 
 \* Expected full sink, in sink order, under the fixed machine. The
@@ -311,6 +348,8 @@ SinkSeq(r) ==
     []  r = "unknown"      -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>> >>
     []  r = "unknownWrap"  -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>>, <<"txt", 4>>, <<"txt", 5>> >>
     []  r = "prose"        -> << <<"txt", 1>>, <<"txt", 2>> >>
+    []  r = "malformed"    -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>> >>
+    []  r = "bareEmpty"    -> << <<"call", 2>> >>
     []  OTHER -> <<>>
 
 

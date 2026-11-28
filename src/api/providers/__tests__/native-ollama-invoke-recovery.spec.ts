@@ -122,6 +122,23 @@ const reasoningOf = (parts: Array<{ type: string }>) =>
 		.map((part) => part.text)
 		.join("")
 
+/**
+ * Bounds one pull so a regression that buffers a chunk fails in this
+ * test instead of at the suite timeout: the finally block then still
+ * runs, releases the gate, and closes the iterator.
+ */
+const BOUNDED_PULL_MS = 1000
+const boundedPull = async <T>(pull: Promise<T>, label: string): Promise<T> => {
+	// AbortSignal.timeout owns the timer, so the loser's late rejection
+	// stays handled by the race and no timer handle needs clearing.
+	const stall = new Promise<never>((_resolve, reject) => {
+		AbortSignal.timeout(BOUNDED_PULL_MS).addEventListener("abort", () =>
+			reject(new Error(`stalled pull (${label}): the chunk was buffered, not streamed`)),
+		)
+	})
+	return await Promise.race([pull, stall])
+}
+
 describe("NativeOllamaHandler pseudo tool-call recovery", () => {
 	beforeEach(() => {
 		clearAllMocks()
@@ -358,13 +375,51 @@ describe("NativeOllamaHandler pseudo tool-call recovery", () => {
 			[Symbol.asyncIterator]()
 
 		try {
-			const first = await iterator.next()
+			const first = await boundedPull(iterator.next(), "'Hello '")
 			expect(first.value).toEqual({ type: "text", text: "Hello " })
 			releaseSecondChunk()
-			const second = await iterator.next()
+			const second = await boundedPull(iterator.next(), "'world'")
 			expect(second.value).toEqual({ type: "text", text: "world" })
 		} finally {
 			releaseSecondChunk()
+			await iterator.return?.(undefined)
+		}
+	})
+
+	it("stops emitting recovered events once the request is cancelled", async () => {
+		// The signal can fire while the consumer holds one event of a
+		// batch the handler already buffered. The remaining yields of
+		// that batch re-check the signal, so the cancelled consumer
+		// gets an abort error instead of the recovered call.
+		const handler = makeHandler()
+		const controller = new AbortController()
+		mockChat.mockImplementation(async function* () {
+			yield { message: { content: "Hi " } }
+			yield {
+				message: {
+					content: `X<invoke name="get_weather"><parameter name="location">Rome</parameter></invoke>Y`,
+				},
+			}
+		})
+
+		const iterator = handler
+			.createMessage("System", [{ role: "user" as const, content: "Hi" }], {
+				...makeCreateMessageMetadata(),
+				tools: [weatherTool],
+				abortSignal: controller.signal,
+			})
+			[Symbol.asyncIterator]()
+
+		try {
+			const first = await boundedPull(iterator.next(), "'Hi '")
+			expect(first.value).toEqual({ type: "text", text: "Hi " })
+			// The second pull holds the batch's first text event; the
+			// abort lands while the consumer sits between the two pulls.
+			const second = await boundedPull(iterator.next(), "the batch text")
+			expect(second.value).toEqual({ type: "text", text: "X" })
+			controller.abort()
+			await expect(iterator.next()).rejects.toMatchObject({ name: "AbortError" })
+		} finally {
 			await iterator.return?.(undefined)
 		}
 	})
