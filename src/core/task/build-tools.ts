@@ -169,7 +169,11 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		// Gemini also receives only attached MCP definitions, not the full catalog.
 		advertisedMcpTools = mcpTools.filter((tool) => attached.has(getToolName(tool)))
 	}
-	reportMcpToolStatus?.(gated ? { attachedToolNames: filteredMcpTools.map(getToolName), totalScoped } : null)
+	reportMcpToolStatus?.(
+		filteredMcpTools.length < totalScoped
+			? { attachedToolNames: filteredMcpTools.map(getToolName), totalScoped }
+			: null,
+	)
 
 	// Add custom tools if they are available and the experiment is enabled.
 	let nativeCustomTools: OpenAI.Chat.ChatCompletionFunctionTool[] = []

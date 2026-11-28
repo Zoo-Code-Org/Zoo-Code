@@ -12,20 +12,40 @@
 \* Expect (before the code): each removed guard fails its invariant.
 \* Added after the first run: Snapshot and Deliver, after a read of mergeExtensionState and its tests.
 \* Found: with those actions, the first design failed Fresh (old value after an await). Fixed by ReadLast.
-\* Result: the fixed model passes. All five sabotage configs fail.
+\* Initial result: the fixed model passed. All five initial sabotage configs failed.
 \* Replay: DropStale, PostOnChange, SendNull, ReadLast, and CheckTask each fail a test when removed.
 \* Tests: mcpToolStatus.property.spec.ts, build-tools-dynamic-load, ClineProvider, and ExtensionStateContext.
 \* Test gap found: the first property test passed without DropStale. It now checks each later step.
-\* Review counts: covered 0, added 0, gap 0. Cost: each run takes less than 5 seconds.
+\* Before review: Fresh, LatestWins, and matching counts were the expected properties.
+\* Review PR 2763: added FullHidden (thread PRRT_kwDOSK-bwM68_ECR).
+\* Review PR 2763: added Replace with the same ID (thread PRRT_kwDOSK-bwM68_ECU).
+\* Failure: a full selection shows a status. Invariant: FullHidden. Source: build-tools; sink: status report.
+\* Failure: an old instance snapshot restores its status. Invariant: Fresh. Source: provider; sink: state merge.
+\* Expect: FullStatus fails FullHidden; OldInstance fails Fresh. Replay: build and provider property cases.
+\* Gap: screen reader announcements need a DOM test (thread PRRT_kwDOSK-bwM68_ECX).
+\* Covered: review comment cr-comment:v1:07662f59f9c00d7ff3044a8e; Snapshot and Deliver already model a delayed read.
+\* Review counts: covered 1, added 2, gap 1. Cost: about 7 minutes of agent work; each TLC config takes less than 2 seconds.
+\* Result: fixed passes (8,832 states); all seven fault configs fail. No new defect beyond the review findings.
+\* Replay: four new regression cases fail before the fix and pass after it; 426 focused tests pass.
+\* Simplified: replacement is one bit in the pending snapshot; ranking and build results remain oracles.
+\* Refactor expectation: null result. Fresh, LatestWins, and FullHidden must keep their verdicts.
+\* Failure to prevent: a null status renders an indicator, or a partial selection is hidden.
+\* Source: buildNativeToolsArrayWithRestrictions. Sink: DynamicToolsStatus reads ExtensionState directly.
+\* Only the selection gate removes scoped tools, so a smaller count implies that the gate ran.
+\* The UI derives visibility from null and the count from attachedToolNames; no mode adapter is needed.
+\* Refactor result: null result. Fixed passes (8,832 states); all seven fault configs still fail.
+\* Refactor replay: 83 build, tracker property, component, and chat tests pass. Lint passes with no new suppressions.
+\* Refactor cost: about 2 minutes of agent work. No model variable or action was added.
 EXTENDS Naturals
 
-CONSTANTS SendNull, DropStale, PostOnChange, CheckTask, ReadLast
+CONSTANTS SendNull, DropStale, PostOnChange, CheckTask, ReadLast, HideFull, ReadCurrent
 VARIABLES current, status, started, newest, pending, shown, late
 vars == <<current, status, started, newest, pending, shown, late>>
 
 Tasks == {1, 2}
 \* "none" means that the gate did not run. The other values are two different selections.
-Results == {"none", "a", "b"}
+Results == {"none", "a", "b", "all"}
+Visible(result) == IF HideFull /\ result = "all" THEN "none" ELSE result
 MaxBuilds == 2
 
 Init ==
@@ -47,11 +67,11 @@ Finish(b, result) ==
     LET t == b[1]
         seq == b[2]
         accept == ~DropStale \/ seq = started[t]
-        next == IF accept THEN [status EXCEPT ![t] = result] ELSE status
+        next == IF accept THEN [status EXCEPT ![t] = Visible(result)] ELSE status
     IN
     /\ b \in pending /\ pending' = pending \ {b}
     /\ status' = next
-    /\ newest' = IF seq > newest[t].seq THEN [newest EXCEPT ![t] = [seq |-> seq, value |-> result]] ELSE newest
+    /\ newest' = IF seq > newest[t].seq THEN [newest EXCEPT ![t] = [seq |-> seq, value |-> Visible(result)]] ELSE newest
     /\ IF PostOnChange /\ next # status
        THEN Post(next[current])
        ELSE UNCHANGED shown
@@ -64,7 +84,7 @@ Switch(t) ==
 
 \* A post without messages starts: the extension takes a snapshot of the current task.
 Snapshot ==
-    /\ late = <<>> /\ late' = <<current, status[current]>>
+    /\ late = <<>> /\ late' = <<current, status[current], FALSE>>
     /\ UNCHANGED <<current, status, started, newest, pending, shown>>
 
 \* It arrives later. ReadLast reads the status after the last await of the snapshot.
@@ -72,16 +92,26 @@ Deliver ==
     /\ late # <<>> /\ late' = <<>>
     /\ IF CheckTask /\ late[1] # current
        THEN UNCHANGED shown
-       ELSE Post(IF ReadLast THEN status[late[1]] ELSE late[2])
+       ELSE Post(IF ReadLast /\ (ReadCurrent \/ ~late[3]) THEN status[late[1]] ELSE late[2])
     /\ UNCHANGED <<current, status, started, newest, pending>>
 
+\* Restore replaces the current instance with the same task ID and no status.
+Replace ==
+    /\ late # <<>> /\ late[1] = current /\ ~late[3]
+    /\ late' = <<late[1], late[2], TRUE>>
+    /\ status' = [status EXCEPT ![current] = "none"] /\ Post("none")
+    /\ newest' = [newest EXCEPT ![current] = [seq |-> 0, value |-> "none"]]
+    /\ UNCHANGED <<current, started, pending>>
+
 Next ==
+    \/ Replace
     \/ Snapshot \/ Deliver
     \/ \E t \in Tasks : Begin(t) \/ Switch(t)
     \/ \E b \in pending, result \in Results : Finish(b, result)
 
 Spec == Init /\ [][Next]_vars
 
+FullHidden == shown # "all"
 Fresh == shown = status[current]
 \* A newer build that is still pending makes an older result obsolete.
 LatestWins ==

@@ -95,6 +95,19 @@ function setup(count: number, savedNames?: string[]) {
 }
 
 describe("MCP tool status", () => {
+	it.each([1, 2, 3, 4])("shows status only for a partial selection with initialK %s", async (initialK) => {
+		const { task, options } = setup(3)
+		const result = await buildNativeToolsArrayWithRestrictions({
+			...options,
+			mcpDynamicLoadThreshold: 0,
+			mcpDynamicLoadInitialK: initialK,
+		})
+		const attachedToolNames = names(result.tools).filter((name) => name.startsWith("mcp--"))
+		expect(task.mcpToolStatus.value).toEqual(
+			attachedToolNames.length < 3 ? { attachedToolNames, totalScoped: 3 } : null,
+		)
+	})
+
 	it("reports the declared tools of a gated build one time", async () => {
 		const { task, options, provider } = setup(100)
 		const result = await buildNativeToolsArrayWithRestrictions({ ...options, mcpDynamicLoadInitialK: 3 })

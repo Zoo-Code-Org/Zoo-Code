@@ -4472,6 +4472,28 @@ describe("ClineProvider", () => {
 		expect((await provider.getStateToPostToWebview()).mcpToolStatus).toEqual(status)
 	})
 
+	it.each([null, { attachedToolNames: ["mcp--s--new"], totalScoped: 60 }])(
+		"reads the current instance status after replacement: %j",
+		async (status) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const oldTask = Object.assign(new Task(defaultTaskOptions), {
+				mcpToolStatus: { value: { attachedToolNames: ["mcp--s--old"], totalScoped: 60 } },
+			})
+			const replacement = Object.assign(new Task(defaultTaskOptions), {
+				taskId: oldTask.taskId,
+				mcpToolStatus: { value: status },
+			})
+			await provider.addClineToStack(oldTask)
+			const current = vi.spyOn(provider, "getCurrentTask").mockReturnValue(oldTask)
+			const { kimiCodeOAuthManager } = await import("../../../integrations/kimi-code/oauth")
+			vi.spyOn(kimiCodeOAuthManager, "isAuthenticated").mockImplementation(async () => {
+				current.mockReturnValue(replacement)
+				return false
+			})
+			expect((await provider.getStateToPostToWebview()).mcpToolStatus).toEqual(status)
+		},
+	)
+
 	test("getStateToPostToWebview defaults allowed read files to an empty list", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 

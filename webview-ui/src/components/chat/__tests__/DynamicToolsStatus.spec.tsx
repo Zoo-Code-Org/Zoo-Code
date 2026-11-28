@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import type { McpToolStatus } from "@roo-code/types"
 import { DynamicToolsStatus } from "../DynamicToolsStatus"
 
@@ -15,6 +15,20 @@ describe("DynamicToolsStatus", () => {
 		mcpToolStatus = status
 		const { container } = render(<DynamicToolsStatus />)
 		expect(container).toBeEmptyDOMElement()
+	})
+
+	it("announces only the summary when counts change", () => {
+		mcpToolStatus = { attachedToolNames: ["mcp--s--a"], totalScoped: 60 }
+		const { rerender } = render(<DynamicToolsStatus />)
+		const summary = screen.getByRole("status")
+		expect(summary).toHaveTextContent("chat:dynamicToolsStatus.summary 1/60")
+		fireEvent.click(screen.getByRole("button"))
+		mcpToolStatus = { attachedToolNames: ["mcp--s--a", "mcp--s--b"], totalScoped: 60 }
+		rerender(<DynamicToolsStatus />)
+		expect(summary).toHaveTextContent("chat:dynamicToolsStatus.summary 2/60")
+		expect(within(summary).queryByRole("button")).not.toBeInTheDocument()
+		expect(within(summary).queryByRole("list")).not.toBeInTheDocument()
+		expect(screen.getByRole("button")).toHaveAttribute("aria-expanded", "true")
 	})
 
 	it("shows the counts and expands the attached tool names", () => {
