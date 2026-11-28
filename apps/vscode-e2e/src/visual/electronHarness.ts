@@ -1,7 +1,9 @@
+import { execFile } from "child_process"
 import fs from "fs/promises"
 import { readFileSync } from "fs"
 import os from "os"
 import path from "path"
+import { promisify } from "util"
 
 import { LLMock } from "@copilotkit/aimock"
 import { _electron, expect, type ElectronApplication, type Page, type TestInfo } from "@playwright/test"
@@ -18,10 +20,26 @@ export const vscodeVersion = packageJson.devDependencies["@types/vscode"]
 
 const CHAT_PROMPT = "electron-visual-smoke: render a deterministic completion"
 export const CHAT_RESULT = "Electron visual smoke response rendered inside the real VS Code webview."
+export const SCM_ACTION_TITLE = "Generate Commit Message (Zoo Code)"
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * Makes the workspace a Git repository with one staged file, so the Source Control view shows the
+ * Git provider and its title actions. The branch name, author, and file are fixed for a stable scene.
+ */
+async function initGitWorkspace(workspacePath: string) {
+	const git = (...args: string[]) => execFileAsync("git", args, { cwd: workspacePath })
+	await git("init", "--initial-branch=main")
+	await git("config", "user.name", "Zoo Code Visual")
+	await git("config", "user.email", "visual@example.invalid")
+	await fs.writeFile(path.join(workspacePath, "notes.md"), "# Notes\n", "utf8")
+	await git("add", "notes.md")
+}
 
 export interface VisualScenario {
 	name: string
-	scene: "welcome" | "chat"
+	scene: "welcome" | "chat" | "scm"
 	themeId: "Default Dark Modern" | "Default High Contrast"
 	landmark: string
 	webviewSnapshot?: string
@@ -105,6 +123,9 @@ export async function startScene(
 		for (const result of directories) {
 			if (result.status === "rejected") throw result.reason
 		}
+		if (scenario.scene === "scm") {
+			await initGitWorkspace(workspacePath)
+		}
 		if (scenario.startMock) {
 			mock = new LLMock({ port: 0 })
 			mock.addFixture({
@@ -147,6 +168,7 @@ export async function startScene(
 				ROO_CODE_VISUAL_READY_PATH: readyPath,
 				ROO_CODE_VISUAL_SCENE: scenario.scene,
 				ROO_CODE_VISUAL_THEME: scenario.themeId,
+				ROO_CODE_VISUAL_SCM_ACTION_TITLE: SCM_ACTION_TITLE,
 				ROO_CODE_THEME_FIXTURE_PROBE: "1",
 			},
 			locale: "en-US",

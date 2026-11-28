@@ -48,6 +48,8 @@ export const commandIds = [
 	"retryWebviewRecovery",
 	"toggleAutoApprove",
 
+	"generateGitCommitMessage",
+
 	"showRipgrepDiagnostic",
 	"createDiagnosticsReport",
 ] as const
