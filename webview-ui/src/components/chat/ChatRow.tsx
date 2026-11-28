@@ -1329,7 +1329,11 @@ export const ChatRowContent = ({
 												style={{ visibility: isStreaming ? "hidden" : "visible" }}
 												onClick={(e) => {
 													e.stopPropagation()
-													vscode.postMessage({ type: "deleteMessage", value: message.ts })
+													vscode.postMessage({
+														type: "deleteMessage",
+														value: message.ts,
+														messageId: message.messageId,
+													})
 												}}>
 												<Trash2
 													className="w-4 shrink-0"

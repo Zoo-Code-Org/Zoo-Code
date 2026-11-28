@@ -30,6 +30,7 @@ type Tab = "settings" | "history" | "chat" | "marketplace"
 interface DeleteMessageDialogState {
 	isOpen: boolean
 	messageTs: number
+	messageId?: string
 	hasCheckpoint: boolean
 }
 
@@ -146,6 +147,7 @@ const App = () => {
 				setDeleteMessageDialogState({
 					isOpen: true,
 					messageTs: message.messageTs,
+					messageId: message.messageId,
 					hasCheckpoint: message.hasCheckpoint || false,
 				})
 			}
@@ -298,6 +300,7 @@ const App = () => {
 						vscode.postMessage({
 							type: "deleteMessageConfirm",
 							messageTs: deleteMessageDialogState.messageTs,
+							messageId: deleteMessageDialogState.messageId,
 							restoreCheckpoint,
 						})
 						setDeleteMessageDialogState((prev) => ({ ...prev, isOpen: false }))
@@ -311,6 +314,7 @@ const App = () => {
 						vscode.postMessage({
 							type: "deleteMessageConfirm",
 							messageTs: deleteMessageDialogState.messageTs,
+							messageId: deleteMessageDialogState.messageId,
 						})
 						setDeleteMessageDialogState((prev) => ({ ...prev, isOpen: false }))
 					}}

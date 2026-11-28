@@ -10,6 +10,7 @@ export interface CheckpointRestoreConfig {
 	provider: ClineProvider
 	currentCline: Task
 	messageTs: number
+	messageId?: string
 	messageIndex: number
 	checkpoint: { hash: string }
 	operation: "delete" | "edit"
@@ -25,7 +26,7 @@ export interface CheckpointRestoreConfig {
  * This consolidates the common logic while handling operation-specific behavior.
  */
 export async function handleCheckpointRestoreOperation(config: CheckpointRestoreConfig): Promise<void> {
-	const { provider, currentCline, messageTs, checkpoint, operation, editData } = config
+	const { provider, currentCline, messageTs, messageId, checkpoint, operation, editData } = config
 
 	let checkpointRestored = false
 	let pendingEditOwner: object | undefined
@@ -60,6 +61,7 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		// Perform the checkpoint restoration
 		await currentCline.checkpointRestore({
 			ts: messageTs,
+			...(messageId ? { messageId } : {}),
 			commitHash: checkpoint.hash,
 			mode: "restore",
 			operation,

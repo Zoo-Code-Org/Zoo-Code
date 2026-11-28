@@ -1,7 +1,7 @@
 // npx vitest run src/__tests__/App.spec.tsx
 
 import React from "react"
-import { render, screen, act, cleanup } from "@/utils/test-utils"
+import { render, screen, act, cleanup, fireEvent } from "@/utils/test-utils"
 
 import AppWithProviders from "../App"
 import { vscode } from "../utils/vscode"
@@ -209,6 +209,29 @@ describe("App", () => {
 		expect(chatView).toBeInTheDocument()
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
+
+	it("forwards the saved message ID when restoring a deleted steering message", () => {
+		render(<AppWithProviders />)
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "showDeleteMessageDialog",
+						messageTs: 1234,
+						messageId: "steer-id",
+						hasCheckpoint: true,
+					},
+				}),
+			)
+		})
+		fireEvent.click(screen.getByText("common:confirmation.restoreToCheckpoint"))
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "deleteMessageConfirm",
+			messageTs: 1234,
+			messageId: "steer-id",
+			restoreCheckpoint: true,
+		})
+	})
 
 	it("preserves chat state across task and tab changes", async () => {
 		const state = {

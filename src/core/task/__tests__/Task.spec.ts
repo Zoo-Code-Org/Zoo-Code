@@ -2701,6 +2701,21 @@ describe("Cline", () => {
 			expect(metadata?.mode).toBe("ask")
 		})
 
+		it("records checkpoint deletion metrics after the task has been stopped", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.requestAbort(false)
+			await expect(task.say("api_req_deleted", "{}")).resolves.toBeUndefined()
+			expect(task.clineMessages.at(-1)).toMatchObject({ say: "api_req_deleted", text: "{}" })
+			await expect(task.say("text", "must not resume")).rejects.toThrow(
+				`[RooCode#say] task ${task.taskId}.${task.instanceId} aborted`,
+			)
+		})
+
 		it("condenses with an undefined state snapshot when the provider is gone", async () => {
 			const task = new Task({
 				provider: mockProvider,

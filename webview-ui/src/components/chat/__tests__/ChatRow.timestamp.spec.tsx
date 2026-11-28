@@ -1,6 +1,7 @@
 import React from "react"
 import { fireEvent, render, screen } from "@/utils/test-utils"
 import type { ClineMessage } from "@roo-code/types"
+import { vscode } from "@src/utils/vscode"
 
 import { ChatRowContent } from "../ChatRow"
 
@@ -82,6 +83,16 @@ describe("ChatRow – message timestamp", () => {
 	it("shows when a user message was sent", () => {
 		renderRow({ ts: Date.now(), type: "say", say: "user_feedback", text: "hello there" })
 		expect(screen.getByTestId("message-timestamp").textContent).toContain("Today")
+	})
+
+	it("sends the stable ID when deleting a steering message", () => {
+		renderRow({ ts: 1234, messageId: "steer-id", type: "say", say: "user_feedback", text: "steer" })
+		fireEvent.click(screen.getByLabelText("common:confirmation.deleteMessage"))
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "deleteMessage",
+			value: 1234,
+			messageId: "steer-id",
+		})
 	})
 
 	it("uses the message's own timestamp, not the current time", () => {
