@@ -281,40 +281,66 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
 		})
 
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
+		// chunk.usage carries the request's full totals, and Go-plan models
+		// (DeepSeek) may repeat it on many chunks. Keep only the last one.
+		let lastUsage: OpenAI.CompletionUsage | undefined
 
-			// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+		// A stream that dies mid-request still consumed tokens. Stash the
+		// failure and emit the stored usage below before rethrowing, so the
+		// failed request stays accounted for.
+		let streamError: unknown
+		let streamFailed = false
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+		try {
+			for await (const chunk of completion) {
+				const delta = chunk.choices[0]?.delta
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management.
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+				// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management.
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
 					}
 				}
-			}
 
-			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
+				if (chunk.usage) {
+					lastUsage = chunk.usage
 				}
 			}
+		} catch (error) {
+			streamFailed = true
+			streamError = error
+		}
+
+		// One usage event per request, with the last chunk's totals. The task
+		// loop adds every usage event it receives, so per-chunk yields would
+		// inflate tokensIn and trigger runaway condense loops (issue 1365).
+		if (lastUsage) {
+			yield {
+				type: "usage",
+				inputTokens: lastUsage.prompt_tokens || 0,
+				outputTokens: lastUsage.completion_tokens || 0,
+				cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens || undefined,
+			}
+		}
+
+		if (streamFailed) {
+			throw streamError
 		}
 	}
 

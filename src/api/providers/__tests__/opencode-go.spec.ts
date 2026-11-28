@@ -12,7 +12,10 @@ vitest.mock("vscode", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import { consolidateTokenUsage } from "@roo-code/core"
+
 import {
+	type ClineMessage,
 	opencodeGoDefaultModelId,
 	opencodeGoModels,
 	isOpencodeGoAnthropicFormatModel,
@@ -21,8 +24,10 @@ import {
 
 import { OpencodeGoHandler } from "../opencode-go"
 import { getModels } from "../fetchers/modelCache"
+import { willManageContext } from "../../../core/context-management"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
+import type { ApiStreamChunk, ApiStreamUsageChunk } from "../../transform/stream"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -82,6 +87,8 @@ vitest.mock("@anthropic-ai/sdk", () => ({
 		}
 	}),
 }))
+
+const isUsageChunk = (chunk: ApiStreamChunk): chunk is ApiStreamUsageChunk => chunk.type === "usage"
 
 describe("OpencodeGoHandler", () => {
 	const mockOptions: ApiHandlerOptions = {
@@ -199,6 +206,108 @@ describe("OpencodeGoHandler", () => {
 				outputTokens: 7,
 				cacheReadTokens: 4,
 			})
+		})
+
+		it("yields one usage event with the last chunk totals when chunks repeat usage", async () => {
+			// DeepSeek-style stream: several chunks repeat the request's full
+			// usage totals (issue 1365). Only the last one may be recorded.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "Hel" }, index: 0 }],
+						usage: {
+							prompt_tokens: 4,
+							completion_tokens: 2,
+							total_tokens: 6,
+							prompt_tokens_details: { cached_tokens: 1 },
+						},
+					},
+					{
+						choices: [{ delta: { content: "lo" }, index: 0 }],
+						usage: {
+							prompt_tokens: 4,
+							completion_tokens: 5,
+							total_tokens: 9,
+							prompt_tokens_details: { cached_tokens: 1 },
+						},
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: {
+							prompt_tokens: 4,
+							completion_tokens: 7,
+							total_tokens: 11,
+							prompt_tokens_details: { cached_tokens: 2 },
+						},
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+			const usageChunks = chunks.filter(isUsageChunk)
+
+			expect(usageChunks).toStrictEqual([{ type: "usage", inputTokens: 4, outputTokens: 7, cacheReadTokens: 2 }])
+		})
+
+		it("emits no usage event when no chunk carries usage", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Hi" }, index: 0 }], usage: null },
+					{ choices: [{ delta: {}, index: 0 }], usage: null },
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			// The post-loop guard must run its false branch too: a stream
+			// without usage totals emits nothing, not a zeroed event.
+			expect(chunks.filter(isUsageChunk)).toStrictEqual([])
+		})
+
+		it("emits the stashed usage before a mid-stream error propagates", async () => {
+			// A stream that dies after a usage chunk must still account the
+			// failed request: the stored usage reaches Task before the error.
+			const failure = new Error("stream died")
+			mockCreate.mockImplementationOnce(async () =>
+				(async function* () {
+					yield {
+						choices: [{ delta: { content: "Hel" }, index: 0 }],
+						usage: {
+							prompt_tokens: 4,
+							completion_tokens: 2,
+							total_tokens: 6,
+							prompt_tokens_details: { cached_tokens: 1 },
+						},
+					}
+					throw failure
+				})(),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: ApiStreamChunk[] = []
+			let caught: unknown
+			try {
+				for await (const chunk of handler.createMessage("sys", messages)) {
+					chunks.push(chunk)
+				}
+			} catch (error) {
+				caught = error
+			}
+
+			// The error still surfaces, and exactly one usage event was
+			// delivered before it, with the stashed chunk totals.
+			expect(caught).toBe(failure)
+			expect(chunks.filter(isUsageChunk)).toStrictEqual([
+				{ type: "usage", inputTokens: 4, outputTokens: 2, cacheReadTokens: 1 },
+			])
 		})
 
 		it("requests a streaming completion with usage included and native max tokens", async () => {
@@ -467,6 +576,58 @@ describe("OpencodeGoHandler", () => {
 			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			expect(chunks).toContainEqual({ type: "usage", inputTokens: 0, outputTokens: 0 })
+		})
+
+		it("does not push contextTokens over the condense threshold when usage repeats on every chunk", async () => {
+			// A repeated-usage stream must record one request total, so the
+			// consolidated context stays below the condense threshold and the
+			// task does not enter the runaway condense loop of issue 1365.
+			const repeatedUsage = { prompt_tokens: 50000, completion_tokens: 10000, total_tokens: 60000 }
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Hel" }, index: 0 }], usage: repeatedUsage },
+					{ choices: [{ delta: { content: "lo" }, index: 0 }], usage: repeatedUsage },
+					{ choices: [{ delta: { content: "!" }, index: 0 }], usage: repeatedUsage },
+					{ choices: [{ delta: {}, index: 0 }], usage: repeatedUsage },
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			// The Task stream loop adds every usage event it receives.
+			const usageChunks = chunks.filter(isUsageChunk)
+			const tokensIn = usageChunks.reduce((sum, chunk) => sum + chunk.inputTokens, 0)
+			const tokensOut = usageChunks.reduce((sum, chunk) => sum + chunk.outputTokens, 0)
+
+			// The request is recorded the way Task records it, then consolidated.
+			const recorded: ClineMessage[] = [
+				{
+					ts: 1000,
+					type: "say",
+					say: "api_req_started",
+					text: JSON.stringify({ tokensIn, tokensOut }),
+				},
+			]
+			const { contextTokens } = consolidateTokenUsage(recorded)
+			expect(contextTokens).toBe(60000)
+
+			// A 200K window with a 60 percent condense threshold: the 60K
+			// recorded context stays below it. The per-chunk sum (240K) does not.
+			expect(
+				willManageContext({
+					totalTokens: contextTokens,
+					contextWindow: 200000,
+					maxTokens: 8192,
+					autoCondenseContext: true,
+					autoCondenseContextPercent: 60,
+					profileThresholds: {},
+					currentProfileId: "default",
+					lastMessageTokens: 0,
+					useAvailableInputForContextPercent: false,
+				}),
+			).toBe(false)
 		})
 
 		it("honors includeMaxTokens/modelMaxTokens override for max_completion_tokens", async () => {
