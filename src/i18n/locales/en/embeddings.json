@@ -73,5 +73,6 @@
 		"downloadFailed": "Failed to download semble: {{errorMessage}}",
 		"checkFailed": "Semble check failed: {{errorMessage}}",
 		"providerReset": "Semble provider reset. On-disk cache remains until next rebuild."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

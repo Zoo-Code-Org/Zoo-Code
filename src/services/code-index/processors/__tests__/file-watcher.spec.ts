@@ -159,6 +159,7 @@ describe("FileWatcher", () => {
 
 		mockEmbedder = {
 			createEmbeddings: vi.fn().mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] }),
+			rateLimitScope: "openai:1",
 		}
 
 		mockVectorStore = {
@@ -401,20 +402,21 @@ describe("FileWatcher", () => {
 			async (stage) => {
 				await fileWatcher.initialize()
 				for (let index = 0; index < 4; index++) {
-					const error = new Error(`${stage} failed`)
+					const error = Object.assign(new Error(`${stage} failed`), { status: 400 })
 					if (stage === "stat") vi.mocked(vscode.workspace.fs.stat).mockRejectedValueOnce(error)
 					if (stage === "read") vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(error)
 					if (stage === "parse") vi.mocked(codeParser.parseFile).mockRejectedValueOnce(error)
 					if (stage === "embed") mockEmbedder.createEmbeddings.mockRejectedValueOnce(error)
 					const summary = await runBatch(`/mock/workspace/src/local-${index}.ts`)
-					expect(summary.processedFiles).toEqual([
-						{
-							path: `/mock/workspace/src/local-${index}.ts`,
-							status: "local_error",
-							error,
-							...(stage === "embed" ? { embeddingOutcome: "failure" } : {}),
-						},
-					])
+					const [result] = summary.processedFiles
+					expect(summary.processedFiles).toHaveLength(1)
+					expect(result).toMatchObject({
+						path: `/mock/workspace/src/local-${index}.ts`,
+						status: "local_error",
+						...(stage === "embed" ? { embeddingOutcome: "failure" } : {}),
+					})
+					// The retry policy wraps embed failures; the original stays in `cause`.
+					expect(stage === "embed" ? result.error?.cause : result.error).toBe(error)
 					expect(summary.circuitBreakerOpen).toBe(false)
 				}
 			},

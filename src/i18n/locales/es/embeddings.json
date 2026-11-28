@@ -73,5 +73,6 @@
 		"downloadFailed": "Error al descargar semble: {{errorMessage}}",
 		"checkFailed": "Verificación de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveedor de Semble restablecido. La caché en disco se conserva hasta la próxima reconstrucción."
-	}
+	},
+	"quotaExceeded": "Se ha alcanzado la cuota o el límite de facturación del proveedor de incrustaciones. Comprueba tu plan o la facturación y vuelve a iniciar la indexación."
 }

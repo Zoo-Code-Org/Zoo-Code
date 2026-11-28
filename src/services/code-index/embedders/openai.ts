@@ -11,6 +11,7 @@ import {
 import { getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, formatEmbeddingError, HttpError } from "../shared/validation-helpers"
+import { makeRateLimitScope } from "../provider-pacer"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
@@ -21,6 +22,7 @@ import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
 export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 	private embeddingsClient: OpenAI
 	private readonly defaultModelId: string
+	readonly rateLimitScope: string
 
 	/**
 	 * Creates a new OpenAI embedder
@@ -39,6 +41,7 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 		}
 
 		this.defaultModelId = options.openAiEmbeddingModelId || "text-embedding-3-small"
+		this.rateLimitScope = makeRateLimitScope("openai", this.embeddingsClient.baseURL, apiKey)
 	}
 
 	/**

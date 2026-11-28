@@ -4,6 +4,7 @@ import { makeExtensionContext } from "../../../../test-utils/vscode"
 import { clearAllMocks } from "../../../../test-utils/reset"
 import { Package } from "../../../../shared/package"
 import { CacheManager } from "../../cache-manager"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 import { BATCH_SEGMENT_THRESHOLD } from "../../constants"
 import { OpenAiEmbedder } from "../../embedders/openai"
 import { QdrantVectorStore } from "../../vector-store/qdrant-client"
@@ -44,6 +45,7 @@ describe("processor factories", () => {
 			vectorStore: new QdrantVectorStore("/workspace", "http://localhost:6333", 512),
 			parser: codeParser,
 			ignoreInstance: ignore(),
+			pacers: new ProviderPacerRegistry(),
 		}
 	}
 
@@ -67,6 +69,7 @@ describe("processor factories", () => {
 				options.cacheManager,
 				options.ignoreInstance,
 				batchSize,
+				options.pacers,
 			)
 			expect(FileWatcher).toHaveBeenCalledWith(
 				options.workspacePath,
@@ -77,6 +80,7 @@ describe("processor factories", () => {
 				options.ignoreInstance,
 				undefined,
 				batchSize,
+				options.pacers,
 			)
 			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name)
 			expect(configuration.get).toHaveBeenCalledWith("codeIndex.embeddingBatchSize", BATCH_SEGMENT_THRESHOLD)
@@ -148,12 +152,13 @@ describe("processor factories", () => {
 		vi.mocked(configManager.getConfig).mockReturnValue(config)
 		const createEmbedder = vi.spyOn(EmbedderFactory.prototype, "create").mockReturnValue(options.embedder)
 		const createVectorStore = vi.spyOn(VectorStoreFactory.prototype, "create").mockReturnValue(options.vectorStore)
-		const factory = new CodeIndexServiceFactory(configManager, options.workspacePath, options.cacheManager)
+		const pacers = new ProviderPacerRegistry()
+		const factory = new CodeIndexServiceFactory(configManager, options.workspacePath, options.cacheManager, pacers)
 
 		const services = factory.createServices(options.context, watcherCache, options.ignoreInstance)
 
 		expect(configManager.getConfig).toHaveBeenCalledTimes(1)
-		expect(createEmbedder).toHaveBeenCalledExactlyOnceWith(config)
+		expect(createEmbedder).toHaveBeenCalledExactlyOnceWith(config, pacers)
 		expect(createVectorStore).toHaveBeenCalledExactlyOnceWith(config, options.workspacePath)
 		expect(services).toEqual({
 			embedder: options.embedder,
@@ -173,7 +178,12 @@ describe("processor factories", () => {
 		Object.defineProperty(configManager, "isFeatureConfigured", { value: false })
 		const createEmbedder = vi.spyOn(EmbedderFactory.prototype, "create")
 		const createVectorStore = vi.spyOn(VectorStoreFactory.prototype, "create")
-		const factory = new CodeIndexServiceFactory(configManager, options.workspacePath, options.cacheManager)
+		const factory = new CodeIndexServiceFactory(
+			configManager,
+			options.workspacePath,
+			options.cacheManager,
+			new ProviderPacerRegistry(),
+		)
 
 		expect(() => factory.createServices(options.context, options.cacheManager, options.ignoreInstance)).toThrow(
 			"serviceFactory.codeIndexingNotConfigured",

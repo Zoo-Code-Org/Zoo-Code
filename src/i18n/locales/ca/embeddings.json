@@ -73,5 +73,6 @@
 		"downloadFailed": "Error en descarregar semble: {{errorMessage}}",
 		"checkFailed": "Comprovació de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveïdor de Semble restablert. La memòria cau al disc es conserva fins a la propera reconstrucció."
-	}
+	},
+	"quotaExceeded": "S'ha arribat a la quota o al límit de facturació del proveïdor d'incrustacions. Revisa el teu pla o la facturació i torna a iniciar la indexació."
 }

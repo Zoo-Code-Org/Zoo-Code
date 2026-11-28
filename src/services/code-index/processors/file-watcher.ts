@@ -23,6 +23,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
+import { ProviderPacerRegistry } from "../provider-pacer"
 
 /**
  * Implementation of the file watcher interface
@@ -88,6 +89,7 @@ export class FileWatcher implements IFileWatcher {
 		ignoreInstance?: Ignore,
 		ignoreController?: RooIgnoreController,
 		batchSegmentThreshold?: number,
+		pacers: Pick<ProviderPacerRegistry, "get"> = new ProviderPacerRegistry(),
 	) {
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
 		if (ignoreInstance) {
@@ -101,6 +103,7 @@ export class FileWatcher implements IFileWatcher {
 			cacheManager: this.cacheManager,
 			parser: codeParser,
 			embedder: this.embedder,
+			pacers,
 		})
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings

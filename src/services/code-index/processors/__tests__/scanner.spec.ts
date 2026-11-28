@@ -1,6 +1,7 @@
 // npx vitest services/code-index/processors/__tests__/scanner.spec.ts
 
 import { DirectoryScanner } from "../scanner"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 import { stat } from "fs/promises"
 
 // Mock TelemetryService
@@ -68,6 +69,8 @@ vi.mock("../../../glob/list-files", () => ({
 }))
 
 describe("DirectoryScanner", () => {
+	afterEach(() => vi.useRealTimers())
+
 	let scanner: DirectoryScanner
 	let mockEmbedder: any
 	let mockVectorStore: any
@@ -80,6 +83,7 @@ describe("DirectoryScanner", () => {
 		mockEmbedder = {
 			createEmbeddings: vi.fn().mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] }),
 			embedderInfo: { name: "mock-embedder", dimensions: 384 },
+			rateLimitScope: "openai:1",
 		}
 		mockVectorStore = {
 			upsertPoints: vi.fn().mockResolvedValue(undefined),
@@ -218,6 +222,78 @@ describe("DirectoryScanner", () => {
 			await scanner.scanDirectory("/test")
 			expect(mockEmbedder.createEmbeddings).toHaveBeenCalled()
 			expect(mockVectorStore.upsertPoints).toHaveBeenCalled()
+		})
+
+		it.each([1, 100])("passes the scan signal to the pacer and retries a 429 (threshold %s)", async (threshold) => {
+			const controller = new AbortController()
+			const pacers = new ProviderPacerRegistry()
+			const run = vi.spyOn(pacers.get("openai:1"), "run")
+			const pacedScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				threshold,
+				pacers,
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/file1.js"], false])
+			mockCodeParser.parseFile.mockResolvedValue([
+				{ file_path: "test/file1.js", content: "c", start_line: 1, end_line: 2, segmentHash: "s" },
+			])
+			mockEmbedder.createEmbeddings
+				.mockRejectedValueOnce(Object.assign(new Error("limited"), { status: 429, retryAfterMs: 5000 }))
+				.mockResolvedValueOnce({ embeddings: [[0.5]] })
+
+			vi.useFakeTimers()
+			const pending = pacedScanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal)
+			await vi.advanceTimersByTimeAsync(4999)
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(1)
+			expect(mockVectorStore.upsertPoints).not.toHaveBeenCalled()
+			await vi.advanceTimersByTimeAsync(1)
+			const result = await pending
+
+			expect(run).toHaveBeenCalledWith(undefined, controller.signal, expect.any(Function))
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(2)
+			expect(result.totalBlockCount).toBe(1)
+			expect(mockVectorStore.upsertPoints).toHaveBeenCalledExactlyOnceWith([
+				{
+					id: expect.any(String),
+					vector: [0.5],
+					payload: expect.objectContaining({ codeChunk: "c", startLine: 1, endLine: 2, segmentHash: "s" }),
+				},
+			])
+		})
+
+		it("stops batch retries without reporting an error when the scan is stopped during a wait", async () => {
+			const controller = new AbortController()
+			const onError = vi.fn()
+			const pacedScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				1,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/file1.js"], false])
+			mockCodeParser.parseFile.mockResolvedValue([
+				{ file_path: "test/file1.js", content: "c", start_line: 1, end_line: 2, segmentHash: "s" },
+			])
+			mockEmbedder.createEmbeddings.mockRejectedValue(
+				Object.assign(new Error("limited"), { status: 429, retryAfterMs: 60_000 }),
+			)
+			vi.useFakeTimers()
+			const pending = pacedScanner.scanDirectory("/test", undefined, onError, undefined, controller.signal)
+			await vi.advanceTimersByTimeAsync(10)
+			controller.abort()
+			await vi.advanceTimersByTimeAsync(10_000)
+			await pending
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(1)
+			expect(onError).not.toHaveBeenCalled()
 		})
 
 		it("should clean up a threshold-triggered batch", async () => {

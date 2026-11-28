@@ -30,6 +30,8 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
+import { ProviderPacerRegistry } from "../provider-pacer"
+import { createPacedEmbeddings } from "../shared/retry-policy"
 
 export class DirectoryScanner implements IDirectoryScanner {
 	private readonly batchSegmentThreshold: number
@@ -41,6 +43,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		private readonly cacheManager: CacheManager,
 		private readonly ignoreInstance: Ignore,
 		batchSegmentThreshold?: number,
+		private readonly pacers: Pick<ProviderPacerRegistry, "get"> = new ProviderPacerRegistry(),
 	) {
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
@@ -211,6 +214,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 												scanWorkspace,
 												onError,
 												onBlocksIndexed,
+												signal,
 											),
 										)
 										activeBatchPromises.add(batchPromise)
@@ -302,7 +306,15 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 				// Queue final batch processing
 				const batchPromise = batchLimiter(() =>
-					this.processBatch(batchBlocks, batchTexts, batchFileInfos, scanWorkspace, onError, onBlocksIndexed),
+					this.processBatch(
+						batchBlocks,
+						batchTexts,
+						batchFileInfos,
+						scanWorkspace,
+						onError,
+						onBlocksIndexed,
+						signal,
+					),
 				)
 				activeBatchPromises.add(batchPromise)
 
@@ -393,6 +405,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		scanWorkspace: string,
 		onError?: (error: Error) => void,
 		onBlocksIndexed?: (indexedCount: number) => void,
+		signal?: AbortSignal,
 	): Promise<void> {
 		if (batchBlocks.length === 0) return
 
@@ -445,7 +458,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 				// --- End Deletion Step ---
 
 				// Create embeddings for batch
-				const { embeddings } = await this.embedder.createEmbeddings(batchTexts)
+				const { embeddings } = await createPacedEmbeddings(this.embedder, this.pacers, batchTexts, signal)
 
 				// Prepare points for Qdrant
 				const points = batchBlocks.map((block, index) => {
@@ -477,6 +490,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 				}
 				success = true
 			} catch (error) {
+				// A stop is not a batch failure: do not retry or report it.
+				if (signal?.aborted) return
 				lastError = error as Error
 				console.error(
 					`[DirectoryScanner] Error processing batch (attempt ${attempts}) in workspace ${scanWorkspace}:`,

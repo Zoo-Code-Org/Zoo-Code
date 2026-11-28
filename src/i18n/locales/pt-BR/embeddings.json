@@ -73,5 +73,6 @@
 		"downloadFailed": "Falha ao baixar semble: {{errorMessage}}",
 		"checkFailed": "Verificação do semble falhou: {{errorMessage}}",
 		"providerReset": "Provedor Semble redefinido. O cache em disco permanece até a próxima reconstrução."
-	}
+	},
+	"quotaExceeded": "A cota ou o limite de cobrança do provedor de embeddings foi atingido. Verifique seu plano ou sua cobrança e inicie a indexação novamente."
 }

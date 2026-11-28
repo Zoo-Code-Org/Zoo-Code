@@ -73,5 +73,6 @@
 		"downloadFailed": "Fehler beim Herunterladen von Semble: {{errorMessage}}",
 		"checkFailed": "Semble-Überprüfung fehlgeschlagen: {{errorMessage}}",
 		"providerReset": "Semble-Anbieter zurückgesetzt. Der Cache auf der Festplatte bleibt bis zum nächsten Neuaufbau erhalten."
-	}
+	},
+	"quotaExceeded": "Kontingent oder Abrechnungslimit des Einbettungsanbieters erreicht. Überprüfe deinen Tarif oder deine Abrechnung und starte die Indexierung erneut."
 }

@@ -6,6 +6,7 @@ import type { FilePreparationDependencies } from "./file-preparation-dependencie
 import { MAX_FILE_SIZE_BYTES, QDRANT_CODE_BLOCK_NAMESPACE } from "../constants"
 import { generateNormalizedAbsolutePath, generateRelativeFilePath } from "../shared/get-relative-path"
 import { isPathInIgnoredDirectory } from "../../glob/ignore-utils"
+import { createPacedEmbeddings } from "../shared/retry-policy"
 
 /** Prepares one file for batching without writing points or mutating the hash cache. */
 export class FilePreparation {
@@ -33,7 +34,13 @@ export class FilePreparation {
 			if (dependencies.embedder && blocks.length > 0) {
 				let embeddings: number[][]
 				try {
-					const result = await dependencies.embedder.createEmbeddings(blocks.map((block) => block.content))
+					const result = await createPacedEmbeddings(
+						dependencies.embedder,
+						dependencies.pacers,
+						blocks.map((block) => block.content),
+						undefined,
+						filePath,
+					)
 					embeddingOutcome = "success"
 					embeddings = result.embeddings
 				} catch (error) {

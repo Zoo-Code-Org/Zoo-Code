@@ -14,6 +14,7 @@ import { FileWatcherFactory } from "./processors/file-watcher-factory"
 import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
+import type { ProviderPacerRegistry } from "./provider-pacer"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
@@ -32,6 +33,7 @@ export class CodeIndexServiceFactory {
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
+		private readonly pacers: ProviderPacerRegistry,
 	) {}
 
 	/**
@@ -66,7 +68,7 @@ export class CodeIndexServiceFactory {
 		}
 
 		const config = this.configManager.getConfig()
-		const embedder = this.embedderFactory.create(config)
+		const embedder = this.embedderFactory.create(config, this.pacers)
 		const vectorStore = this.vectorStoreFactory.create(config, this.workspacePath)
 		const parser = codeParser
 		const scanner = this.directoryScannerFactory.create({
@@ -75,6 +77,7 @@ export class CodeIndexServiceFactory {
 			parser,
 			cacheManager: this.cacheManager,
 			ignoreInstance,
+			pacers: this.pacers,
 		})
 		const fileWatcher = this.fileWatcherFactory.create({
 			workspacePath: this.workspacePath,
@@ -84,6 +87,7 @@ export class CodeIndexServiceFactory {
 			cacheManager,
 			ignoreInstance,
 			rooIgnoreController,
+			pacers: this.pacers,
 		})
 
 		return {

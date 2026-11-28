@@ -13,6 +13,7 @@ import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { Mutex } from "async-mutex"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
+import { makeRateLimitScope } from "../provider-pacer"
 
 // Default provider name when no specific provider is selected
 export const OPENROUTER_DEFAULT_PROVIDER_NAME = "[default]"
@@ -41,6 +42,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 	private readonly maxItemTokens: number
 	private readonly baseUrl: string = "https://openrouter.ai/api/v1"
 	private readonly specificProvider?: string
+	readonly rateLimitScope: string
 
 	// Global rate limiting state shared across all instances
 	private static globalRateLimitState = {
@@ -84,6 +86,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 		}
 
 		this.defaultModelId = modelId || getDefaultModelId("openrouter")
+		this.rateLimitScope = makeRateLimitScope("openrouter", this.baseUrl, apiKey)
 		this.maxItemTokens = maxItemTokens || MAX_ITEM_TOKENS
 	}
 

@@ -4,6 +4,7 @@ import { getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { MAX_ITEM_TOKENS } from "../constants"
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, sanitizeErrorMessage } from "../shared/validation-helpers"
+import { makeRateLimitScope } from "../provider-pacer"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 
@@ -17,6 +18,7 @@ const OLLAMA_VALIDATION_TIMEOUT_MS = 30000 // 30 seconds for validation requests
 export class CodeIndexOllamaEmbedder implements IEmbedder {
 	private readonly baseUrl: string
 	private readonly defaultModelId: string
+	readonly rateLimitScope: string
 
 	constructor(options: ApiHandlerOptions) {
 		// Ensure ollamaBaseUrl and ollamaModelId exist on ApiHandlerOptions or add defaults
@@ -27,6 +29,7 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 
 		this.baseUrl = baseUrl
 		this.defaultModelId = options.ollamaModelId || "nomic-embed-text:latest"
+		this.rateLimitScope = makeRateLimitScope("ollama", baseUrl)
 	}
 
 	/**

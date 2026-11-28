@@ -3,6 +3,7 @@ import type { FileSystem } from "vscode"
 import type { RooIgnoreController } from "../../../core/ignore/RooIgnoreController"
 import type { CacheManager } from "../cache-manager"
 import type { ICodeParser, IEmbedder } from "../interfaces"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 
 export interface FilePreparationDependencies {
 	workspacePath: string
@@ -11,5 +12,6 @@ export interface FilePreparationDependencies {
 	fileSystem: Pick<FileSystem, "stat" | "readFile">
 	cacheManager: Pick<CacheManager, "getHash">
 	parser: ICodeParser
-	embedder?: Pick<IEmbedder, "createEmbeddings">
+	embedder?: Pick<IEmbedder, "createEmbeddings" | "rateLimitScope">
+	pacers: Pick<ProviderPacerRegistry, "get">
 }

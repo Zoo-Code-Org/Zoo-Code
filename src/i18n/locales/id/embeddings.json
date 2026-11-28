@@ -73,5 +73,6 @@
 		"downloadFailed": "Gagal mengunduh semble: {{errorMessage}}",
 		"checkFailed": "Pemeriksaan semble gagal: {{errorMessage}}",
 		"providerReset": "Penyedia Semble direset. Cache di disk tetap ada hingga pembangunan ulang berikutnya."
-	}
+	},
+	"quotaExceeded": "Kuota atau batas penagihan penyedia embeddings telah tercapai. Periksa paket atau penagihanmu, lalu mulai pengindeksan lagi."
 }

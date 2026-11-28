@@ -73,5 +73,6 @@
 		"downloadFailed": "Download di semble fallito: {{errorMessage}}",
 		"checkFailed": "Verifica di semble fallita: {{errorMessage}}",
 		"providerReset": "Provider Semble ripristinato. La cache su disco rimane fino alla prossima ricostruzione."
-	}
+	},
+	"quotaExceeded": "Quota o limite di fatturazione del provider di embedding raggiunto. Controlla il tuo piano o la fatturazione, poi riavvia l'indicizzazione."
 }

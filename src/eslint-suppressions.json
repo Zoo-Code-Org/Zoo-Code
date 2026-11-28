@@ -1019,11 +1019,6 @@
 			"count": 43
 		}
 	},
-	"services/code-index/embedders/__tests__/bedrock.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
 	"services/code-index/embedders/__tests__/gemini.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
@@ -1037,16 +1032,6 @@
 	"services/code-index/embedders/__tests__/ollama.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"services/code-index/embedders/__tests__/openai-compatible-rate-limit.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 15
-		}
-	},
-	"services/code-index/embedders/__tests__/openai-compatible.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 28
 		}
 	},
 	"services/code-index/embedders/__tests__/openai.spec.ts": {
@@ -1066,7 +1051,7 @@
 	},
 	"services/code-index/embedders/bedrock.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"services/code-index/embedders/ollama.ts": {

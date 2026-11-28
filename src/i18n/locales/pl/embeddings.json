@@ -73,5 +73,6 @@
 		"downloadFailed": "Nie udało się pobrać semble: {{errorMessage}}",
 		"checkFailed": "Sprawdzenie semble nie powiodło się: {{errorMessage}}",
 		"providerReset": "Dostawca Semble zresetowany. Pamięć podręczna na dysku pozostaje do kolejnej przebudowy."
-	}
+	},
+	"quotaExceeded": "Osiągnięto limit wykorzystania lub rozliczeń u dostawcy osadzeń. Sprawdź swój plan lub rozliczenia, a następnie uruchom indeksowanie ponownie."
 }

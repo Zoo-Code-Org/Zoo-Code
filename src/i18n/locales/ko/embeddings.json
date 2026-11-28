@@ -73,5 +73,6 @@
 		"downloadFailed": "semble 다운로드 실패: {{errorMessage}}",
 		"checkFailed": "Semble 확인 실패: {{errorMessage}}",
 		"providerReset": "Semble 공급자가 재설정되었습니다. 디스크 캐시는 다음 재구축까지 유지됩니다."
-	}
+	},
+	"quotaExceeded": "임베딩 공급자의 할당량 또는 결제 한도에 도달했습니다. 요금제나 결제 정보를 확인한 다음 인덱싱을 다시 시작하세요."
 }

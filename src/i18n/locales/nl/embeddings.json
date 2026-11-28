@@ -73,5 +73,6 @@
 		"downloadFailed": "Downloaden van semble mislukt: {{errorMessage}}",
 		"checkFailed": "Semble-controle mislukt: {{errorMessage}}",
 		"providerReset": "Semble-provider gereset. Schijfcache blijft behouden tot de volgende heropbouw."
-	}
+	},
+	"quotaExceeded": "Het quotum of de factureringslimiet van de insluitingsprovider is bereikt. Controleer je abonnement of facturering en start de indexering opnieuw."
 }

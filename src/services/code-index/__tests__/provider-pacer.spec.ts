@@ -1,0 +1,313 @@
+import { ProviderPacer, ProviderPacerRegistry, makeRateLimitScope } from "../provider-pacer"
+
+const rateLimit = (retryAfterMs?: number) => Object.assign(new Error("limited"), { status: 429, retryAfterMs })
+
+async function settle(promise: Promise<unknown>) {
+	return promise.then(
+		(value) => ({ value }),
+		(error: unknown) => ({ error }),
+	)
+}
+
+describe("makeRateLimitScope (CI-PP-01)", () => {
+	it.each([
+		["same configuration", ["openai", "https://api.test/v1", "key"], ["openai", "https://api.test/v1", "key"]],
+		["trailing slash", ["openai", "https://api.test/v1/", "key"], ["openai", "https://api.test/v1", "key"]],
+		["credentials in URL", ["openai", "https://u:p@api.test/v1", "key"], ["openai", "https://api.test/v1", "key"]],
+		["URL hash", ["openai", "https://api.test/v1#x", "key"], ["openai", "https://api.test/v1", "key"]],
+	])("gives equal scopes for %s", (_label, first, second) => {
+		const [provider, url, key] = first
+		const [provider2, url2, key2] = second
+		expect(makeRateLimitScope(provider, url, key)).toBe(makeRateLimitScope(provider2, url2, key2))
+	})
+
+	it.each([
+		["API key", ["openai", "https://api.test", "a"], ["openai", "https://api.test", "b"]],
+		["endpoint", ["openai", "https://a.test", "k"], ["openai", "https://b.test", "k"]],
+		["provider", ["openai", "https://a.test", "k"], ["mistral", "https://a.test", "k"]],
+	])("gives unequal scopes for a different %s", (_label, first, second) => {
+		expect(makeRateLimitScope(first[0], first[1], first[2])).not.toBe(
+			makeRateLimitScope(second[0], second[1], second[2]),
+		)
+	})
+
+	it("rejects an invalid base URL", () => {
+		expect(() => makeRateLimitScope("openai", "not a URL", "key")).toThrow(TypeError)
+	})
+
+	it("distinguishes extra inputs and never embeds the key", () => {
+		const scope = makeRateLimitScope("bedrock", undefined, undefined, "us-east-1|default")
+		expect(scope).not.toBe(makeRateLimitScope("bedrock", undefined, undefined, "us-west-2|default"))
+		expect(makeRateLimitScope("openai", "https://api.test", "secret-key")).not.toContain("secret-key")
+		expect(scope.startsWith("bedrock:")).toBe(true)
+	})
+})
+
+describe("ProviderPacer (CI-PP-02)", () => {
+	beforeEach(() => vi.useFakeTimers({ now: 0 }))
+	afterEach(() => vi.useRealTimers())
+
+	it.each([61_000, 120_000])("honors a %d ms Retry-After in full", async (delay) => {
+		const pacer = new ProviderPacer("openai:1")
+		const request = vi.fn().mockRejectedValueOnce(rateLimit(delay)).mockResolvedValue("ok")
+		const run = pacer.run("a.ts", undefined, request)
+		await vi.advanceTimersByTimeAsync(delay - 1)
+		expect(request).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(1)
+		await expect(run).resolves.toBe("ok")
+		expect(request).toHaveBeenCalledTimes(2)
+	})
+
+	it("backs off exponentially without a delay, caps at 300 s and resets on success", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const request = vi.fn()
+		for (let iter = 0; iter < 12; iter++) request.mockRejectedValueOnce(rateLimit())
+		request.mockResolvedValue("ok")
+		const run = pacer.run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(0)
+		const waits: number[] = []
+		while (request.mock.calls.length < 13) {
+			const before = Date.now()
+			const resume = pacer.resumeAt!
+			await vi.advanceTimersByTimeAsync(resume - before)
+			waits.push(resume - before)
+		}
+		await expect(run).resolves.toBe("ok")
+		expect(waits.slice(0, 4)).toEqual([1000, 2000, 4000, 8000])
+		expect(Math.max(...waits)).toBe(300_000)
+
+		request.mockRejectedValueOnce(rateLimit()).mockResolvedValue("ok")
+		const next = pacer.run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(pacer.resumeAt! - Date.now()).toBe(1000)
+		await vi.advanceTimersByTimeAsync(1000)
+		await next
+	})
+
+	it("never shortens an existing pause when a later 429 asks for less", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		let releaseShort: (() => void) | undefined
+		const shortRequest = vi
+			.fn()
+			.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (releaseShort = () => reject(rateLimit(1000)))),
+			)
+			.mockResolvedValue("ok")
+		const short = settle(pacer.run(undefined, undefined, shortRequest))
+		const slow = settle(pacer.run(undefined, undefined, vi.fn().mockRejectedValueOnce(rateLimit(60_000))))
+		await vi.advanceTimersByTimeAsync(0)
+		expect(pacer.resumeAt).toBe(60_000)
+		releaseShort?.()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(pacer.resumeAt).toBe(60_000)
+		await vi.advanceTimersByTimeAsync(59_999)
+		expect(shortRequest).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(1)
+		await expect(Promise.all([slow, short])).resolves.toEqual([{ value: undefined }, { value: "ok" }])
+		expect(shortRequest).toHaveBeenCalledTimes(2)
+	})
+
+	it("counts concurrent 429s during one pause as a single backoff step", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const releases: Array<() => void> = []
+		const request = () =>
+			vi
+				.fn()
+				.mockImplementationOnce(
+					() => new Promise((_resolve, reject) => releases.push(() => reject(rateLimit()))),
+				)
+				.mockResolvedValue("ok")
+		const runs = [1, 2, 3, 4].map(() => settle(pacer.run(undefined, undefined, request())))
+		await vi.advanceTimersByTimeAsync(0)
+		for (const release of releases) release()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(pacer.resumeAt! - Date.now()).toBe(1000)
+		await vi.advanceTimersByTimeAsync(1000)
+		await expect(Promise.all(runs)).resolves.toEqual([1, 2, 3, 4].map(() => ({ value: "ok" })))
+	})
+
+	it("rejects a waiter at once with the abort reason and drops its path", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const first = settle(pacer.run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(60_000))))
+		await vi.advanceTimersByTimeAsync(0)
+		const controller = new AbortController()
+		const request = vi.fn()
+		const waiting = pacer.run("b.ts", controller.signal, request)
+		expect(pacer.waitingPaths).toContain("b.ts")
+		const reason = new Error("stopped")
+		controller.abort(reason)
+		await expect(waiting).rejects.toBe(reason)
+		expect(pacer.waitingPaths).not.toContain("b.ts")
+		expect(request).not.toHaveBeenCalled()
+		await vi.advanceTimersByTimeAsync(60_000)
+		await expect(first).resolves.toEqual({ value: undefined })
+	})
+
+	it("removes the same abort listener it registered when a wait ends normally", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const first = settle(pacer.run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(1000))))
+		await vi.advanceTimersByTimeAsync(0)
+		const controller = new AbortController()
+		const add = vi.spyOn(controller.signal, "addEventListener")
+		const remove = vi.spyOn(controller.signal, "removeEventListener")
+		const waiting = pacer.run("b.ts", controller.signal, vi.fn().mockResolvedValue("ok"))
+		const registered = add.mock.calls[0][1]
+		await vi.advanceTimersByTimeAsync(1000)
+		await expect(waiting).resolves.toBe("ok")
+		expect(remove).toHaveBeenCalledWith("abort", registered)
+		await first
+	})
+
+	it("records the pause from a 429 that arrives after its caller aborted", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const controller = new AbortController()
+		const aborted = settle(
+			pacer.run(undefined, controller.signal, async () => {
+				controller.abort(new Error("stopped"))
+				throw rateLimit(5000)
+			}),
+		)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(await aborted).toMatchObject({ error: { message: "stopped" } })
+		expect(pacer.resumeAt).toBe(5000)
+	})
+
+	it("does not let a success sent before a pause reset that pause's backoff", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		let resolveLate: (value: string) => void = () => {}
+		let rejectThird: (error: unknown) => void = () => {}
+		const late = pacer.run(undefined, undefined, () => new Promise<string>((resolve) => (resolveLate = resolve)))
+		const third = settle(
+			pacer.run(
+				undefined,
+				undefined,
+				vi
+					.fn()
+					.mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectThird = reject)))
+					.mockResolvedValue("third"),
+			),
+		)
+		const limited = settle(pacer.run(undefined, undefined, vi.fn().mockRejectedValueOnce(rateLimit(100))))
+		await vi.advanceTimersByTimeAsync(0)
+		resolveLate("late")
+		await late
+		rejectThird(rateLimit())
+		await vi.advanceTimersByTimeAsync(0)
+		// Without the guard, the late success would reset the count and this headerless 429 would wait 500 ms.
+		expect(pacer.resumeAt! - Date.now()).toBe(1000)
+		await vi.advanceTimersByTimeAsync(1000)
+		await Promise.all([limited, third])
+	})
+
+	it("applies a 100 ms minimum pause to Retry-After: 0 instead of a backoff", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const request = vi.fn().mockRejectedValueOnce(rateLimit(0)).mockResolvedValue("ok")
+		const run = pacer.run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(99)
+		expect(request).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(1)
+		await expect(run).resolves.toBe("ok")
+		expect(request).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps pacing and later listeners working when a change listener throws", async () => {
+		const registry = new ProviderPacerRegistry()
+		const error = vi.spyOn(console, "error").mockImplementation(() => {})
+		const later = vi.fn()
+		registry.get("openai:1").onDidChange(() => {
+			throw new Error("observer")
+		})
+		registry.onDidChange(() => {
+			throw new Error("observer")
+		})
+		registry.onDidChange(later)
+		const request = vi.fn().mockRejectedValueOnce(rateLimit(1000)).mockResolvedValue("ok")
+		const run = registry.get("openai:1").run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(1000)
+		await expect(run).resolves.toBe("ok")
+		expect(later).toHaveBeenCalled()
+		expect(error).toHaveBeenCalled()
+		error.mockRestore()
+	})
+
+	it("rethrows non-rate-limit errors unchanged", async () => {
+		const failure = Object.assign(new Error("server"), { status: 500 })
+		await expect(
+			new ProviderPacer("openai:1").run(undefined, undefined, () => Promise.reject(failure)),
+		).rejects.toBe(failure)
+	})
+
+	it("makes a released waiter wait again when another waiter's 429 pauses the scope first", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const first = vi
+			.fn()
+			.mockRejectedValueOnce(rateLimit(1000))
+			.mockImplementationOnce(() => {
+				throw rateLimit(1000)
+			})
+			.mockResolvedValue("first")
+		const firstRun = pacer.run("a.ts", undefined, first)
+		await vi.advanceTimersByTimeAsync(0)
+		const second = vi.fn().mockResolvedValue("second")
+		const secondRun = pacer.run("b.ts", undefined, second)
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(first).toHaveBeenCalledTimes(2)
+		expect(second).not.toHaveBeenCalled()
+		await vi.advanceTimersByTimeAsync(1000)
+		await expect(Promise.all([firstRun, secondRun])).resolves.toEqual(["first", "second"])
+	})
+
+	it("keeps waits longer than the 32-bit timer limit", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const delay = 2 ** 31 + 10_000
+		const request = vi.fn().mockRejectedValueOnce(rateLimit(delay)).mockResolvedValue("ok")
+		const run = pacer.run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(2 ** 31)
+		expect(request).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(10_000)
+		await expect(run).resolves.toBe("ok")
+	})
+})
+
+describe("ProviderPacerRegistry", () => {
+	beforeEach(() => vi.useFakeTimers({ now: 0 }))
+	afterEach(() => vi.useRealTimers())
+
+	it("shares a scope's pause, isolates other scopes and reports deduplicated waits", async () => {
+		const registry = new ProviderPacerRegistry()
+		const changed = vi.fn()
+		registry.onDidChange(changed)
+		const paused = settle(
+			registry.get("openai:1").run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(5000))),
+		)
+		const pausedOther = settle(
+			registry.get("mistral:2").run("b.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(8000))),
+		)
+		await vi.advanceTimersByTimeAsync(0)
+		const sameRequest = vi.fn().mockResolvedValue("ok")
+		const same = settle(registry.get("openai:1").run("a.ts", undefined, sameRequest))
+		const other = vi.fn().mockResolvedValue("other")
+		const otherRun = registry.get("openai:3").run("c.ts", undefined, other)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(sameRequest).not.toHaveBeenCalled()
+		expect(other).toHaveBeenCalledTimes(1)
+		await expect(otherRun).resolves.toBe("other")
+		expect(registry.get("openai:3").resumeAt).toBeUndefined()
+
+		expect(registry.providerWaits()).toEqual([
+			{ service: "openai", resumeAt: 5000, waitingFiles: ["a.ts"] },
+			{ service: "mistral", resumeAt: 8000, waitingFiles: ["b.ts"] },
+		])
+		expect(registry.waitingPaths()).toEqual(["a.ts", "b.ts"])
+		expect(registry.hasWaitingRequests()).toBe(true)
+		expect(changed).toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(5000)
+		await expect(Promise.all([paused, same])).resolves.toEqual([{ value: undefined }, { value: "ok" }])
+		expect(registry.providerWaits()).toEqual([{ service: "mistral", resumeAt: 8000, waitingFiles: ["b.ts"] }])
+		await vi.advanceTimersByTimeAsync(3000)
+		await expect(pausedOther).resolves.toEqual({ value: undefined })
+		expect(registry.providerWaits()).toEqual([])
+		expect(registry.hasWaitingRequests()).toBe(false)
+	})
+})

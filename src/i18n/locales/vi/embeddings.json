@@ -73,5 +73,6 @@
 		"downloadFailed": "Tải xuống semble thất bại: {{errorMessage}}",
 		"checkFailed": "Kiểm tra semble thất bại: {{errorMessage}}",
 		"providerReset": "Nhà cung cấp Semble đã đặt lại. Bộ nhớ đệm trên đĩa vẫn còn cho đến lần xây dựng lại tiếp theo."
-	}
+	},
+	"quotaExceeded": "Đã đạt hạn ngạch hoặc giới hạn thanh toán của nhà cung cấp nhúng. Kiểm tra gói dịch vụ hoặc thông tin thanh toán của bạn, rồi bắt đầu lập chỉ mục lại."
 }

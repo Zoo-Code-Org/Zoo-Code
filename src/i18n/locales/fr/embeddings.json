@@ -73,5 +73,6 @@
 		"downloadFailed": "Échec du téléchargement de semble : {{errorMessage}}",
 		"checkFailed": "Vérification de semble échouée : {{errorMessage}}",
 		"providerReset": "Fournisseur Semble réinitialisé. Le cache sur disque reste jusqu'à la prochaine reconstruction."
-	}
+	},
+	"quotaExceeded": "Le quota ou la limite de facturation du fournisseur d'embeddings a été atteint. Vérifie ton forfait ou ta facturation, puis relance l'indexation."
 }
