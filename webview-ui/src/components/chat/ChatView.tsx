@@ -70,6 +70,7 @@ import { QueuedMessages } from "./QueuedMessages"
 import { WorktreeSelector } from "./WorktreeSelector"
 import FileChangesPanel from "./FileChangesPanel"
 import { useScrollLifecycle } from "@src/hooks/useScrollLifecycle"
+import { useEventCallback } from "@src/hooks/useEventCallback"
 import { isMessageForCurrentTask, useManualCondenseWait } from "./hooks/useManualCondenseWait"
 
 export interface ChatViewProps {
@@ -1574,7 +1575,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		handleScrollToBottomClick()
 	}, [handleScrollToBottomClick])
 
-	const handleScrollToLatestCheckpoint = useCallback(() => {
+	const handleScrollToLatestCheckpoint = useEventCallback(() => {
 		if (checkpointIndices.length === 0) {
 			return
 		}
@@ -1590,7 +1591,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			align: "center",
 			behavior: "smooth",
 		})
-	}, [checkpointIndices, enterUserBrowsingHistory])
+	})
 
 	const itemContent = useCallback(
 		(index: number, messageOrGroup: ClineMessage) => {
