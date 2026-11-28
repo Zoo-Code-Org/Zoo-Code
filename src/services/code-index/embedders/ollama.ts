@@ -4,6 +4,8 @@ import { getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { MAX_ITEM_TOKENS } from "../constants"
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, sanitizeErrorMessage } from "../shared/validation-helpers"
+import { EmbeddingError } from "../shared/indexing-errors"
+import { makeRateLimitScope } from "../provider-pacer"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 
@@ -17,6 +19,7 @@ const OLLAMA_VALIDATION_TIMEOUT_MS = 30000 // 30 seconds for validation requests
 export class CodeIndexOllamaEmbedder implements IEmbedder {
 	private readonly baseUrl: string
 	private readonly defaultModelId: string
+	readonly rateLimitScope: string
 
 	constructor(options: ApiHandlerOptions) {
 		// Ensure ollamaBaseUrl and ollamaModelId exist on ApiHandlerOptions or add defaults
@@ -27,6 +30,7 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 
 		this.baseUrl = baseUrl
 		this.defaultModelId = options.ollamaModelId || "nomic-embed-text:latest"
+		this.rateLimitScope = makeRateLimitScope("ollama", baseUrl)
 	}
 
 	/**
@@ -92,13 +96,13 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 				} catch {
 					// Ignore error reading body
 				}
-				throw new Error(
-					t("embeddings:ollama.requestFailed", {
-						status: response.status,
-						statusText: response.statusText,
-						errorBody,
-					}),
-				)
+				// Keep status and headers so a 5xx or 429 is retried or paced instead of failing at once.
+				const message = t("embeddings:ollama.requestFailed", {
+					status: response.status,
+					statusText: response.statusText,
+					errorBody,
+				})
+				throw new EmbeddingError(message, { status: response.status, headers: response.headers })
 			}
 
 			const data = await response.json()
@@ -113,6 +117,7 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 				embeddings: embeddings,
 			}
 		} catch (error: any) {
+			if (error instanceof EmbeddingError) throw error
 			// Capture telemetry before reformatting the error
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),

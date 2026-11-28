@@ -28,6 +28,10 @@ export class GeminiEmbedder implements IEmbedder {
 	}
 	private readonly modelId: string
 
+	get rateLimitScope(): string {
+		return this.openAICompatibleEmbedder.rateLimitScope
+	}
+
 	/**
 	 * Migrates deprecated model IDs to their replacements.
 	 * @param modelId The model ID to potentially migrate

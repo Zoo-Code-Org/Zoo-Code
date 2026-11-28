@@ -9,6 +9,7 @@ import { CodeIndexSearchService } from "./search-service"
 import { CodeIndexOrchestrator } from "./orchestrator"
 import { CacheManager } from "./cache-manager"
 import { SembleProvider } from "./semble"
+import { ProviderPacerRegistry } from "./provider-pacer"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
 import ignore from "ignore"
@@ -25,6 +26,8 @@ export class CodeIndexManager {
 	private _searchService: CodeIndexSearchService | undefined
 	private _cacheManager: CacheManager | undefined
 	private _sembleProvider: SembleProvider | undefined
+	// One pacer set per workspace: recreating services must not reset provider waits.
+	private readonly pacers = new ProviderPacerRegistry()
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
@@ -379,6 +382,7 @@ export class CodeIndexManager {
 			this._configManager!,
 			this.workspacePath,
 			this._cacheManager!,
+			this.pacers,
 		)
 
 		const ignoreInstance = ignore()
