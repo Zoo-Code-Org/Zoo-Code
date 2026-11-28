@@ -1,6 +1,8 @@
 import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
+import { getEventListeners } from "node:events"
+
 import { DispatchState } from "../dispatchState"
 import * as fsReal from "fs"
 import * as os from "os"
@@ -13,6 +15,7 @@ import type { Mock } from "vitest"
 import {
 	providerIdentifiers,
 	RooCodeEventName,
+	TaskStatus,
 	type ClineMessage,
 	type GlobalState,
 	type HistoryItem,
@@ -30,6 +33,10 @@ import { summarizeConversation } from "../../condense"
 import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
+import { ThoughtSignatureReader, applyThoughtSignatures } from "../../../api/providers/utils/thought-signature"
+import { convertToOpenAiMessages } from "../../../api/transform/openai-format"
+import { toolResultsMessage } from "../../../test-utils/thought-signature"
+import * as timeoutConfig from "../../../api/providers/utils/timeout-config"
 import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { parseMentions } from "../../mentions"
@@ -41,6 +48,7 @@ import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
+import { attemptCompletionTool } from "../../tools/AttemptCompletionTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 import { manageContext } from "../../context-management"
 
@@ -472,8 +480,9 @@ describe("Cline", () => {
 		})()
 	}
 
-	async function createTaskWithManualRetries() {
+	async function createTaskWithManualRetries(parentTask?: Task) {
 		const task = new Task({
+			parentTask,
 			provider: mockProvider,
 			apiConfiguration: mockApiConfig,
 			task: "test task",
@@ -2072,6 +2081,56 @@ describe("Cline", () => {
 				})
 			}
 
+			it.each(["success", "failure", "cancel-before", "cancel-during"] as const)(
+				"cleans up stream-read listeners and preserves cancellation on %s",
+				async (outcome) => {
+					const task = await createTaskWithManualRetries()
+					const state = await mockProvider.getState()
+					vi.mocked(mockProvider.getState).mockResolvedValue({ ...state, autoApprovalEnabled: true })
+					Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+					const controller = new AbortController()
+					const reason = new Error("Request-specific cancellation reason")
+					let release!: () => void
+					const gate = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					let notifyPending!: () => void
+					const pending = new Promise<void>((resolve) => {
+						notifyPending = resolve
+					})
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							task.currentRequestAbortController = controller
+							if (outcome === "cancel-before") controller.abort(reason)
+							yield { type: "text", text: "first" }
+							if (outcome === "success" || outcome === "failure") task.didRejectTool = true
+							yield { type: "text", text: "buffered" }
+							if (outcome === "cancel-during") {
+								notifyPending()
+								await gate
+							}
+							if (outcome === "failure") throw new Error("Read failed")
+						},
+					)
+					realRequestsThenStop(task)
+					const backoff = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+					try {
+						if (outcome === "cancel-during") {
+							await pending
+							controller.abort(reason)
+						}
+						await loop
+						expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
+						if (outcome.startsWith("cancel")) expect(backoff.mock.calls[0]?.[1]).toBe(reason)
+					} finally {
+						release()
+						await loop
+					}
+				},
+			)
+
 			it("closes a stream whose read failed, releasing the replaced handler (stream.return())", async () => {
 				const task = await createTaskWithManualRetries()
 				const oldDispose = disposableApi(task)
@@ -2146,6 +2205,494 @@ describe("Cline", () => {
 					// drain
 				}
 				expect(oldDispose).toHaveBeenCalledOnce()
+			})
+
+			it.each([
+				{ lateExplicit: true, pastUsageLimit: false, replaceHandler: false },
+				{ lateExplicit: false, pastUsageLimit: false, replaceHandler: false },
+				{ lateExplicit: true, pastUsageLimit: true, replaceHandler: false },
+				{ lateExplicit: false, pastUsageLimit: true, replaceHandler: false },
+				{ lateExplicit: true, pastUsageLimit: false, replaceHandler: true },
+			])(
+				"settles signatures before save (explicit=$lateExplicit pastUsageLimit=$pastUsageLimit replaceHandler=$replaceHandler)",
+				async ({ lateExplicit, pastUsageLimit, replaceHandler }) => {
+					const task = await createTaskWithManualRetries()
+					task.apiConfiguration = { apiProvider: providerIdentifiers.openai, openAiModelId: "gemini-3-flash" }
+					const reader = new ThoughtSignatureReader()
+					Object.assign(task.api, {
+						requiresThoughtSignatureDrain: true,
+						getThoughtSignature: () => reader.signature,
+						getThoughtSignatureOrigin: () => "proxy",
+					})
+					let release!: () => void
+					const gate = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					let notifyDraining!: () => void
+					const draining = new Promise<void>((resolve) => {
+						notifyDraining = resolve
+					})
+					vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							if (lateExplicit) reader.update([{ id: "call_1__thought__encoded" }])
+							yield { type: "text", text: "Read the file." }
+							task.assistantMessageContent.push({
+								type: "tool_use",
+								id: "call_1",
+								name: "read_file",
+								params: { path: "a.ts" },
+								nativeArgs: { path: "a.ts" },
+								partial: false,
+							})
+							task.didRejectTool = true
+							yield { type: "text", text: "buffered" }
+							notifyDraining()
+							await gate
+							yield { type: "text", text: "late buffered chunk" }
+							if (!lateExplicit) reader.update([{ id: "call_1__thought__encoded" }])
+							if (lateExplicit)
+								reader.update([{ provider_specific_fields: { thought_signature: "explicit" } }])
+							yield { type: "usage", inputTokens: 1, outputTokens: 1 }
+						},
+					)
+					realRequestsThenStop(task)
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+					await draining
+					if (replaceHandler) {
+						task.updateApiConfiguration({ ...mockApiConfig })
+						Object.assign(task.api, {
+							getThoughtSignature: () => "replacement",
+							getThoughtSignatureOrigin: () => "replacement",
+						})
+					}
+					const clock = pastUsageLimit
+						? vi.spyOn(performance, "now").mockReturnValue(performance.now() + 6_001)
+						: undefined
+					try {
+						await new Promise((resolve) => setTimeout(resolve, 250))
+						expect(
+							task.apiConversationHistory.filter((message) => message.role === "assistant"),
+						).toHaveLength(0)
+					} finally {
+						release()
+						await loop
+						clock?.mockRestore()
+					}
+					const saved = task.apiConversationHistory.find((message) => message.role === "assistant")
+					expect(saved).toBeDefined()
+					if (!saved) throw new Error("Expected the saved assistant turn")
+					expect(saved.content).toEqual(
+						expect.arrayContaining([
+							expect.objectContaining({ type: "thoughtSignature", origin: "proxy" }),
+						]),
+					)
+					const history = [saved, toolResultsMessage(["call_1"])]
+					const replay = applyThoughtSignatures(history, convertToOpenAiMessages(history), {
+						origin: "proxy",
+					})
+					expect(replay[0]).toMatchObject({
+						tool_calls: [
+							{ provider_specific_fields: { thought_signature: lateExplicit ? "explicit" : "encoded" } },
+						],
+					})
+				},
+			)
+
+			it.each(["once", "always", "stalled"] as const)(
+				"preserves a completed turn when usage reporting is %s",
+				async (reporting) => {
+					const task = await createTaskWithManualRetries()
+					task.apiConfiguration = { apiProvider: providerIdentifiers.openai, openAiModelId: "gemini-3-flash" }
+					Object.assign(task.api, {
+						requiresThoughtSignatureDrain: true,
+						getThoughtSignature: () => "completed-signature",
+						getThoughtSignatureOrigin: () => "proxy",
+					})
+					let consumed = false
+					vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							yield { type: "text", text: "The request completed." }
+							yield { type: "usage", inputTokens: 1, outputTokens: 1, totalCost: 0.125 }
+							consumed = true
+						},
+					)
+					const requests = realRequestsThenStop(task)
+					const telemetry = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+					const error = new Error("Usage reporting failed")
+					let releaseReporting!: () => void
+					const reportingGate = new Promise<void>((resolve) => {
+						releaseReporting = resolve
+					})
+					let notifyReporting!: () => void
+					const reportingStarted = new Promise<void>((resolve) => {
+						notifyReporting = resolve
+					})
+					let attempts = 0
+					const update = task["updateClineMessage"].bind(task)
+					vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockImplementation(async (message) => {
+						if (consumed && message.say === "api_req_started") {
+							attempts++
+							notifyReporting()
+							if (reporting === "stalled") await reportingGate
+							if (reporting === "always" || (reporting === "once" && attempts === 1)) throw error
+						}
+						await update(message)
+					})
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+					await reportingStarted
+					try {
+						await vi.waitFor(() =>
+							expect(
+								task.apiConversationHistory.filter((message) => message.role === "assistant"),
+							).toHaveLength(1),
+						)
+						await loop
+						expect(requests.mock.calls[1]?.[0]).toBe(0)
+						if (reporting !== "stalled") {
+							await vi.waitFor(() => expect(attempts).toBe(2))
+							if (reporting === "once") {
+								await vi.waitFor(() =>
+									expect(telemetry).toHaveBeenCalledWith(task.taskId, {
+										inputTokens: 1,
+										outputTokens: 1,
+										cacheWriteTokens: 0,
+										cacheReadTokens: 0,
+										cost: 0.125,
+									}),
+								)
+							}
+						}
+						const saved = task.apiConversationHistory.find((message) => message.role === "assistant")
+						expect(saved?.content).toEqual(
+							expect.arrayContaining([
+								expect.objectContaining({
+									type: "thoughtSignature",
+									thoughtSignature: "completed-signature",
+									origin: "proxy",
+								}),
+							]),
+						)
+					} finally {
+						releaseReporting()
+						await loop
+					}
+				},
+			)
+
+			it.each([
+				{ failure: "failure", pending: false, reply: "message" },
+				{ failure: "deadline", pending: false, reply: "message" },
+				{ failure: "failure", pending: true, reply: "message" },
+				{ failure: "deadline", pending: true, reply: "message" },
+				{ failure: "failure", pending: false, reply: "button" },
+				{ failure: "failure", pending: false, reply: "decline" },
+				{ failure: "late-error", pending: true, reply: "message" },
+			])(
+				"offers recovery after $failure, pending tool: $pending, reply: $reply",
+				async ({ failure, pending, reply }) => {
+					const task = await createTaskWithManualRetries()
+					const state = await mockProvider.getState()
+					vi.mocked(mockProvider.getState).mockResolvedValue({ ...state, autoApprovalEnabled: true })
+					Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+					vi.spyOn(timeoutConfig, "getApiRequestTimeout").mockReturnValue(25)
+					vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+					let finishTool!: () => void
+					const toolGate = new Promise<void>((resolve) => {
+						finishTool = resolve
+					})
+					const executeTool = vi
+						.spyOn(writeToFileTool, "handle")
+						.mockClear()
+						.mockImplementation(async (_task, _block, callbacks) => {
+							if (pending) await toolGate
+							if (failure === "late-error") {
+								await callbacks.handleError(
+									"writing file",
+									new Error("Write completed but its final step failed"),
+								)
+								return
+							}
+							callbacks.pushToolResult("Written")
+						})
+					let release!: () => void
+					const gate = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					let turns = 0
+					const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+					vi.mocked(pWaitFor).mockImplementation(realPWaitFor)
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							if (turns++ > 0) {
+								yield { type: "text", text: "Recovery continued." }
+								return
+							}
+							getTaskTestAccess(task).requestPolicySnapshot = {
+								disabledTools: [],
+								customModes: [],
+								modelInfo: stubModelInfo,
+							}
+							yield {
+								type: "tool_call",
+								id: "call_write",
+								name: "write_to_file",
+								arguments: '{"path":"result.md","content":"done"}',
+							}
+							yield { type: "text", text: "buffered" }
+							await vi.waitFor(() => expect(executeTool).toHaveBeenCalledOnce())
+							// User feedback can interrupt the stream while the tool is still running.
+							task.didRejectTool = true
+							if (reply === "button")
+								task.messageQueueService.addMessage("A request queued before recovery.")
+							yield { type: "text", text: "interrupted" }
+							if (failure === "deadline") await gate
+							throw new Error("Stream consumption failed")
+						},
+					)
+					const requests = realRequestsThenStop(task, 2)
+					vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+					const say = vi.spyOn(task, "say")
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = getTaskTestAccess(task).initiateTaskLoop([{ type: "text", text: "write the file" }])
+					try {
+						if (pending) {
+							await vi.waitFor(() => expect(executeTool).toHaveBeenCalledOnce())
+							await vi.waitFor(() => expect(task.isStreaming).toBe(false))
+							await new Promise<void>((resolve) => setTimeout(resolve, 0))
+							finishTool()
+						}
+						await vi.waitFor(() => expect(task.taskStatus).toBe(TaskStatus.Resumable), { timeout: 4_000 })
+						expect(task.taskAsk?.ask).toBe("resume_task")
+						expect(task.taskAsk?.isProtected).toBe(true)
+						expect(task.isStreaming).toBe(false)
+						expect(executeTool).toHaveBeenCalledOnce()
+						expect(requests).toHaveBeenCalledOnce()
+						if (!pending)
+							expect(task.userMessageContent).toEqual(
+								expect.arrayContaining([
+									expect.objectContaining({ type: "tool_result", tool_use_id: "call_write" }),
+								]),
+							)
+						expect(say).toHaveBeenCalledWith("error", expect.stringContaining("Automatic retry stopped"))
+						if (reply === "decline") {
+							task.handleWebviewAskResponse("noButtonClicked")
+							await loop
+							expect(task.abort).toBe(true)
+							expect(turns).toBe(1)
+							expect(requests).toHaveBeenCalledOnce()
+							return
+						}
+						if (reply === "button") {
+							expect(task.queuedMessages).toHaveLength(1)
+							task.handleWebviewAskResponse("yesButtonClicked")
+						} else {
+							await task.submitUserMessage("The write is verified. Continue with a read-only check.")
+						}
+
+						await loop
+						expect(turns).toBe(2)
+						expect(executeTool).toHaveBeenCalledOnce()
+						expect(requests.mock.calls[1]?.[0]).toBe(0)
+						const recovery = task.apiConversationHistory.find(
+							(message) =>
+								message.role === "user" &&
+								JSON.stringify(message.content).includes(
+									failure === "late-error" ? "Write completed but its final step failed" : "Written",
+								),
+						)
+						expect(recovery?.content).toEqual(
+							expect.arrayContaining([
+								expect.objectContaining({
+									type: "text",
+									text: expect.stringContaining("write_to_file"),
+								}),
+								expect.objectContaining({
+									type: "text",
+									text:
+										reply === "button"
+											? "Continue from the verified tool results."
+											: "The write is verified. Continue with a read-only check.",
+								}),
+							]),
+						)
+						expect(
+							task.apiConversationHistory
+								.flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+								.some((block) => block.type === "tool_use" || block.type === "tool_result"),
+						).toBe(false)
+						expect(
+							task.apiConversationHistory.some(
+								(message) =>
+									message.role === "assistant" &&
+									JSON.stringify(message.content).includes("Recovery continued."),
+							),
+						).toBe(true)
+					} finally {
+						finishTool()
+						release()
+						task.requestAbort(false)
+						await loop
+						executeTool.mockRestore()
+						vi.mocked(pWaitFor).mockImplementation(async () => {})
+					}
+				},
+			)
+
+			it.each(["failure", "deadline"] as const)(
+				"settles child completion before recovery on %s",
+				async (failure) => {
+					const parent = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "parent",
+						startTask: false,
+					})
+					const task = await createTaskWithManualRetries(parent)
+					Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+					vi.spyOn(timeoutConfig, "getApiRequestTimeout").mockReturnValue(25)
+					const record = await mockProvider.getTaskWithId(task.taskId)
+					vi.spyOn(mockProvider, "getTaskWithId").mockImplementation(async (id) => {
+						return {
+							...record,
+							historyItem: {
+								...record.historyItem,
+								status: id === task.taskId ? "active" : "delegated",
+								awaitingChildId: id === parent.taskId ? task.taskId : undefined,
+							},
+						}
+					})
+					vi.spyOn(mockProvider, "setPendingTaskAction").mockResolvedValue(undefined)
+					const clear = vi.spyOn(mockProvider, "clearPendingTaskAction").mockResolvedValue(false)
+					const reopen = vi.spyOn(mockProvider, "reopenParentFromDelegation").mockResolvedValue(false)
+					const completed = vi.spyOn(mockProvider, "emitDelegatedTaskCompleted").mockImplementation(() => {})
+					const execute = vi.spyOn(attemptCompletionTool, "execute").mockClear()
+					const persistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
+					vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+					const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+					vi.mocked(pWaitFor).mockImplementation(realPWaitFor)
+					let release!: () => void
+					const gate = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					let turns = 0
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							if (turns++ > 0) {
+								yield { type: "text", text: "Recovery continued." }
+								return
+							}
+							getTaskTestAccess(task).requestPolicySnapshot = {
+								disabledTools: [],
+								customModes: [],
+								modelInfo: stubModelInfo,
+							}
+							yield {
+								type: "tool_call",
+								id: "call_complete",
+								name: "attempt_completion",
+								arguments: '{"result":"Child result"}',
+							}
+							yield { type: "text", text: "buffered" }
+							await vi.waitFor(() => expect(persistence).toHaveBeenCalledOnce())
+							task.didRejectTool = true
+							yield { type: "text", text: "interrupted" }
+							if (failure === "deadline") await gate
+							throw new Error("Stream failed after completion started")
+						},
+					)
+					const requests = realRequestsThenStop(task, 2)
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = getTaskTestAccess(task).initiateTaskLoop([{ type: "text", text: "finish the child" }])
+					try {
+						await vi.waitFor(() => expect(task.taskStatus).toBe(TaskStatus.Resumable), { timeout: 4_000 })
+						expect(task.dispatchState).toBe(DispatchState.IDLE)
+						expect(await persistence.mock.results[0]?.value).toBe(false)
+						expect(task["pendingAction"]?.kind).toBe("finish_subtask")
+						expect(task["assistantMessageSavedToHistory"]).toBe(false)
+						expect(clear).not.toHaveBeenCalled()
+						expect(reopen).not.toHaveBeenCalled()
+						expect(completed).not.toHaveBeenCalled()
+						expect(requests).toHaveBeenCalledOnce()
+						await task.submitUserMessage(
+							"Review the interrupted completion without completing the child again.",
+						)
+						await loop
+						expect(turns).toBe(2)
+						expect(execute).toHaveBeenCalledOnce()
+						expect(clear).not.toHaveBeenCalled()
+						expect(reopen).not.toHaveBeenCalled()
+						expect(completed).not.toHaveBeenCalled()
+						expect(task["pendingAction"]?.kind).toBe("finish_subtask")
+					} finally {
+						release()
+						task.requestAbort(false)
+						task["cancelAssistantMessagePersistence"]()
+						await loop
+						execute.mockRestore()
+						vi.mocked(pWaitFor).mockImplementation(async () => {})
+					}
+				},
+			)
+
+			it("keeps a signature stream-consumption failure fatal", async () => {
+				const task = await createTaskWithManualRetries()
+				Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+				const error = new Error("Stream consumption failed")
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						yield { type: "text", text: "partial" }
+						task.didRejectTool = true
+						yield { type: "text", text: "buffered" }
+						throw error
+					},
+				)
+				const requests = realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+				expect(task.apiConversationHistory.filter((message) => message.role === "assistant")).toHaveLength(0)
+				expect(requests.mock.calls[1]?.[0]).toBe(1)
+			})
+
+			it("rejects a stalled signature drain without saving an incomplete assistant turn", async () => {
+				const task = await createTaskWithManualRetries()
+				Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+				vi.spyOn(timeoutConfig, "getApiRequestTimeout").mockReturnValue(25)
+				let release!: () => void
+				const gate = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				let notifyDraining!: () => void
+				const draining = new Promise<void>((resolve) => {
+					notifyDraining = resolve
+				})
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						yield { type: "text", text: "partial" }
+						task.didRejectTool = true
+						yield { type: "text", text: "buffered" }
+						notifyDraining()
+						await gate
+						yield { type: "usage", inputTokens: 1, outputTokens: 1 }
+					},
+				)
+				const requests = realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+				const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+				await draining
+				try {
+					await vi.waitFor(() => expect(requests).toHaveBeenCalledTimes(2), { timeout: 1_000 })
+					await loop
+					expect(task.apiConversationHistory.filter((message) => message.role === "assistant")).toHaveLength(
+						0,
+					)
+				} finally {
+					release()
+					await loop
+				}
 			})
 
 			it("keeps a replaced handler alive until the background usage drain finishes", async () => {

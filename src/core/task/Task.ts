@@ -144,6 +144,9 @@ import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
+import { waitForThoughtSignatureDrain } from "./thoughtSignatureDrain"
+import { detachOnAbort } from "../../api/providers/utils/abort-signal"
+import { getApiRequestTimeout } from "../../api/providers/utils/timeout-config"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
@@ -1451,7 +1454,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Appends an API turn and records whether an assistant turn reached persistent storage.
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
+	private async addToApiConversationHistory(
+		message: Anthropic.MessageParam,
+		reasoning?: string,
+		source = { api: this.api, apiConfiguration: this.apiConfiguration },
+	): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1463,8 +1470,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			prepareApiConversationMessage({
 				message,
 				reasoning,
-				api: this.api,
-				apiConfiguration: this.apiConfiguration,
+				api: source.api,
+				apiConfiguration: source.apiConfiguration,
 				apiConversationHistory: this.apiConversationHistory,
 			}),
 		)
@@ -4269,6 +4276,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
 				// limit error, which gets thrown on the first chunk).
+				const requestApi = this.api
+				const requestApiConfiguration = { ...this.apiConfiguration }
 				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, {
 					skipProviderRateLimit: true,
 					requestModelInfo: streamModelInfo,
@@ -4281,31 +4290,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				try {
 					const iterator = stream[Symbol.asyncIterator]()
 
-					// Helper to race iterator.next() with abort signal
-					const nextChunkWithAbort = async () => {
-						const nextPromise = iterator.next()
-
-						// If we have an abort controller, race it with the next chunk
-						if (this.currentRequestAbortController) {
-							const abortPromise = new Promise<never>((_, reject) => {
-								const signal = this.currentRequestAbortController!.signal
-								if (signal.aborted) {
-									reject(new Error("Request cancelled by user"))
-								} else {
-									signal.addEventListener(
-										"abort",
-										() => {
-											reject(new Error("Request cancelled by user"))
-										},
-										{ once: true },
-									)
-								}
-							})
-							return await Promise.race([nextPromise, abortPromise])
-						}
-
-						// No abort controller, just return the next chunk normally
-						return await nextPromise
+					const nextChunkWithAbort = () => {
+						const pending = iterator.next()
+						const signal = this.currentRequestAbortController?.signal
+						return signal ? detachOnAbort(pending, signal) : pending
 					}
 
 					let item = await nextChunkWithAbort()
@@ -4687,15 +4675,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							}
 						}
 
+						let usageFound = false
+						let chunkCount = 0
 						try {
-							// Continue processing the original stream from where the main loop left off
-							let usageFound = false
-							let chunkCount = 0
-
 							// Use the same iterator that the main loop was using
 							while (!item.done) {
 								// Check for timeout
-								if (performance.now() - startTime > timeoutMs) {
+								if (
+									!requestApi.requiresThoughtSignatureDrain &&
+									performance.now() - startTime > timeoutMs
+								) {
 									console.warn(
 										`[Background Usage Collection] Timed out after ${timeoutMs}ms for model: ${modelId}, processed ${chunkCount} chunks`,
 									)
@@ -4707,7 +4696,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								}
 
 								const chunk = item.value
-								item = await iterator.next()
+								item = await (requestApi.requiresThoughtSignatureDrain
+									? nextChunkWithAbort()
+									: iterator.next())
 								chunkCount++
 
 								if (chunk && chunk.type === "usage") {
@@ -4721,67 +4712,63 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									bgTotalCost = chunk.totalCost
 								}
 							}
-
-							if (
-								usageFound ||
-								bgInputTokens > 0 ||
-								bgOutputTokens > 0 ||
-								bgCacheWriteTokens > 0 ||
-								bgCacheReadTokens > 0
-							) {
-								// We have usage data either from a usage chunk or accumulated tokens
-								await captureUsageData(
-									{
-										input: bgInputTokens,
-										output: bgOutputTokens,
-										cacheWrite: bgCacheWriteTokens,
-										cacheWrite1h: bgCacheWrite1hTokens,
-										cacheWrite12h: bgCacheWrite12hTokens,
-										cacheRead: bgCacheReadTokens,
-										total: bgTotalCost,
-									},
-									lastApiReqIndex,
-									status,
-								)
-							} else {
-								console.warn(
-									`[Background Usage Collection] Suspicious: request ${apiReqIndex} is complete, but no usage info was found. Model: ${modelId}`,
-								)
+						} finally {
+							// Only stream consumption controls history readiness. Usage reporting stays independent.
+							const reportUsage = async () => {
+								if (
+									!usageFound &&
+									bgInputTokens <= 0 &&
+									bgOutputTokens <= 0 &&
+									bgCacheWriteTokens <= 0 &&
+									bgCacheReadTokens <= 0
+								) {
+									console.warn(
+										`[Background Usage Collection] Suspicious: request ${apiReqIndex} is complete, but no usage info was found. Model: ${modelId}`,
+									)
+									return
+								}
+								const tokens = {
+									input: bgInputTokens,
+									output: bgOutputTokens,
+									cacheWrite: bgCacheWriteTokens,
+									cacheWrite1h: bgCacheWrite1hTokens,
+									cacheWrite12h: bgCacheWrite12hTokens,
+									cacheRead: bgCacheReadTokens,
+									total: bgTotalCost,
+								}
+								for (let attempt = 0; attempt < 2; attempt++) {
+									try {
+										await captureUsageData(tokens, lastApiReqIndex, status)
+										return
+									} catch (error) {
+										console.error("Error reporting stream usage:", error)
+									}
+								}
 							}
-						} catch (error) {
-							console.error("Error draining stream for usage data:", error)
-							// Still try to capture whatever usage data we have collected so far
-							if (
-								bgInputTokens > 0 ||
-								bgOutputTokens > 0 ||
-								bgCacheWriteTokens > 0 ||
-								bgCacheReadTokens > 0
-							) {
-								await captureUsageData(
-									{
-										input: bgInputTokens,
-										output: bgOutputTokens,
-										cacheWrite: bgCacheWriteTokens,
-										cacheWrite1h: bgCacheWrite1hTokens,
-										cacheWrite12h: bgCacheWrite12hTokens,
-										cacheRead: bgCacheReadTokens,
-										total: bgTotalCost,
-									},
-									lastApiReqIndex,
-									status,
-								)
-							}
+							void reportUsage().catch((error) =>
+								console.error("Background usage reporting failed:", error),
+							)
 						}
 					}
 
-					// Start the background task and handle any errors
+					// One boundary handles drain failures. Usage reporting has its own detached boundary.
 					// Pass "cancelled" status if the task was aborted by the user
-					drainStreamInBackgroundToFindAllUsage(
+					const requestAbortController = this.currentRequestAbortController
+					const streamDrain = drainStreamInBackgroundToFindAllUsage(
 						lastApiReqIndex,
 						this.abort ? "cancelled" : "completed",
 					).catch((error) => {
 						console.error("Background usage collection failed:", error)
+						if (requestApi.requiresThoughtSignatureDrain) throw error
 					})
+					// Proxy signatures can arrive after a tool stops the main loop. Save only after the drain settles.
+					if (requestApi.requiresThoughtSignatureDrain) {
+						await waitForThoughtSignatureDrain(streamDrain, {
+							timeoutMs: getApiRequestTimeout(),
+							signal: requestAbortController?.signal,
+							onTimeout: (error) => requestAbortController?.abort(error),
+						})
+					}
 				} catch (error) {
 					// Close the request generator so its `finally` releases the API
 					// work it holds (a replaced handler is disposed once nothing uses
@@ -4808,6 +4795,71 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// A cancel can land during abortStream after cancelReason was computed; setAbortReason keeps the first reason.
 							this.setAbortReason("user_cancelled")
 							await this.abortTask()
+						} else if (
+							this.assistantMessageContent.some(
+								(block) =>
+									(block.type === "tool_use" || block.type === "mcp_tool_use") && !block.partial,
+							)
+						) {
+							// Release completion and delegation waits before joining the presenter for this failed turn.
+							this.cancelAssistantMessagePersistence()
+							this.isStreaming = false
+							await pWaitFor(
+								() => this.dispatchState === DispatchState.IDLE || this.abort || this.abandoned,
+								{ interval: 100 },
+							)
+							if (this.abort || this.abandoned) return true
+
+							// All tool messages have settled. A protected ask requires a fresh reply.
+							await this.say(
+								"error",
+								"Automatic retry stopped because a tool may have already run. Check the tool results before you continue.",
+							)
+							const recovery = await this.ask("resume_task", undefined, false, undefined, true)
+							if (recovery.response !== "yesButtonClicked" && recovery.response !== "messageResponse") {
+								await this.abortTask()
+								return true
+							}
+							const interruptedTools = this.assistantMessageContent.flatMap((block) => {
+								if ((block.type !== "tool_use" && block.type !== "mcp_tool_use") || block.partial)
+									return []
+								const result = this.userMessageContent.find(
+									(result): result is Anthropic.ToolResultBlockParam =>
+										result.type === "tool_result" &&
+										block.id !== undefined &&
+										result.tool_use_id === sanitizeToolUseId(block.id),
+								)
+								return [
+									{
+										tool: block.name,
+										parameters:
+											block.type === "mcp_tool_use"
+												? block.arguments
+												: (block.nativeArgs ?? block.params),
+										result:
+											result?.content ??
+											"No result was recorded. Check the current state before further actions.",
+									},
+								]
+							})
+							if (recovery.text || recovery.images?.length) {
+								await this.say("user_feedback", recovery.text, recovery.images)
+							}
+							// Use a fresh text context. The incomplete assistant turn and its protocol tool calls cannot be replayed.
+							stack.push({
+								userContent: [
+									{
+										type: "text",
+										text: `The previous response failed after these tool calls may have run. Do not repeat them. Check their results before further actions.\n${JSON.stringify(interruptedTools)}`,
+									},
+									...this.userMessageContent.filter((block) => block.type !== "tool_result"),
+									{ type: "text", text: recovery.text || "Continue from the verified tool results." },
+									...formatResponse.imageBlocks(recovery.images),
+								],
+								includeFileDetails: false,
+								retryAttempt: 0,
+							})
+							continue
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
 							// (even with auto-approval); let the user decide once.
@@ -5154,6 +5206,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					await this.addToApiConversationHistory(
 						{ role: "assistant", content: assistantContent },
 						reasoningMessage || undefined,
+						{ api: requestApi, apiConfiguration: requestApiConfiguration },
 					)
 
 					this.messageCounts.assistant++

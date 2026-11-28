@@ -11,7 +11,7 @@ interface ModelState {
 	writeStarts: WriteStarts
 	completionAccepted: boolean
 	completionEmitted: boolean
-	cancelled: boolean
+	cancelled: boolean // Current persistence generation, including a failed stream on an active task.
 	waitSettled: boolean
 	cancelledAtRetryBoundary: boolean
 	delegation: DelegationPhase
@@ -82,6 +82,14 @@ const transitionInvariants = {
 	},
 } satisfies Record<string, (previous: ModelState, transition: Transition) => string | undefined>
 const semanticLandmarks = {
+	"failed-delegated-turn-settles-without-completion": (state: ModelState) =>
+		state.kind === "delegated" &&
+		state.completionAccepted &&
+		state.history === "idle" &&
+		state.cancelled &&
+		state.waitSettled &&
+		!state.completionEmitted &&
+		state.delegation === "awaiting-reopen",
 	"delayed-completion-pending": (state: ModelState) =>
 		state.completionAccepted && state.history === "writing" && !state.completionEmitted,
 	"failed-completion-pending": (state: ModelState) =>
