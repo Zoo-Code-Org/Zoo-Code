@@ -11,7 +11,7 @@ import { t } from "../i18n"
  * If a custom path is configured, uses that path
  * Otherwise uses the default VSCode extension global storage path
  */
-export async function getStorageBasePath(defaultPath: string): Promise<string> {
+export async function getStorageBasePath(defaultPath: string, requireConfiguredPath = false): Promise<string> {
 	// Get user-configured custom storage path
 	let customStoragePath = ""
 
@@ -19,7 +19,8 @@ export async function getStorageBasePath(defaultPath: string): Promise<string> {
 		// This is the line causing the error in tests
 		const config = vscode.workspace.getConfiguration(Package.name)
 		customStoragePath = config.get<string>("customStoragePath", "")
-	} catch {
+	} catch (error) {
+		if (requireConfiguredPath) throw new Error("Could not read Zoo's storage-path setting", { cause: error })
 		console.warn("Could not access VSCode configuration - using default path")
 		return defaultPath
 	}
@@ -38,10 +39,14 @@ export async function getStorageBasePath(defaultPath: string): Promise<string> {
 
 		return customStoragePath
 	} catch (error) {
-		// If path is unusable, report error and fall back to default path
+		// Never switch storage roots behind the user's back: that makes all
+		// conversations appear missing and may write new tasks into a second root.
 		console.error(`Custom storage path is unusable: ${error instanceof Error ? error.message : String(error)}`)
 		if (vscode.window) {
 			vscode.window.showErrorMessage(t("common:errors.custom_storage_path_unusable", { path: customStoragePath }))
+		}
+		if (requireConfiguredPath) {
+			throw new Error(`Configured Zoo storage path is unavailable: ${customStoragePath}`, { cause: error })
 		}
 		return defaultPath
 	}
@@ -51,7 +56,7 @@ export async function getStorageBasePath(defaultPath: string): Promise<string> {
  * Gets the storage directory path for a task
  */
 export async function getTaskDirectoryPath(globalStoragePath: string, taskId: string): Promise<string> {
-	const basePath = await getStorageBasePath(globalStoragePath)
+	const basePath = await getStorageBasePath(globalStoragePath, true)
 	const taskDir = path.join(basePath, "tasks", taskId)
 	await fs.mkdir(taskDir, { recursive: true })
 	return taskDir

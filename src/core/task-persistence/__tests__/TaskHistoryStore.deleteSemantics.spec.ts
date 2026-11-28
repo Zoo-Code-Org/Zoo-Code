@@ -225,14 +225,27 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const store = createStore()
 			await store.initialize()
 			onWrite.mockClear()
+			vi.mocked(withFileLock).mockClear()
 
 			await expect(store.delete("never-existed")).resolves.toBeUndefined()
 			expect(store.get("never-existed")).toBeUndefined()
 			expect(onWrite).toHaveBeenCalledTimes(1)
+			expect(withFileLock).not.toHaveBeenCalled()
 		})
 	})
 
 	describe("deleteMany()", () => {
+		it("skips locking absent task directories and still writes the batch through", async () => {
+			const store = createStore()
+			await store.initialize()
+			onWrite.mockClear()
+			vi.mocked(withFileLock).mockClear()
+
+			await expect(store.deleteMany(["never-existed"])).resolves.toBeUndefined()
+			expect(withFileLock).not.toHaveBeenCalled()
+			expect(onWrite).toHaveBeenCalledTimes(1)
+		})
+
 		it("continues the batch after a failed unlink, evicts every entry, and writes through exactly once", async () => {
 			const store = createStore()
 			await store.initialize()

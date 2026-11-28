@@ -34,7 +34,7 @@ describe("getStorageBasePath - customStoragePath", () => {
 		expect(fsPromises.access).toHaveBeenCalledWith(customPath, 7) // 7 = R_OK(4) | W_OK(2) | X_OK(1)
 	})
 
-	it("falls back to default and shows an error when custom path is not writable", async () => {
+	it("does not silently switch conversation storage roots when custom path is not writable", async () => {
 		const customPath = "/test/storage/unwritable"
 
 		vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue(
@@ -58,9 +58,9 @@ describe("getStorageBasePath - customStoragePath", () => {
 			return Promise.resolve()
 		})
 
-		const result = await getStorageBasePath(defaultPath)
-
-		expect(result).toBe(defaultPath)
+		await expect(getStorageBasePath(defaultPath, true)).rejects.toThrow(
+			"Configured Zoo storage path is unavailable",
+		)
 		expect(showErrorSpy).toHaveBeenCalledTimes(1)
 		const firstArg = showErrorSpy.mock.calls[0][0]
 		expect(typeof firstArg).toBe("string")
@@ -80,7 +80,7 @@ describe("getStorageBasePath - customStoragePath", () => {
 		expect(fsPromises.access).not.toHaveBeenCalled()
 	})
 
-	it("falls back to default when mkdir fails and does not attempt access", async () => {
+	it("rejects when custom storage creation fails and does not attempt access", async () => {
 		const customPath = "/test/storage/failmkdir"
 
 		vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue(
@@ -102,10 +102,10 @@ describe("getStorageBasePath - customStoragePath", () => {
 			return undefined
 		})
 
-		const result = await getStorageBasePath(defaultPath)
-
-		expect(result).toBe(defaultPath)
-		expect(fsPromises.access).not.toHaveBeenCalled()
+		await expect(getStorageBasePath(defaultPath, true)).rejects.toThrow(
+			"Configured Zoo storage path is unavailable",
+		)
+		expect(vi.mocked(fsPromises.access)).not.toHaveBeenCalled()
 		expect(showErrorSpy).toHaveBeenCalledTimes(1)
 	})
 
@@ -126,7 +126,7 @@ describe("getStorageBasePath - customStoragePath", () => {
 		expect(fsPromises.access).toHaveBeenCalledWith(customPath, expectedFlags)
 	})
 
-	it("falls back when directory is readable but not writable (partial permissions)", async () => {
+	it("rejects when custom storage is readable but not writable", async () => {
 		const customPath = "/test/storage/readonly"
 		vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue(
 			makeWorkspaceConfiguration({ customStoragePath: customPath }),
@@ -149,9 +149,9 @@ describe("getStorageBasePath - customStoragePath", () => {
 			return Promise.resolve()
 		})
 
-		const result = await getStorageBasePath(defaultPath)
-
-		expect(result).toBe(defaultPath)
+		await expect(getStorageBasePath(defaultPath, true)).rejects.toThrow(
+			"Configured Zoo storage path is unavailable",
+		)
 		expect(showErrorSpy).toHaveBeenCalledTimes(1)
 	})
 })

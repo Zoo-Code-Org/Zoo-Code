@@ -9,6 +9,9 @@ import * as lockfile from "proper-lockfile"
  */
 export const LOCK_STALE_MS = 31_000
 
+// Proper-lockfile coordinates VS Code windows, while this queue prevents
+// concurrent writes inside one extension host from exhausting its retry budget.
+const localHolders = new Map<string, Promise<void>>()
 const RECOVERY_RETRY_MS = 1000
 const RECOVERY_GRACE_MS = 4000
 
@@ -28,9 +31,24 @@ export interface FileLockOptions {
  */
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
 	const absoluteFilePath = path.resolve(filePath)
+	if (options?.immediate && localHolders.has(absoluteFilePath)) {
+		throw Object.assign(new Error(`Lock file is already being held: ${absoluteFilePath}`), { code: "ELOCKED" })
+	}
+	const previous = localHolders.get(absoluteFilePath) ?? Promise.resolve()
+	let leaveQueue: () => void = () => {}
+	const held = new Promise<void>((resolve) => {
+		leaveQueue = resolve
+	})
+	const tail = previous.then(() => held)
+	localHolders.set(absoluteFilePath, tail)
+	await previous
+	const clearLocalHolder = () => {
+		leaveQueue()
+		if (localHolders.get(absoluteFilePath) === tail) localHolders.delete(absoluteFilePath)
+	}
 	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
-		return await lockfile.lock(absoluteFilePath, {
+		const release = await lockfile.lock(absoluteFilePath, {
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
@@ -45,7 +63,7 @@ export async function acquireFileLock(filePath: string, options?: FileLockOption
 						}
 					: {
 							// Configuration for retrying lock acquisition
-							retries: 5, // Number of retries after the initial attempt
+							retries: 30, // Allow large peer message writes to finish
 							factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
 							minTimeout: 100, // Minimum time to wait before the first retry (in ms)
 							maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
@@ -55,7 +73,15 @@ export async function acquireFileLock(filePath: string, options?: FileLockOption
 				throw err
 			},
 		})
+		return async () => {
+			try {
+				await release()
+			} finally {
+				clearLocalHolder()
+			}
+		}
 	} catch (lockError) {
+		clearLocalHolder()
 		console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
 		throw lockError
 	}

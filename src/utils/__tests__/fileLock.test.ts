@@ -8,16 +8,20 @@ describe("file lock protocol", () => {
 
 	it("allows recovery to outwait staleness with bounded constant retries", async () => {
 		vi.mocked(lockfile.lock).mockResolvedValue(async () => {})
-		await acquireFileLock("history.json", { waitForStaleLock: true })
-		expect(lockfile.lock).toHaveBeenCalledWith(
-			expect.any(String),
-			expect.objectContaining({
-				stale: LOCK_STALE_MS,
-				update: 10000,
-				realpath: false,
-				retries: { retries: 35, factor: 1, minTimeout: 1000, maxTimeout: 1000 },
-			}),
-		)
+		const release = await acquireFileLock("history.json", { waitForStaleLock: true })
+		try {
+			expect(lockfile.lock).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({
+					stale: LOCK_STALE_MS,
+					update: 10000,
+					realpath: false,
+					retries: { retries: 35, factor: 1, minTimeout: 1000, maxTimeout: 1000 },
+				}),
+			)
+		} finally {
+			await release()
+		}
 	})
 
 	it("releases the lock when the operation fails", async () => {

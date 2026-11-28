@@ -63,6 +63,17 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 	safeWriteJson: vi.fn().mockResolvedValue(undefined),
 }))
 
+// This suite mocks filesystem writes, so no file exists for proper-lockfile to
+// lock. The store's own write lock is what the concurrency tests exercise.
+vi.mock("../../../utils/fileLock", async () => {
+	const actual = await vi.importActual<typeof import("../../../utils/fileLock")>("../../../utils/fileLock")
+	return {
+		...actual,
+		withFileLock: async <T>(filePath: string, operation: (absoluteFilePath: string) => Promise<T>): Promise<T> =>
+			operation(filePath),
+	}
+})
+
 vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
 	CallToolResultSchema: {},
 	ListResourcesResultSchema: {},
