@@ -6,7 +6,7 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
 
-import { isCompletedAsk, waitFor } from "./utils"
+import { clearViewStateBetweenSuites, isCompletedAsk, waitFor } from "./utils"
 import { authenticatedMockFetch } from "../mock-auth"
 
 export async function run() {
@@ -76,6 +76,13 @@ export async function run() {
 	}
 
 	const mocha = new Mocha(mochaOptions)
+
+	// Clear the per-view pin and the view-local buffer after every test so each suite
+	// resolves the provider it configures itself; see clearViewStateBetweenSuites.
+	mocha.suite.afterEach(async () => {
+		await clearViewStateBetweenSuites(api)
+	})
+
 	const cwd = path.resolve(__dirname, "..")
 
 	let testFiles: string[]
