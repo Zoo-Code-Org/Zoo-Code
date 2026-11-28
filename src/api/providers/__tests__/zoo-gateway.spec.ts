@@ -27,16 +27,18 @@ vitest.mock("../../../i18n", () => ({
 }))
 
 import type { MockInstance } from "vitest"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
 import { ZooGatewayHandler, classifyGatewayApiError, toGatewayStreamError } from "../zoo-gateway"
+import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { clearZooCodeToken } from "../../../services/zoo-code-auth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -118,6 +120,19 @@ function mockOpenAIClient() {
 }
 
 mockOpenAIClient()
+
+// A bounded observation window built on vi.waitFor: it polls while its callback throws, so a
+// callback that always throws keeps it polling for the whole window (measured on vitest 4.1.12:
+// a callback that only returns a value settles immediately instead of waiting). It also doubles
+// as the "still pending" sentinel in the cancel races below, which is what pins the race itself.
+async function observeWindow(ms: number): Promise<"pending"> {
+	return vi
+		.waitFor(() => expect(false).toBe(true), { timeout: ms, interval: 10 })
+		.then(
+			() => "pending",
+			() => "pending",
+		)
+}
 
 describe("ZooGatewayHandler", () => {
 	const mockOptions: ApiHandlerOptions = {
@@ -376,6 +391,7 @@ describe("ZooGatewayHandler", () => {
 						"X-Zoo-Task-ID": "task-123",
 						"X-Zoo-Mode": "code",
 					},
+					signal: expect.any(AbortSignal),
 				}),
 			)
 		})
@@ -824,8 +840,811 @@ describe("ZooGatewayHandler", () => {
 			expect(getModels).not.toHaveBeenCalled()
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
+
+		it("should pass abort signal through to client", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+			// The handler hands the SDK a per-request signal bridged from the caller's, so the
+			// forwarded object is a fresh AbortSignal rather than the caller's own instance.
+			// The linkage itself is asserted by the abort-during-request test below.
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
+			const forwarded = (call[1] as { signal?: AbortSignal } | undefined)?.signal
+			expect(forwarded).toBeInstanceOf(AbortSignal)
+			expect(forwarded?.aborted).toBe(false)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should omit the timeout option when timeoutMs is 0", async () => {
+			// The OpenAI SDK treats timeout: 0 as an immediate abort, so the
+			// "disabled" value must never be forwarded — assert the absence of
+			// the option (a forwarded timeout: 0 would fail this assertion).
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
+			const requestOptions = call[1] as { timeout?: number } | undefined
+			expect(requestOptions).not.toHaveProperty("timeout")
+		})
+
+		it("should omit the timeout option for a negative timeoutMs and keep the bridged signal", async () => {
+			// -5 is a disabled budget, not a five-second one: hasUsableTimeout rejects every
+			// non-positive value, so nothing may reach the SDK — and dropping the budget must not
+			// drop the cancel, so the bridged per-request signal still has to be forwarded.
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+			const controller = new AbortController()
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: -5 })
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
+			const requestOptions = call[1] as { timeout?: number; signal?: AbortSignal } | undefined
+			expect(requestOptions).not.toHaveProperty("timeout")
+			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
+		})
+
+		it("should preserve abort identity when the caller aborts during the request", async () => {
+			// Emulate the OpenAI SDK: an aborted request signal rejects with
+			// APIUserAbortError ("Request was aborted." — the trailing period would
+			// fail task-level abort detection, so the provider must normalize it).
+			// The abort fires inside the mock so the SDK abort branch is actually reached:
+			// a pre-aborted signal settles in the cancellation scope before the mock
+			// runs, which would leave this catch untested. The pre-abort entry guard
+			// is covered by its own test below.
+			const controller = new AbortController()
+			let sdkSignal: AbortSignal | undefined
+			let abortedAtEntry = true
+			mockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				// The bridged per-request signal is what the SDK receives; the caller's abort must reach it
+				// while the request is in flight. The state is recorded here and asserted below: an assertion
+				// raised inside this mock would itself be normalized into the AbortError this test expects.
+				sdkSignal = options.signal
+				abortedAtEntry = sdkSignal?.aborted === true
+				controller.abort()
+				throw new APIUserAbortError()
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+			expect(sdkSignal).toBeInstanceOf(AbortSignal)
+			expect(sdkSignal).not.toBe(controller.signal) // the bridge, not the caller's own signal
+			expect(abortedAtEntry).toBe(false)
+			expect(sdkSignal?.aborted).toBe(true) // the bridge forwarded the cancel to the SDK signal
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("should classify the SDK's own timeout error while the request signal is live", async () => {
+			// The neighbouring timeout test aborts the signal before the SDK raises its error, so the
+			// aborted-signal disjunct alone could satisfy it. Reject with APIConnectionTimeoutError while
+			// nothing has been aborted: only the error-class disjunct can classify that as AbortError.
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIConnectionTimeoutError()
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+
+			expect(controller.signal.aborted).toBe(false)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("should surface request timeouts as an AbortError", async () => {
+			// Emulate the OpenAI SDK: when the request timeout fires, the SDK
+			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+			// are exhausted — verified against openai v5.23.2 against a hung server.
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options: { timeout?: number; signal?: AbortSignal }) => {
+					// The SDK surfaces its timeout error only once the client's patience runs out: wait on
+					// the per-request signal the handler passed instead of guessing at a duration.
+					const sdkSignal = options?.signal
+					if (!sdkSignal) {
+						// Without a per-request signal there is no deadline to wait for, so this mock would throw
+						// immediately and the test would pass even if the provider stopped forwarding the budget.
+						throw new Error("the provider forwarded no deadline signal")
+					}
+					if (!sdkSignal.aborted) {
+						await new Promise<void>((resolve) => {
+							sdkSignal.addEventListener("abort", () => resolve(), { once: true })
+						})
+					}
+					throw new APIConnectionTimeoutError()
+				},
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 50 }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("should preserve abort identity when the signal aborts during the request with a plain error", async () => {
+			// The aborted-signal disjunct alone must normalize a plain
+			// rejection (not just SDK abort classes) to the DOM-standard
+			// AbortError. The abort fires inside the request so the cancellation
+			// scope still lets the model lookup finish and the catch observes an
+			// aborted signal.
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
+				controller.abort()
+				throw new Error("boom")
+			})
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("should preserve abort identity for a name-based AbortError rejection", async () => {
+			// No aborted signal and no SDK abort class: only the DOM-standard
+			// name === "AbortError" check marks a cancelled request.
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("raw"), { name: "AbortError" }))
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt").then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+		it("should work without options (backward compatible)", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
 	})
 
+	it("completePrompt settles on the abort before the auth check when the signal is already aborted", async () => {
+		// The entry guard must win over the fallible auth step, exactly as in
+		// createMessage: a cancelled task does not run auth or the catalog lookup.
+		const handler = new ZooGatewayHandler(mockOptions)
+		const controller = new AbortController()
+		controller.abort()
+
+		const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+			() => undefined,
+			(caught: unknown) => caught,
+		)
+
+		expect(error).toMatchObject({ name: "AbortError" })
+		expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
+	})
+
+	it("completePrompt keeps the guard ahead of the auth check when the session is unauthenticated", async () => {
+		// The guard is not equivalent to the helper's own aborted check: with no
+		// session token the auth step runs first and would raise its own error,
+		// so the fast-fail must win before ensureAuthenticated.
+		const handler = new ZooGatewayHandler({ ...mockOptions, zooSessionToken: undefined })
+		const controller = new AbortController()
+		controller.abort()
+
+		const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+			() => undefined,
+			(caught: unknown) => caught,
+		)
+
+		expect(error).toMatchObject({ name: "AbortError" })
+		expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		expect(mockCreate).not.toHaveBeenCalled()
+		expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
+	})
+
+	it("completePrompt settles on the abort while model resolution is pending", async () => {
+		// The catalog lookup parks forever, so the prompt can only settle through
+		// the cancellation scope around the lookup; without it the handler waits
+		// for the catalog and then issues the SDK request.
+		let releaseGate!: () => void
+		const gate = new Promise<void>((resolve) => {
+			releaseGate = resolve
+		})
+		let markLookupParked!: () => void
+		const lookupParked = new Promise<void>((resolve) => {
+			markLookupParked = resolve
+		})
+		vitest.mocked(getModels).mockImplementationOnce(async () => {
+			markLookupParked()
+			await gate
+			return {}
+		})
+
+		const handler = new ZooGatewayHandler(mockOptions)
+		const controller = new AbortController()
+
+		const completion = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		await lookupParked
+		controller.abort()
+
+		const error = await completion.then(
+			() => undefined,
+			(caught: unknown) => caught,
+		)
+		// Release the parked lookup so the disposable mock does not leak into the
+		// next test in the file.
+		releaseGate()
+		expect(mockCreate).not.toHaveBeenCalled()
+		expect(error).toMatchObject({ name: "AbortError" })
+		expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+	})
+	describe("createMessage abort signal bridging", () => {
+		it("rejects with the standardized AbortError before any request work when the external signal is already aborted", async () => {
+			// A pre-aborted request must fail fast before any model-catalog or
+			// SDK work starts: the standardized AbortError wins over any
+			// resolution failure, and the request itself never begins.
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				throw new Error("boom")
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"prompt",
+				[{ role: "user", content: "hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// The fast-fail guard rejects before the request starts.
+			expect(mockCreate).not.toHaveBeenCalled()
+			// Pre-flight cancellation must skip the model catalog entirely:
+			// the getModels mock must remain uncalled, not just the SDK create.
+			expect(getModels).not.toHaveBeenCalled()
+			expect(capturedSignal).toBeUndefined()
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("rejects with the standardized AbortError before the auth check when the external signal is already aborted and the session is unauthenticated", async () => {
+			// The entry fast-fail must win over the auth failure: with no
+			// session token a pre-aborted request surfaces the standardized
+			// AbortError, not the auth error the unauthenticated fall-through
+			// would raise.
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				throw new Error("boom")
+			})
+
+			const handler = new ZooGatewayHandler({ ...mockOptions, zooSessionToken: undefined })
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"prompt",
+				[{ role: "user", content: "hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// The fast-fail guard rejects before the auth check and the request.
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(getModels).not.toHaveBeenCalled()
+			expect(capturedSignal).toBeUndefined()
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("rejects with the standardized AbortError when the external signal aborts while model resolution is pending", async () => {
+			// The model catalog stays pending while the external signal aborts:
+			// the resolution race must settle with the standardized AbortError
+			// before the lookup is released, and the request itself must never
+			// start. A bridge-only fix would let the lookup finish and abort the
+			// internal controller after the fact; this gate proves the prompt
+			// settles on the abort itself.
+			let releaseResolution!: () => void
+			const resolutionGate = new Promise<void>((resolve) => {
+				releaseResolution = resolve
+			})
+			let markLookupParked!: () => void
+			const lookupParked = new Promise<void>((resolve) => {
+				markLookupParked = resolve
+			})
+			vitest.mocked(getModels).mockImplementationOnce(async () => {
+				markLookupParked()
+				await resolutionGate
+				return DEFAULT_MODEL_CATALOG
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+
+			const consumed = collectStream(
+				handler.createMessage(
+					"prompt",
+					[{ role: "user", content: "hello" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			// Let the lookup park on the gate, then abort while it is still pending.
+			await lookupParked
+			controller.abort()
+
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			// The catalog lookup was attempted but the prompt must have settled
+			// on the abort itself, before the lookup was released: no SDK call.
+			expect(getModels).toHaveBeenCalledTimes(1)
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+
+			// Releasing the lookup afterwards must not start a late request.
+			releaseResolution()
+			// A late request is an absence, so give the released continuation a real observation window.
+			// vi.waitFor resolves as soon as its callback stops throwing, and a callback that only returns a
+			// falsy value never throws at all (measured on vitest 4.1.12: it settled well inside the timeout),
+			// so polling the call count here would not wait. The assertion below is what fails when a late
+			// request appears.
+			await observeWindow(50)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
+			// The mock polls the INTERNAL controller signal (bounded 40x5ms)
+			// instead of waiting for an "abort" event, so the test can never
+			// hang if the bridge stops forwarding aborts.
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				return (async function* () {
+					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
+					// Reached only when the consumer asks for the next chunk, i.e. the first chunk is
+					// delivered: fire the caller's abort here so the abort is mid-stream by construction.
+					controller.abort()
+					if (capturedSignal?.aborted) {
+						throw new DOMException("The operation was aborted.", "AbortError")
+					}
+				})()
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+
+			const consumed = collectStream(
+				handler.createMessage(
+					"prompt",
+					[{ role: "user", content: "hello" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			// Let the request start and the first chunk be yielded before aborting.
+			// The mock calls controller.abort() the moment the first chunk has been consumed,
+
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("surfaces a cancel when the SDK closes the stream without throwing", async () => {
+			// The SDK consumes the body-read abort itself and can end the iterator normally, so the
+			// provider must inspect the caller signal rather than read that quiet end as a completed turn.
+			const controller = new AbortController()
+			let lateChunkReads = 0
+			mockCreate.mockImplementationOnce(async () =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "a" } }], index: 0 }
+					controller.abort()
+					// A frame still queued behind the cancel: pulling it is fine, reading it is not.
+					yield {
+						get choices() {
+							lateChunkReads += 1
+							return [{ delta: { content: "late" }, index: 0 }]
+						},
+						index: 0,
+					}
+				})(),
+			)
+			const handler = new ZooGatewayHandler(mockOptions)
+			const error = await collectStream(
+				handler.createMessage(
+					"system",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({
+						abortSignal: controller.signal,
+					}),
+				),
+			).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+			expect(lateChunkReads).toBe(0) // the cancelled stream is not read again
+		})
+
+		it("does not emit the usage item of a frame whose text was already taken", async () => {
+			// The usage item is the last thing this iteration can hand over, so a cancel between the text and
+			// the usage must reject rather than bill a turn the caller already cancelled.
+			// Observable condition below: the text reaches the consumer first, then the cancel lands.
+			const frame = {
+				choices: [{ delta: { content: "answer" } }],
+				usage: { prompt_tokens: 1, completion_tokens: 2, cost: 0.01 },
+				index: 0,
+			}
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([frame]))
+			const controller = new AbortController()
+			const handler = new ZooGatewayHandler(mockOptions)
+			const iterator = handler
+				.createMessage(
+					"system",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+				[Symbol.asyncIterator]()
+
+			const first = await iterator.next()
+			expect(first.value).toMatchObject({ type: "text", text: "answer" })
+			// Observable condition: this item reached the consumer; the frame still owes its next item.
+			controller.abort()
+
+			const settled = await iterator.next().then(
+				(result) => result.value,
+				(error: unknown) => error,
+			)
+			expect(settled).toMatchObject({ name: "AbortError" })
+			expect((settled as Error).message).toBe("The Zoo Gateway request was aborted")
+
+			// The same frame with a live caller signal still delivers both items.
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([frame]))
+			const live = new AbortController()
+			const chunks = await collectStream(
+				handler.createMessage(
+					"system",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: live.signal }),
+				),
+			)
+			expect(chunks.map((chunk: { type: string }) => chunk.type)).toEqual(["text", "usage"])
+		})
+
+		it("does not emit the rest of a tool-call chunk once the caller cancels", async () => {
+			// Consumer-driven: take the first partial, cancel, then require the next call to reject without
+			// building the second one. The getter variant aborted before either partial existed, so it could
+			// not tell a per-partial check apart from a check in front of the whole frame.
+			const controller = new AbortController()
+			let laterToolCallReads = 0
+			const toolCalls = [
+				{
+					index: 0,
+					id: "call_1",
+					type: "function",
+					function: { name: "get_weather", arguments: '{"city":"NYC"}' },
+				},
+				{
+					get index() {
+						laterToolCallReads += 1
+						return 0
+					},
+					id: "call_2",
+					type: "function",
+					function: { name: "get_time", arguments: '{"tz":"UTC"}' },
+				},
+			]
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([{ choices: [{ delta: { tool_calls: toolCalls } }], index: 0 }]),
+			)
+			const handler = new ZooGatewayHandler(mockOptions)
+			const iterator = handler
+				.createMessage(
+					"system",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+				[Symbol.asyncIterator]()
+
+			const first = await iterator.next()
+			expect(first.value).toMatchObject({ type: "tool_call_partial", id: "call_1" })
+			// Observable condition: the first partial reached the consumer, so the cancel lands between partials.
+			controller.abort()
+
+			const settled = await iterator.next().then(
+				(result) => result.value,
+				(error: unknown) => error,
+			)
+			expect(settled).toMatchObject({ name: "AbortError" })
+			expect((settled as Error).message).toBe("The Zoo Gateway request was aborted")
+			expect(laterToolCallReads).toBe(0) // the second partial is never built
+		})
+
+		it("settles the stream at once when the caller cancels while create() is pending", async () => {
+			// The SDK waits out a Retry-After backoff without observing the signal, so an in-flight create
+			// can outlive the cancel; a never-settling create reproduces that wait.
+			mockCreate.mockImplementation(() => new Promise<never>(() => {}))
+			const controller = new AbortController()
+			const handler = new ZooGatewayHandler(mockOptions)
+			const collecting = collectStream(
+				handler.createMessage(
+					"system",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({
+						abortSignal: controller.signal,
+					}),
+				),
+			).then(
+				() => "resolved",
+				(e: unknown) => e,
+			)
+			// Cancel only once the lookup has settled and the SDK call is in flight: an earlier abort would
+			// be answered by the model-lookup race rather than this one.
+			await vi.waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+			controller.abort()
+			const settled = await Promise.race([collecting, observeWindow(200)])
+			expect(settled).not.toBe("pending") // an in-flight create must not outlive the cancel
+			expect(settled).not.toBe("resolved")
+			expect(settled).toMatchObject({ name: "AbortError" })
+			expect((settled as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("settles at once when the caller cancels while the add-credits prompt is open", async () => {
+			// The 402 notification waits for the user: unless it is raced like the completion is, the
+			// iterator stays parked on the original 402 and the cancel never settles the stream.
+			const controller = new AbortController()
+			const consoleError = vitest.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				mockCreate.mockImplementationOnce(function () {
+					throw makeApiError(402)
+				})
+				showErrorMessage.mockImplementationOnce(() => new Promise<never>(() => {}))
+				const handler = new ZooGatewayHandler(mockOptions)
+				const draining = collectStream(
+					handler.createMessage(
+						"system",
+						[{ role: "user", content: "hi" }],
+						makeCreateMessageMetadata({
+							abortSignal: controller.signal,
+						}),
+					),
+				).then(
+					() => "resolved",
+					(e: unknown) => e,
+				)
+				await vi.waitFor(() => expect(showErrorMessage).toHaveBeenCalledTimes(1))
+				controller.abort()
+				const settled = await Promise.race([draining, observeWindow(200)])
+				expect(settled).not.toBe("pending") // the open prompt must not outlive the cancel
+				expect(settled).not.toBe("resolved")
+				expect(settled).toMatchObject({ name: "AbortError" })
+				expect((settled as Error).message).toBe("The Zoo Gateway request was aborted")
+				// A cancelled prompt is not a surfacing failure, so it must not log like one (as completePrompt
+				// already avoids on its own abort path).
+				expect(consoleError).not.toHaveBeenCalled()
+			} finally {
+				consoleError.mockRestore()
+			}
+		})
+
+		it("logs a failed add-credits notification on the streaming path and still rethrows the gateway error", async () => {
+			// The streaming catch reaches the same surfacing failure completePrompt does. With the caller's
+			// signal live the log is the only evidence that the notification itself failed: the guard in
+			// front of the console call must not swallow it, and the original 402 must still reach the
+			// caller instead of an AbortError.
+			const controller = new AbortController()
+			const consoleError = vitest.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				mockCreate.mockImplementationOnce(function () {
+					throw makeApiError(402, { message: "out of credits" })
+				})
+				showErrorMessage.mockImplementationOnce(() => Promise.reject(new Error("notification failed")))
+				const handler = new ZooGatewayHandler(mockOptions)
+
+				const settled = await collectStream(
+					handler.createMessage(
+						"system",
+						[{ role: "user", content: "hi" }],
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				).then(
+					() => "resolved",
+					(e: unknown) => e,
+				)
+				expect(consoleError).toHaveBeenCalledWith("Failed to surface Zoo Gateway error:", "notification failed")
+				expect((settled as Error).message).toContain("out of credits")
+				expect((settled as Error).name).not.toBe("AbortError")
+				expect(controller.signal.aborted).toBe(false)
+			} finally {
+				consoleError.mockRestore()
+			}
+		})
+
+		it("normalizes a name-based AbortError on the streaming path without running the gateway notification", async () => {
+			// No aborted signal and no SDK abort class: only the DOM-standard name marks a cancelled
+			// request. Without the classification in front of the notification path this rejection falls
+			// through into the add-credits surfacing and the raw error reaches the caller instead of the
+			// contract identity, which is what the two assertions below discriminate.
+			const controller = new AbortController()
+			const consoleError = vitest.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				const rawAbort = Object.assign(new Error("raw"), { name: "AbortError" })
+				mockCreate.mockImplementationOnce(function () {
+					throw rawAbort
+				})
+				const handler = new ZooGatewayHandler(mockOptions)
+
+				const settled = await collectStream(
+					handler.createMessage(
+						"system",
+						[{ role: "user", content: "hi" }],
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				).then(
+					() => "resolved",
+					(e: unknown) => e,
+				)
+				expect(settled).toMatchObject({ name: "AbortError", message: "The Zoo Gateway request was aborted" })
+				expect(showErrorMessage).not.toHaveBeenCalled()
+				expect(consoleError).not.toHaveBeenCalled()
+			} finally {
+				consoleError.mockRestore()
+			}
+		})
+
+		it.each(["mid-stream throw", "rejected create()", "early gen.return()"] as const)(
+			"detaches the bridged abort listener on %s",
+			async (mode) => {
+				const controller = new AbortController()
+				const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+				const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+				if (mode === "rejected create()") {
+					mockCreate.mockRejectedValueOnce(new Error("boom"))
+				} else if (mode === "mid-stream throw") {
+					mockCreate.mockImplementationOnce(async () =>
+						(async function* () {
+							yield { choices: [{ delta: { content: "p" }, index: 0 }], index: 0 }
+							throw new Error("boom")
+						})(),
+					)
+				} else {
+					mockCreate.mockImplementationOnce(async () =>
+						(async function* () {
+							yield { choices: [{ delta: { content: "p" }, index: 0 }], index: 0 }
+							await new Promise<void>(() => {})
+						})(),
+					)
+				}
+
+				const handler = new ZooGatewayHandler(mockOptions)
+				const iterator = handler
+					.createMessage(
+						"prompt",
+						[{ role: "user", content: "hello" }],
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					)
+					[Symbol.asyncIterator]()
+
+				if (mode === "early gen.return()") {
+					await iterator.next()
+					await iterator.return?.(undefined)
+				} else {
+					await iterator.next().catch(() => undefined)
+					await iterator.next().catch(() => undefined)
+					await iterator.return?.(undefined)
+				}
+
+				const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+				const abortRemoveCalls = removeListenerSpy.mock.calls.filter(([event]) => event === "abort")
+				const bridgeListener = abortAddCalls.at(-1)?.[1]
+				expect(abortAddCalls.length).toBeGreaterThan(0)
+				expect(abortRemoveCalls.some(([, listener]) => listener === bridgeListener)).toBe(true)
+			},
+		)
+
+		it("detaches the bridged abort listener when the request completes normally", async () => {
+			// The listener is added with { once: true }, so it only detaches on
+			// abort. A task-scoped signal spanning many requests must not
+			// accumulate a listener per request: assert explicit removal after a
+			// normal (non-aborted) completion.
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" }, index: 0 }],
+						index: 0,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						index: 0,
+						usage: { prompt_tokens: 2, completion_tokens: 3 },
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+
+			const stream = handler.createMessage(
+				"prompt",
+				[{ role: "user", content: "hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const chunks = await collectStream(stream)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			// Assert the exact listener reference so a bridge that removes a
+			// different callback than the one it registered cannot pass.
+			// The rejectOnAbort race registers its own "abort" listener on the
+			// same external signal during model resolution, so the first "abort"
+			// registration is the race's, not the bridge's. Target the last
+			// registration so the options/removal assertions below cannot be
+			// satisfied by the race's listener.
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			// The listener is registered with { once: true } — assert the exact
+			// options so a bridge that drops them (and relies on the finally
+			// block alone for single-shot semantics) is caught.
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+			expect(controller.signal.aborted).toBe(false)
+		})
+	})
 	describe("classifyGatewayApiError", () => {
 		it("returns sign_in on 401", () => {
 			expect(classifyGatewayApiError(makeApiError(401))).toEqual({ kind: "sign_in" })
