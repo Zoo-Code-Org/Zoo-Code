@@ -1794,6 +1794,22 @@ describe("McpOAuthClientProvider", () => {
 			await provider.close()
 		})
 
+		it("keeps cached registration when the callback listener cannot bind", async () => {
+			mockOAuthDiscovery()
+			const storage = createMockSecretStorage()
+			await storage.saveOAuthData("https://example.com/mcp", {
+				tokens: { access_token: "saved", token_type: "Bearer" },
+				expires_at: Date.now() + 600_000,
+				issuer: "https://auth.example.com",
+				client_info: { client_id: "cached-client", redirect_uris: ["http://127.0.0.1:9999/callback"] },
+			})
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", storage)
+			vi.mocked(startCallbackServer).mockRejectedValueOnce(new Error("listener bind failed"))
+			await expect(provider.registerClientIfNeeded()).rejects.toThrow("listener bind failed")
+			expect((await provider.clientInformation())?.client_id).toBe("cached-client")
+			await provider.close()
+		})
+
 		it("should reuse cached client_info even when callback server port has changed", async () => {
 			setupCallbackServerMock()
 			const secretStorage = createMockSecretStorage()
