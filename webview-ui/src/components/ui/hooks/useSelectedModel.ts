@@ -31,6 +31,7 @@ import {
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
 	kenariDefaultModelInfo,
+	inferDefaultModelInfo,
 	nanoGptDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_DEFAULT_CONTEXT,
@@ -126,16 +127,17 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
-	// LiteLLM may legitimately have no entry in the router payload (partial
-	// listing, failed fetch, renamed deployment) even though the configured ID
-	// is a valid selection, so it only needs the fetch to settle. Other
-	// dynamic providers require a populated provider entry before the
-	// selection is resolved.
+	// LiteLLM and Infer may legitimately have no entry in the router payload
+	// (partial listing, failed fetch, renamed deployment, a route that is out
+	// of the catalog for a while) even though the configured ID is a valid
+	// selection, so they only need the fetch to settle. Other dynamic
+	// providers require a populated provider entry before the selection is
+	// resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
 			? dynamicProvider === providerIdentifiers.friendli
 				? true // static friendliModels cover the window before /v1/models data arrives
-				: dynamicProvider === providerIdentifiers.litellm
+				: dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.infer
 					? !routerModels.isLoading
 					: routerModels.data &&
 						routerModels.data[dynamicProvider] !== undefined &&
@@ -572,6 +574,14 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels[providerIdentifiers.kenari]?.[id] ?? kenariDefaultModelInfo
+			return { id, info }
+		}
+		case providerIdentifiers.infer: {
+			// Keep the configured route selector even when the catalog does not list it:
+			// the handler sends requests with it, and a route can be out of the catalog
+			// for a while. Only the metadata falls back.
+			const id = apiConfiguration.inferModelId || defaultModelId
+			const info = routerModels[providerIdentifiers.infer]?.[id] ?? inferDefaultModelInfo
 			return { id, info }
 		}
 		case providerIdentifiers.nanogpt: {

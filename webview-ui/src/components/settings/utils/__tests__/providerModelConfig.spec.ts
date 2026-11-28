@@ -2,6 +2,7 @@ import {
 	type RouterModels,
 	anthropicDefaultModelId,
 	friendliModels,
+	inferDefaultModelId,
 	mainlandZAiDefaultModelId,
 	nanoGptDefaultModelId,
 	providerIdentifiers,
@@ -184,6 +185,13 @@ describe("providerModelConfig", () => {
 			expect(getProviderModelConfig(providerIdentifiers.nanogpt)).toEqual({
 				field: "nanoGptModelId",
 				default: nanoGptDefaultModelId,
+			})
+		})
+
+		it("returns Infer's dynamic model field and fallback", () => {
+			expect(getProviderModelConfig(providerIdentifiers.infer)).toEqual({
+				field: "inferModelId",
+				default: inferDefaultModelId,
 			})
 		})
 	})

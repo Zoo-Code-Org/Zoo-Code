@@ -1,4 +1,4 @@
-import { bedrockModels, providerIdentifiers } from "@roo-code/types"
+import { bedrockModels, inferDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ThinkingBudget.spec.tsx
 
 import React from "react"
@@ -754,5 +754,36 @@ describe("ThinkingBudget", () => {
 			expect(screen.queryByTestId("max-output-tokens")).not.toBeInTheDocument()
 			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
 		})
+	})
+
+	// Infer sends no reasoning parameters, so its routes must not offer a reasoning control.
+	it.each([
+		["the fallback", inferDefaultModelInfo],
+		[
+			"a catalog route",
+			{
+				contextWindow: 1_000_000,
+				maxTokens: 128_000,
+				supportsImages: false,
+				supportsPromptCache: true,
+				inputPrice: 1.97,
+				outputPrice: 9.81,
+				displayName: "claude-opus-5-5 (Low cost)",
+			},
+		],
+	])("renders no reasoning control for Infer with %s model info", (_label, modelInfo) => {
+		const { container } = render(
+			<ThinkingBudget
+				apiConfiguration={{
+					apiProvider: providerIdentifiers.infer,
+					enableReasoningEffort: true,
+					reasoningEffort: "high",
+				}}
+				setApiConfigurationField={vi.fn()}
+				modelInfo={modelInfo}
+			/>,
+		)
+
+		expect(container).toBeEmptyDOMElement()
 	})
 })

@@ -14,6 +14,7 @@ describe("getContextWindow", () => {
 		[providerIdentifiers.vercelAiGateway, "vercelAiGatewayModelId"],
 		[providerIdentifiers.opencodeGo, "opencodeGoModelId"],
 		[providerIdentifiers.kenari, "kenariModelId"],
+		[providerIdentifiers.infer, "inferModelId"],
 		[providerIdentifiers.nanogpt, "nanoGptModelId"],
 		[providerIdentifiers.zooGateway, "zooGatewayModelId"],
 	] as const)("uses the provider-specific model field for %s", (provider, modelField) => {

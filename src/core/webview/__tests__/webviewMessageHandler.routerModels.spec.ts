@@ -134,6 +134,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.infer:
+					return { "infer/model:low-cost": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -204,6 +206,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.infer:
+					return { "infer/model:low-cost": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -255,6 +259,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.infer:
+					return { "infer/model:low-cost": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -306,6 +312,55 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(providersCalled).toEqual([providerIdentifiers.openrouter])
 		expect(getModelsMock.mock.calls[0][1]).toBe(handlerForProvider(providerIdentifiers.openrouter))
 	})
+
+	it("filters to Infer and fetches its public catalog without the stored key", async () => {
+		mockProvider.getState.mockResolvedValue({ apiConfiguration: { inferApiKey: "stored-infer-key" } })
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.infer },
+		})
+
+		// The catalog is the same for every key, so the stored key is never sent with it.
+		expect(getModelsMock).toHaveBeenCalledTimes(1)
+		expect(getModelsMock.mock.calls[0][0]).toStrictEqual({ provider: providerIdentifiers.infer })
+		expect(getModelsMock.mock.calls[0][1]).toBe(handlerForProvider(providerIdentifiers.infer))
+		expect(flushModelsMock).not.toHaveBeenCalled()
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels).toEqual({
+			[providerIdentifiers.infer]: {
+				"infer/model:low-cost": { contextWindow: 8192, supportsPromptCache: false },
+			},
+		})
+	})
+
+	it.each([
+		["uses Infer", { apiProvider: providerIdentifiers.infer, inferApiKey: "stored-infer-key" }, true],
+		[
+			"uses another provider",
+			{ apiProvider: providerIdentifiers.anthropic, inferApiKey: "stored-infer-key" },
+			false,
+		],
+	] as const)(
+		"fetches Infer's catalog in an aggregate request only when the profile %s",
+		async (_label, apiConfiguration, fetched) => {
+			mockProvider.getState.mockResolvedValue({ apiConfiguration })
+
+			await webviewMessageHandler(mockProvider, { type: RouterModelsMessageType.requestRouterModels })
+
+			// A Zoo Code install that does not use Infer must not contact it.
+			const inferCalls = getModelsMock.mock.calls.filter(
+				([options]) => options?.provider === providerIdentifiers.infer,
+			)
+			expect(inferCalls.map(([options]) => options)).toStrictEqual(
+				fetched ? [{ provider: providerIdentifiers.infer }] : [],
+			)
+		},
+	)
 
 	it("filters to Kimi Code and dispatches an explicit API key without reading the OAuth token", async () => {
 		const kimiModels = { "kimi-for-coding": { contextWindow: 262_144, supportsPromptCache: true } }
@@ -525,6 +580,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.infer:
+					return { "infer/model:low-cost": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -615,6 +672,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.infer:
+					return { "infer/model:low-cost": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -666,6 +725,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.infer:
+					return { "infer/model:low-cost": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:

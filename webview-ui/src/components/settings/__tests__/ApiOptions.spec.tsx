@@ -4,7 +4,12 @@ import { retiredProviderIdentifiers, providerIdentifiers } from "@roo-code/types
 import { renderWithExtensionState, screen, fireEvent, within } from "@/utils/test-utils"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
-import { openAiCodexDefaultModelId, opencodeGoModels, zooGatewayDefaultModelId } from "@roo-code/types"
+import {
+	inferDefaultModelId,
+	openAiCodexDefaultModelId,
+	opencodeGoModels,
+	zooGatewayDefaultModelId,
+} from "@roo-code/types"
 
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
@@ -365,6 +370,25 @@ describe("ApiOptions", () => {
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("zooGatewayModelId", zooGatewayDefaultModelId, false)
 	})
 
+	it.each([
+		{ stored: undefined, expected: inferDefaultModelId },
+		{ stored: "infer/claude-opus-5-5:official", expected: undefined },
+	])("stores the default Infer route on switch only when none is stored ($stored)", ({ stored, expected }) => {
+		const mockSetApiConfigurationField = vi.fn()
+
+		renderApiOptions({
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, inferApiKey: "key", inferModelId: stored },
+			setApiConfigurationField: mockSetApiConfigurationField,
+		})
+
+		const providerSelect = screen.getByTestId("provider-select").querySelector("select") as HTMLSelectElement
+		fireEvent.change(providerSelect, { target: { value: providerIdentifiers.infer } })
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", providerIdentifiers.infer)
+		const modelIdWrites = mockSetApiConfigurationField.mock.calls.filter(([field]) => field === "inferModelId")
+		expect(modelIdWrites).toEqual(expected === undefined ? [] : [["inferModelId", expected, false]])
+	})
+
 	it("renders the Friendli provider form when friendli is selected", () => {
 		renderApiOptions({
 			apiConfiguration: {
@@ -517,6 +541,7 @@ describe("ApiOptions", () => {
 		expect(optionTexts).toContain("OpenAI")
 		expect(optionTexts).toContain("Anthropic")
 		expect(optionTexts).toContain("NanoGPT")
+		expect(optionTexts).toContain("Infer")
 
 		// Note: The mock doesn't implement search functionality, so we're just verifying
 		// that the select element is rendered with the expected options
