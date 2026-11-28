@@ -125,7 +125,7 @@
 			"qs": "6.16.1",
 			"@types/react": "18.3.31",
 			"@types/react-dom": "18.3.7",
-			"csstype": "3.2.3",
+			"csstype": "3.2.4",
 			"zod": "4.6.7",
 			"@lmstudio/sdk>zod": "3.25.76",
 			"katex": "0.19.1"
