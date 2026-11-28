@@ -945,6 +945,32 @@ export interface LanguageModelChatSelector {
 	id?: string
 }
 
+/**
+ * One row of the parallel-subtasks progress panel.
+ *
+ * Mirrors `BackgroundChildEntry` in the extension package's
+ * `src/core/background-subtasks/types.ts`; keep the two in step.
+ */
+export interface ParallelSubtaskInfo {
+	/** Stable id of the spawned child task. */
+	taskId: string
+	/** Sibling-unique label from the tool call. */
+	label: string
+	/** Mode slug the child runs in. */
+	mode: string
+	status: "queued" | "running" | "completed" | "failed" | "aborted"
+	/** Absolute path of the saved report .md, once the child completed. */
+	reportPath?: string
+	/** One-line summary the host returns to the parent model. */
+	summary?: string
+	/** Why the child failed or was aborted. */
+	error?: string
+	/** Epoch ms the child started. */
+	startedAt?: number
+	/** Epoch ms the child reached a terminal state. */
+	finishedAt?: number
+}
+
 export interface ClineSayTool {
 	tool:
 		| "editedExistingFile"
@@ -964,6 +990,7 @@ export interface ClineSayTool {
 		| "runSlashCommand"
 		| "updateTodoList"
 		| "skill"
+		| "parallelSubtasks"
 	path?: string
 	// For readCommandOutput
 	readStart?: number
@@ -1023,6 +1050,8 @@ export interface ClineSayTool {
 	description?: string
 	// Properties for skill tool
 	skill?: string
+	// Properties for parallel_subtasks tool
+	subtasks?: ParallelSubtaskInfo[]
 }
 
 export interface ClineAskUseMcpServer {

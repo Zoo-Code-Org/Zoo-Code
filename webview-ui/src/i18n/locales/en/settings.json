@@ -1012,6 +1012,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamic thinking effort",
 			"description": "Prepares the set_thinking_effort tool for later support: this setting stores the preference only, and the tool's per-request behavior arrives in follow-up work. (experimental)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Enable parallel subtasks",
+			"description": "When enabled, Zoo can spawn multiple read-only background investigation tasks in different modes and models, then collect their reports. Child tasks are structurally blocked from writing files, running commands, or delegating further subtasks."
 		}
 	},
 	"temperature": {

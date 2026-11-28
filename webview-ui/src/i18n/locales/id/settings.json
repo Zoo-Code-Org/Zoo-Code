@@ -938,6 +938,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Usaha berpikir dinamis",
 			"description": "Menyiapkan alat set_thinking_effort untuk dukungan berikutnya: pengaturan ini hanya menyimpan preferensi, perilaku per permintaan akan datang pada pekerjaan lanjutan. (eksperimental)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Aktifkan subtugas paralel",
+			"description": "Saat diaktifkan, Zoo dapat memunculkan beberapa tugas investigasi latar belakang baca-saja dalam mode dan model berbeda, lalu mengumpulkan laporannya. Tugas anak secara struktural diblokir untuk menulis file, menjalankan perintah, atau mendelegasikan subtugas lebih lanjut."
 		}
 	},
 	"temperature": {

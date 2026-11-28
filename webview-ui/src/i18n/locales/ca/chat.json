@@ -355,6 +355,21 @@
 			"copy_code": "Copiar codi"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Investigacions paral·leles",
+		"progress": "{{completed}} de {{total}} completades",
+		"status": {
+			"queued": "En cua",
+			"running": "En execució",
+			"completed": "Completada",
+			"failed": "Ha fallat",
+			"aborted": "Avortada"
+		},
+		"openReport": "Informe",
+		"openDebugLog": "Registre JSON",
+		"goToTask": "Anar a la tasca",
+		"noReport": "Encara no hi ha cap informe disponible"
+	},
 	"profileViolationWarning": "El perfil actual no és compatible amb la configuració de la teva organització",
 	"shellIntegration": {
 		"title": "Advertència d'execució d'ordres",

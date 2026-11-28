@@ -940,6 +940,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Esfuerzo de pensamiento dinámico",
 			"description": "Prepara la herramienta set_thinking_effort para un soporte posterior: esta opción solo guarda la preferencia y el comportamiento por solicitud llegará en trabajo posterior. (experimental)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Habilitar subtareas en paralelo",
+			"description": "Cuando está habilitado, Zoo puede crear múltiples tareas de investigación de solo lectura en segundo plano en diferentes modos y modelos, y luego recopilar sus informes. Las tareas hijas tienen bloqueadas estructuralmente la escritura de archivos, la ejecución de comandos y la delegación de más subtareas."
 		}
 	},
 	"temperature": {

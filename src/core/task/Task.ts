@@ -29,6 +29,7 @@ import {
 	type ClineMessage,
 	type ClineSay,
 	type ClineAsk,
+	type ClineSayTool,
 	type ExtensionState,
 	type ToolProgressStatus,
 	type HistoryItem,
@@ -92,6 +93,7 @@ import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor
 // utils
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
 import { getWorkspacePath } from "../../utils/path"
+import { isRealPathOutsideWorkspace } from "../../utils/pathUtils"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 import { getTaskDirectoryPath } from "../../utils/storage"
 
@@ -140,6 +142,7 @@ import { expandUserMentions, wrapUserMessage } from "../mentions/processUserCont
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
+import { isReadOnlyToolAction } from "../auto-approval/tools"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
@@ -154,6 +157,7 @@ import {
 	isDivergenceCheckEnabled,
 	reportDivergence,
 } from "./run-state/runStateDivergence"
+import { mergeBackgroundToolPolicy } from "../background-subtasks/policy"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -217,6 +221,60 @@ export function isBlanketDenyEngaged(
 	)
 }
 
+/**
+ * D4 read carve-out: parse a background child's tool ask text and, only when it
+ * names a read-only tool, return the parsed ask so the caller can apply the
+ * outside-workspace gate (M-1). The ask text for a tool is the say-tool JSON
+ * (e.g. {"tool":"readFile","path":"..."}); anything unparseable, non-object,
+ * lacking a string `tool` field, or naming a non-read-only tool returns
+ * undefined (fail closed) so the caller keeps the auto-deny.
+ *
+ * A batch read ask names no top-level `path`: every target lives in
+ * `batchFiles` (ReadFileTool's batch approval shape). Each batch entry must
+ * carry a non-empty string `path`, and the returned `paths` list holds every
+ * target so the caller gates each one. A batch whose entries are not all
+ * verifiable (a non-array `batchFiles`, or any entry lacking a non-empty
+ * string `path`) returns undefined (fail closed): an unverifiable target must
+ * not be silently skipped, or it would ride an approved batch past the gate.
+ * A read-only ask with neither `path` nor `batchFiles` returns an empty
+ * `paths` list and stays approved.
+ */
+function parseReadOnlyBackgroundChildToolAsk(text?: string): { tool: string; paths: string[] } | undefined {
+	if (!text) {
+		return undefined
+	}
+	try {
+		const parsed = JSON.parse(text) as { tool?: unknown; path?: unknown; batchFiles?: unknown }
+		if (typeof parsed?.tool !== "string") {
+			return undefined
+		}
+		// Single construction-site cast: the ask text is untrusted JSON, so the
+		// tool field is only known to be a string here; isReadOnlyToolAction
+		// membership-tests it against the read-only set.
+		if (!isReadOnlyToolAction({ tool: parsed.tool } as ClineSayTool)) {
+			return undefined
+		}
+		if (parsed.batchFiles !== undefined) {
+			if (!Array.isArray(parsed.batchFiles)) {
+				return undefined
+			}
+			const paths: string[] = []
+			for (const entry of parsed.batchFiles) {
+				const candidate = (entry as { path?: unknown } | null)?.path
+				if (typeof candidate !== "string" || candidate.length === 0) {
+					return undefined
+				}
+				paths.push(candidate)
+			}
+			return { tool: parsed.tool, paths }
+		}
+		const path = parsed.path
+		return { tool: parsed.tool, paths: typeof path === "string" && path.length > 0 ? [path] : [] }
+	} catch {
+		return undefined
+	}
+}
+
 function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolution | undefined {
 	if (type === "command_output") {
 		return undefined
@@ -243,6 +301,15 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+/**
+ * P1-1: maximum automatic retries for a LIVE background child across the three
+ * retry paths that never increment `consecutiveMistakeCount` (empty assistant
+ * response, mid-stream failure, first-chunk failure). Without a bound a
+ * persistently failing model loops forever, hangs the parent's join, and holds
+ * the scheduler permit. Normal tasks are unaffected: the counter only advances
+ * for `isBackgroundSubtaskChild`, so they keep their existing unbounded retries.
+ */
+const MAX_BACKGROUND_CHILD_RETRY_ATTEMPTS = 3
 
 export interface ToolExecutionContext {
 	toolCallId: string
@@ -263,6 +330,16 @@ export interface TaskOptions extends CreateTaskOptions {
 	experiments?: Record<string, boolean>
 	startTask?: boolean
 	rootTask?: Task
+	/**
+	 * Authoritative root task id for a new task whose root TASK OBJECT is not
+	 * live (e.g. a history-restored task whose root survives only as a stored
+	 * id): stamping it here keeps a child spawned by such a task under the
+	 * original root instead of inheriting the spawner's id. When provided it
+	 * wins over the id derived from `rootTask`; when absent the `rootTask`
+	 * derivation is kept. Ignored for a history-restored task, which keeps its
+	 * stored rootTaskId.
+	 */
+	rootTaskId?: string
 	parentTask?: Task
 	taskNumber?: number
 	onCreated?: (task: Task) => void
@@ -274,6 +351,22 @@ export interface TaskOptions extends CreateTaskOptions {
 	diffFuzzyThreshold?: number
 	/** Explicit task-local execution context for a delegated child. */
 	handoffExecutionContext?: TaskExecutionContext
+	/**
+	 * Task-local tool policy for a background (read-only) child task. It is never
+	 * set for a normal or serially-delegated task. Presence keeps the task
+	 * read-only at the tool and prompt layers, including for a history-restored
+	 * child (F-05), but on its own does NOT make the task a non-interactive
+	 * background child — that is `backgroundChildHosted`.
+	 */
+	backgroundToolPolicy?: { disabledTools?: readonly string[]; experiments?: Record<string, boolean> }
+	/**
+	 * Set only by the spawn path (`ClineProvider.spawnBackgroundChildren`) to mark
+	 * a LIVE background child hosted off the task stack. `isBackgroundSubtaskChild`
+	 * derives from this flag, NOT from `backgroundToolPolicy` presence, so a
+	 * history-restored child keeps its read-only policy yet stays interactive
+	 * (P1-2). A normal or serially-delegated task never sets it.
+	 */
+	backgroundChildHosted?: boolean
 }
 
 type AssistantMessagePersistenceResult = boolean
@@ -310,6 +403,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly parentTask: Task | undefined = undefined
 	readonly taskNumber: number
 	readonly workspacePath: string
+
+	/**
+	 * True when this task is a LIVE background child hosted off the stack (see
+	 * TaskOptions.backgroundChildHosted): it runs beside the current task, so it
+	 * must stay non-interactive and keep its chat activity off the webview. Webview
+	 * state posts always carry the CURRENT task's messages, never this child's, so
+	 * posting here would render the child's stream in the current task's view (the
+	 * parent renders one parallelSubtasks panel row instead). The child's messages
+	 * still persist to its own task directory, which is what the panel's debug-log
+	 * button opens. A history-restored child is NOT flagged (it is the current task
+	 * and stays interactive) even though it keeps its read-only
+	 * `backgroundToolPolicy` (P1-2).
+	 */
+	readonly isBackgroundSubtaskChild: boolean
 
 	/**
 	 * The mode associated with this task. Persisted across sessions
@@ -503,6 +610,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	consecutiveMistakeCountForEditFile: Map<string, number> = new Map()
 	consecutiveNoToolUseCount: number = 0
 	consecutiveNoAssistantMessagesCount: number = 0
+	/**
+	 * P1-1: automatic retries a LIVE background child has taken across the three
+	 * retry paths that bypass `consecutiveMistakeCount` (empty assistant response,
+	 * mid-stream failure, first-chunk failure). Advances only for
+	 * `isBackgroundSubtaskChild`; a normal task never touches it, so its retries
+	 * stay unbounded. On exceed the child terminates like the mistake-limit path.
+	 */
+	backgroundChildRetryCount: number = 0
 	toolUsage: ToolUsage = {}
 
 	// Conversation message counts, summarized once per Task Completed
@@ -576,6 +691,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * can fire.
 	 */
 	private requestPolicySnapshot?: RequestPolicySnapshot
+
+	/**
+	 * Task-local tool policy for a background child (design D3). Folded into the
+	 * per-request policy snapshot at capture time; never written to provider or
+	 * global state, so concurrent tasks cannot observe or leak it.
+	 */
+	private readonly backgroundToolPolicy?: { disabledTools?: readonly string[]; experiments?: Record<string, boolean> }
 
 	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
@@ -734,6 +856,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		experiments: _experimentsConfig,
 		startTask = true,
 		rootTask,
+		rootTaskId,
 		parentTask,
 		taskNumber = -1,
 		onCreated,
@@ -743,6 +866,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		rateLimitClock,
 		diffFuzzyThreshold,
 		handoffExecutionContext,
+		backgroundToolPolicy,
+		backgroundChildHosted,
 	}: TaskOptions) {
 		super()
 		this.segments = segments
@@ -768,7 +893,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.taskId = historyItem ? historyItem.id : (taskId ?? uuidv7())
-		this.rootTaskId = historyItem ? historyItem.rootTaskId : rootTask?.taskId
+		this.rootTaskId = historyItem ? historyItem.rootTaskId : (rootTaskId ?? rootTask?.taskId)
 		this.parentTaskId = historyItem ? historyItem.parentTaskId : parentTask?.taskId
 		this.childTaskId = undefined
 
@@ -815,6 +940,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.taskNumber = taskNumber
 		this.initialStatus = initialStatus ?? historyItem?.status
 		this.pendingAction = historyItem?.pendingAction
+		this.backgroundToolPolicy = backgroundToolPolicy
+		// P1-2: the non-interactive background-child mode is carried by the hosted
+		// flag (spawn path only), NOT by policy presence, so a history-restored
+		// child keeps its read-only policy but stays interactive.
+		this.isBackgroundSubtaskChild = backgroundChildHosted === true
 
 		// Store the task's mode and API config name when it's created.
 		// For history items, use the stored values; for new tasks, we'll set them
@@ -847,12 +977,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.messageQueueStateChangedHandler = () => {
 			this.emit(RooCodeEventName.TaskUserMessage, this.taskId)
 			this.emit(RooCodeEventName.QueuedMessagesUpdated, this.taskId, this.messageQueueService.messages)
-			void this.providerRef
-				.deref()
-				?.postStateToWebviewThrottled()
-				.catch((error) => {
-					console.error("[Task#messageQueueStateChangedHandler] postStateToWebviewThrottled failed:", error)
-				})
+			// A background child's queue activity must stay off the webview (same
+			// clobbering hazard as addToClineMessages); the events above still fire.
+			if (!this.isBackgroundSubtaskChild) {
+				void this.providerRef
+					.deref()
+					?.postStateToWebviewThrottled()
+					.catch((error) => {
+						console.error(
+							"[Task#messageQueueStateChangedHandler] postStateToWebviewThrottled failed:",
+							error,
+						)
+					})
+			}
 		}
 
 		this.messageQueueService.on("stateChanged", this.messageQueueStateChangedHandler)
@@ -1723,16 +1860,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Partial *asks* still flush, via the clause below — `Task#ask` adds them without
 		// `isAnswered`, so they keep the ordering guarantee that unanswered asks depend on.
 		const requiresImmediateState = message.type === "ask" && message.isAnswered !== true
-		try {
-			await provider?.postStateToWebviewThrottled()
-		} catch (error) {
-			console.error("[Task#addToClineMessages] postStateToWebviewThrottled failed:", error)
-		}
-		if (requiresImmediateState) {
+		// A background child's chat must stay off the webview: its state post would
+		// carry the child's clineMessages into the webview, which renders the CURRENT
+		// task, clobbering the parent's chat. Persistence and the Message emit below
+		// still run, so the child's log stays complete in its own task directory.
+		if (!this.isBackgroundSubtaskChild) {
 			try {
-				await provider?.flushPostStateToWebviewThrottled()
+				await provider?.postStateToWebviewThrottled()
 			} catch (error) {
-				console.error("[Task#addToClineMessages] flushPostStateToWebviewThrottled failed:", error)
+				console.error("[Task#addToClineMessages] postStateToWebviewThrottled failed:", error)
+			}
+			if (requiresImmediateState) {
+				try {
+					await provider?.flushPostStateToWebviewThrottled()
+				} catch (error) {
+					console.error("[Task#addToClineMessages] flushPostStateToWebviewThrottled failed:", error)
+				}
 			}
 		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
@@ -1826,7 +1969,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async updateClineMessage(message: ClineMessage) {
 		const provider = this.providerRef.deref()
-		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
+		// A background child's messageUpdated must stay off the webview: the webview
+		// renders the CURRENT task's messages, so a child ts would corrupt the
+		// parent's chat. The Message emit below still runs.
+		if (!this.isBackgroundSubtaskChild) {
+			await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
+		}
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 	}
 
@@ -1883,7 +2031,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
-			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
+			// M-2: re-assert the background-parent stamp on the child's own
+			// history write. The spawn-time upsert (registerBackgroundChild) is
+			// best-effort, so a transient store failure could otherwise leave the
+			// child unstamped and a later restore would treat it as a normal task
+			// (fully privileged). The child already holds the parent id in memory,
+			// so every save makes the stamp durable.
+			const persistedItem =
+				this.isBackgroundSubtaskChild && this.parentTaskId
+					? { ...historyItem, backgroundParentTaskId: this.parentTaskId }
+					: historyItem
+			await provider?.updateTaskHistory(
+				existingStatus ? { ...persistedItem, status: existingStatus } : persistedItem,
+			)
 		} catch (error) {
 			// The message array was persisted above; a metadata or task-history failure must
 			// not mask that write (see the method docs). The next saveClineMessages() call
@@ -1902,6 +2062,124 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		return undefined
+	}
+
+	/**
+	 * Folds a background child's task-local policy into the ambient provider
+	 * state. A task with no `backgroundToolPolicy` (a normal task and a
+	 * serially-delegated task) gets the state values back untouched (same
+	 * references, `undefined` preserved) so this seam is a no-op for it; any task
+	 * carrying the policy — a LIVE background child or a history-restored one
+	 * (P1-2) — gets a fresh union that is at least as restrictive as the user's
+	 * global policy and is never aliased to provider state.
+	 */
+	private effectiveToolPolicy(state?: { disabledTools?: string[]; experiments?: Record<string, boolean> }): {
+		disabledTools: string[] | undefined
+		experiments: Record<string, boolean> | undefined
+	} {
+		if (!this.backgroundToolPolicy) {
+			return { disabledTools: state?.disabledTools, experiments: state?.experiments }
+		}
+		const merged = mergeBackgroundToolPolicy(this.backgroundToolPolicy, state)
+		return { disabledTools: merged.disabledTools, experiments: merged.experiments }
+	}
+
+	/**
+	 * P1-1: record one automatic retry for a LIVE background child and terminate
+	 * the run once the retry bound is exceeded. The three retry paths that call
+	 * this (empty assistant response, mid-stream failure, first-chunk failure)
+	 * never increment `consecutiveMistakeCount`, so a persistently failing model
+	 * would otherwise retry forever: the run never settles, the parent's
+	 * `Promise.all(handles.map(h => h.done))` join hangs, and the scheduler
+	 * permit is held while every retry issues a fresh API request. No-op for a
+	 * normal task. On exceed this mirrors the mistake-limit terminal
+	 * (`requestAbort(true)` + throw): the throw propagates out of the request
+	 * loop and is swallowed by startTask's abandoned/abort catch, so `run()`
+	 * settles and the host's run-settled catch-all settles the child handle as
+	 * failed and releases the permit.
+	 */
+	private noteBackgroundChildRetry(): void {
+		if (!this.isBackgroundSubtaskChild) {
+			return
+		}
+		this.backgroundChildRetryCount++
+		if (this.backgroundChildRetryCount > MAX_BACKGROUND_CHILD_RETRY_ATTEMPTS) {
+			this.requestAbort(true)
+			throw new Error(
+				`[RooCode#Task] background child task ${this.taskId}.${this.instanceId} exceeded the automatic retry limit (${MAX_BACKGROUND_CHILD_RETRY_ATTEMPTS})`,
+			)
+		}
+	}
+
+	/**
+	 * D4 policy for background children: when the auto-approval decision is
+	 * `ask`, a background child must never post a chat row and wait for a user
+	 * click. Resolve the ask deterministically by type instead: read-only tool
+	 * asks approve (design D4 scopes the auto-deny to "tool(읽기 외 전부)" —
+	 * the user already approved the parallel_subtasks call that spawned this
+	 * child, design §11, and the child's structural tool policy already blocks
+	 * every dangerous tool), every other tool ask and every non-tool ask type
+	 * fails closed. A read carve-out is only granted when every read target
+	 * stays inside the workspace (M-1), checked canonically: each ask path —
+	 * the single `path` value or every `batchFiles[].path` entry of a batch
+	 * read — is resolved against the task cwd and the realpath of the target
+	 * must sit under the realpath of a workspace root, so a workspace symlink
+	 * cannot smuggle an outside file past a lexical containment check. A batch
+	 * is denied when ANY of its targets escapes. Returns undefined for
+	 * non-background tasks and for auto-answered asks, so the normal
+	 * interactive flow is untouched.
+	 */
+	private async resolveBackgroundChildAsk(
+		type: ClineAsk,
+		approval: { decision: "ask" },
+		text?: string,
+	): Promise<{ response: ClineAskResponse; text?: string; autoDenyDetail?: AutoDenyDetail } | undefined> {
+		if (!this.isBackgroundSubtaskChild || approval.decision !== "ask") {
+			return undefined
+		}
+		if (type === "tool") {
+			const readOnlyAsk = parseReadOnlyBackgroundChildToolAsk(text)
+			// M-1: the read carve-out must still respect the outside-workspace
+			// gate, otherwise a prompt-injected child could read e.g.
+			// ~/.ssh/id_rsa under default settings and land it in a workspace
+			// report. A batch read ask carries its targets in `batchFiles` and
+			// no top-level `path`, so the gate must run on EVERY batch entry:
+			// one outside target denies the whole ask, and the parse step
+			// already failed closed on any entry whose path is not verifiable.
+			// Each target is resolved against the task cwd and compared
+			// canonically (realpath of the target vs realpath of each workspace
+			// root): a workspace symlink such as `private-link` would pass a
+			// lexical check while ReadFileTool reads its outside-workspace
+			// target. Fail closed (keep the auto-deny) when any target escapes
+			// the workspace or cannot be resolved. Read-only asks with no path
+			// and no batchFiles stay approved.
+			let pathOutsideWorkspace = false
+			if (readOnlyAsk) {
+				for (const candidate of readOnlyAsk.paths) {
+					if (await isRealPathOutsideWorkspace(path.resolve(this.cwd, candidate))) {
+						pathOutsideWorkspace = true
+					}
+				}
+			}
+			if (readOnlyAsk && !pathOutsideWorkspace) {
+				return { response: "yesButtonClicked" }
+			}
+			const autoDenyDetail: AutoDenyDetail = { kind: "background_policy" }
+			// Route the presenter through the structured auto-deny path (mirroring
+			// the deny branch of ask): the tool result must read as a policy
+			// denial scoped to this tool call, not as a user rejection.
+			this.pendingAutoDenyDetail = autoDenyDetail
+			return { response: "noButtonClicked", autoDenyDetail }
+		}
+		// followup, api_req_failed, mistake_limit_reached, and every other ask
+		// type resolve to noButtonClicked. That answer feeds each type's
+		// existing non-approval handling: for a background child the
+		// mistake_limit_reached path is terminal (recursivelyMakeClineRequests
+		// ends the run loop), and completion_result is intercepted earlier by
+		// AttemptCompletionTool (Phase 2) — denying it here is the correct
+		// fail-closed default should it ever reach this seam. The host settles
+		// the child handle when the run settles without a terminal entry.
+		return { response: "noButtonClicked" }
 	}
 
 	// Note that `partial` has three valid states true (partial message),
@@ -2002,6 +2280,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.messageQueueService.releaseMessage(queuedMessage.id)
 			}
 			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
+
+		// D4: a background child never blocks on a user. Resolve an unresolved
+		// policy decision deterministically before any chat row is posted, and
+		// release a claimed queued message so the early return cannot strand it.
+		const backgroundAskResolution = await this.resolveBackgroundChildAsk(
+			type,
+			approval as { decision: "ask" },
+			text,
+		)
+		if (backgroundAskResolution) {
+			// Recheck cancellation after the resolution's awaits: the M-1 gate
+			// lookups (`isRealPathOutsideWorkspace`) can outlive the pre-await
+			// check above, and an abort landing while one is pending must not
+			// still return an approval (or a denial) for a cancelled task. The
+			// interactive path rechecks after its wait the same way (Task.ts
+			// pWaitFor settle). Release the queued message and fail closed like
+			// the other abort paths.
+			if (this.abort) {
+				if (queuedMessage) {
+					this.messageQueueService.releaseMessage(queuedMessage.id)
+				}
+				throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+			}
+			if (queuedMessage) {
+				this.messageQueueService.releaseMessage(queuedMessage.id)
+			}
+			return backgroundAskResolution
 		}
 
 		if (partial !== undefined) {
@@ -2731,14 +3037,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const provider = this.providerRef.deref()
 		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
 		if (provider) {
+			const effectivePolicy = this.effectiveToolPolicy(state)
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
 				provider,
 				cwd: this.cwd,
 				mode,
 				customModes: state?.customModes,
-				experiments: state?.experiments,
+				experiments: effectivePolicy.experiments,
 				apiConfiguration,
-				disabledTools: state?.disabledTools,
+				disabledTools: effectivePolicy.disabledTools,
 				modelInfo: requestModelInfo,
 				includeAllToolsWithRestrictions: false,
 			})
@@ -2837,6 +3144,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.processQueuedMessages()
 	}
 
+	/**
+	 * Posts a say row. Returns the exact `ClineMessage` that was appended or
+	 * updated so callers can keep updating it by identity: the row is pushed
+	 * before persistence awaits complete, so `clineMessages.at(-1)` is not a
+	 * safe way to recover it (another say can append its own row meanwhile).
+	 */
 	async say(
 		type: ClineSay,
 		text?: string,
@@ -2849,7 +3162,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} = {},
 		contextCondense?: ContextCondense,
 		contextTruncation?: ContextTruncation,
-	): Promise<undefined> {
+	): Promise<ClineMessage> {
 		if (this.abort) {
 			throw new Error(`[RooCode#say] task ${this.taskId}.${this.instanceId} aborted`)
 		}
@@ -2868,6 +3181,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
 					this.postPartialMessageUpdate(lastMessage, "say")
+					return lastMessage
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -2876,7 +3190,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					const message: ClineMessage = {
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -2885,7 +3199,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						partial,
 						contextCondense,
 						contextTruncation,
-					})
+					}
+					await this.addToClineMessages(message)
+					return message
 				}
 			} else {
 				// New now have a complete version of a previously partial message.
@@ -2912,6 +3228,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
+					return lastMessage
 				} else {
 					// This is a new and complete message, so add it like normal.
 					const sayTs = Date.now()
@@ -2920,7 +3237,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					const message: ClineMessage = {
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -2928,7 +3245,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						images,
 						contextCondense,
 						contextTruncation,
-					})
+					}
+					await this.addToClineMessages(message)
+					return message
 				}
 			}
 		} else {
@@ -2943,7 +3262,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.lastMessageTs = sayTs
 			}
 
-			await this.addToClineMessages({
+			const message: ClineMessage = {
 				ts: sayTs,
 				type: "say",
 				say: type,
@@ -2952,7 +3271,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				checkpoint,
 				contextCondense,
 				contextTruncation,
-			})
+			}
+			await this.addToClineMessages(message)
+			return message
 		}
 	}
 
@@ -3118,7 +3439,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// The todo list is already set in the constructor if initialTodos were provided
 			// No need to add any messages - the todoList property is already set
 
-			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+			// A background child posts nothing to the webview (design letter): the
+			// state it would post is the current task's, never the child's.
+			if (!this.isBackgroundSubtaskChild) {
+				await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+			}
 
 			await this.say("text", task, images)
 
@@ -3675,13 +4000,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Force final token usage update before abort event
 		this.emitFinalTokenUsageUpdate()
 
-		try {
-			await this.providerRef.deref()?.flushPostStateToWebviewThrottled()
-		} catch (error) {
-			console.error(
-				`[Task#abortTask] flushPostStateToWebviewThrottled failed for ${this.taskId}.${this.instanceId}:`,
-				error,
-			)
+		// A background child posts nothing to the webview (design letter).
+		if (!this.isBackgroundSubtaskChild) {
+			try {
+				await this.providerRef.deref()?.flushPostStateToWebviewThrottled()
+			} catch (error) {
+				console.error(
+					`[Task#abortTask] flushPostStateToWebviewThrottled failed for ${this.taskId}.${this.instanceId}:`,
+					error,
+				)
+			}
 		}
 
 		this.emit(RooCodeEventName.TaskAborted)
@@ -4045,6 +4373,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					t("common:errors.mistake_limit_guidance"),
 				)
 
+				if (this.isBackgroundSubtaskChild) {
+					// D4/§8: the ask above resolved by policy (a background child
+					// never waits for a user), and retrying the same content would
+					// hit the same validation/execution failures, so the
+					// consecutive mistake limit is terminal for a background
+					// child. requestAbort(true) sets the abandoned/abort latches
+					// (mirroring the D5 path in AttemptCompletionTool), so this
+					// throw — like the loop's own abort-guard throw — is swallowed
+					// by startTask's catch and run() settles; the host's
+					// run-settled catch-all then settles the child handle as
+					// failed. abortTask() is not used: its TaskAborted emit would
+					// overwrite that terminal status.
+					this.requestAbort(true)
+					throw new Error(
+						`[RooCode#recursivelyMakeRooRequests] background child task ${this.taskId}.${this.instanceId} reached the consecutive mistake limit`,
+					)
+				}
+
 				if (response === "messageResponse") {
 					currentUserContent.push(
 						...[
@@ -4139,7 +4485,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} satisfies ClineApiReqInfo)
 
 			await this.saveClineMessages()
-			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+			// A background child posts nothing to the webview (design letter); its
+			// messages persist to its own task directory regardless.
+			if (!this.isBackgroundSubtaskChild) {
+				await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+			}
 
 			try {
 				let cacheWriteTokens = 0
@@ -4847,6 +5197,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								}
 							}
 
+							// P1-1: this unconditional re-push is an unbounded retry path
+							// (reached with and without auto-approval), so bound it for a
+							// background child. No-op for a normal task.
+							this.noteBackgroundChildRetry()
+
 							// Push the same content back onto the stack to retry, incrementing the retry attempt counter
 							stack.push({
 								userContent: currentUserContent,
@@ -5006,7 +5361,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 
 				await this.saveClineMessages()
-				await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+				// A background child posts nothing to the webview (design letter).
+				if (!this.isBackgroundSubtaskChild) {
+					await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+				}
 
 				// No legacy text-stream tool parser state to reset.
 
@@ -5250,6 +5608,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Increment consecutive no-assistant-messages counter
 					this.consecutiveNoAssistantMessagesCount++
 
+					// P1-1: an empty assistant response always leads to another attempt
+					// (auto-approval re-pushes here; a background child's denied ask
+					// falls through to the outer noToolsUsed nudge), so it is one of the
+					// unbounded retry paths this bound exists for. No-op for normal tasks.
+					this.noteBackgroundChildRetry()
+
 					// Only show error and count toward mistake limit after 2 consecutive failures
 					// This provides a "grace retry" - first failure retries silently
 					if (this.consecutiveNoAssistantMessagesCount >= 2) {
@@ -5372,8 +5736,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const rooIgnoreInstructions = this.rooIgnoreController?.getInstructions()
 
-		const { customModes, customModePrompts, customInstructions, experiments, language, enableSubfolderRules } =
+		const { customModes, customModePrompts, customInstructions, language, enableSubfolderRules } =
 			requestState ?? {}
+		// Fold the background child's task-local policy into the same snapshot
+		// the request's tool arrays were built from (the tool-array sites all call
+		// effectiveToolPolicy(state)), so the child's prompt never advertises a
+		// tool the runtime blocks and never hides a callable one. No-op for a
+		// non-background task.
+		const effectivePolicy = this.effectiveToolPolicy(requestState)
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
 		const apiConfiguration = this.apiConfiguration
@@ -5400,7 +5770,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				customModePrompts,
 				customModes,
 				customInstructions,
-				experiments,
+				effectivePolicy.experiments,
 				language,
 				rooIgnoreInstructions,
 				{
@@ -5416,7 +5786,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				undefined, // todoList
 				this.api.getModel().id,
 				provider.getSkillsManager(),
-				requestState?.disabledTools,
+				effectivePolicy.disabledTools,
 				modelInfo,
 				failures,
 			)
@@ -5578,20 +5948,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				`Forcing truncation to ${FORCED_CONTEXT_REDUCTION_PERCENT}% of current context.`,
 		)
 		// Send condenseTaskContextStarted to show in-progress indicator
-		await this.providerRef.deref()?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
+		// A background child's condense spinner must not appear in the parent's chat.
+		if (!this.isBackgroundSubtaskChild) {
+			await this.providerRef
+				.deref()
+				?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
+		}
 
 		// Build tools for condensing metadata (same tools used for normal API calls)
 		const provider = this.providerRef.deref()
 		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
 		if (provider) {
+			const effectivePolicy = this.effectiveToolPolicy(state)
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
 				provider,
 				cwd: this.cwd,
 				mode,
 				customModes: state?.customModes,
-				experiments: state?.experiments,
+				experiments: effectivePolicy.experiments,
 				apiConfiguration,
-				disabledTools: state?.disabledTools,
+				disabledTools: effectivePolicy.disabledTools,
 				modelInfo,
 				includeAllToolsWithRestrictions: false,
 			})
@@ -5657,9 +6033,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} finally {
 			// Notify webview that context management is complete (removes in-progress spinner)
 			// IMPORTANT: Must always be sent to dismiss the spinner, even on error
-			await this.providerRef
-				.deref()
-				?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
+			// A background child has no spinner in the parent's chat, so nothing to dismiss.
+			if (!this.isBackgroundSubtaskChild) {
+				await this.providerRef
+					.deref()
+					?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
+			}
 		}
 	}
 
@@ -5763,10 +6142,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// awaits above, so the streaming presenter of this request validates
 		// against exactly the policy its prompt advertised. The generator body
 		// re-executes per retry, so each attempt re-captures before its stream
-		// can present anything.
+		// can present anything. A background child folds its task-local policy
+		// into the same snapshot the prompt was built from, so the prompt layer
+		// and the streaming validator cannot disagree about the child's tools.
+		const effectivePolicy = this.effectiveToolPolicy(state)
 		this.requestPolicySnapshot = {
-			disabledTools: state?.disabledTools,
-			experiments: state?.experiments,
+			disabledTools: effectivePolicy.disabledTools,
+			experiments: effectivePolicy.experiments,
 			customModes: state?.customModes,
 			modelInfo: requestModelInfo,
 		}
@@ -5834,7 +6216,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Send condenseTaskContextStarted BEFORE manageContext to show in-progress indicator
 			// This notification must be sent here (not earlier) because the early check uses stale token count
 			// (before user message is added to history), which could incorrectly skip showing the indicator
-			if (contextManagementWillRun && autoCondenseContext) {
+			// A background child's condense spinner must not appear in the parent's chat.
+			if (contextManagementWillRun && autoCondenseContext && !this.isBackgroundSubtaskChild) {
 				await this.providerRef
 					.deref()
 					?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
@@ -5846,14 +6229,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			{
 				const provider = this.providerRef.deref()
 				if (provider) {
+					const effectivePolicy = this.effectiveToolPolicy(state)
 					const toolsResult = await buildNativeToolsArrayWithRestrictions({
 						provider,
 						cwd: this.cwd,
 						mode,
 						customModes: state?.customModes,
-						experiments: state?.experiments,
+						experiments: effectivePolicy.experiments,
 						apiConfiguration,
-						disabledTools: state?.disabledTools,
+						disabledTools: effectivePolicy.disabledTools,
 						modelInfo: requestModelInfo,
 						includeAllToolsWithRestrictions: false,
 					})
@@ -5930,7 +6314,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show
 				// IMPORTANT: Must always be sent to dismiss the spinner, even on error
-				if (contextManagementWillRun && autoCondenseContext) {
+				// A background child has no spinner in the parent's chat, so nothing to dismiss.
+				if (contextManagementWillRun && autoCondenseContext && !this.isBackgroundSubtaskChild) {
 					await this.providerRef
 						.deref()
 						?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
@@ -5995,14 +6380,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error("Provider reference lost during tool building")
 			}
 
+			const effectivePolicy = this.effectiveToolPolicy(state)
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
 				provider,
 				cwd: this.cwd,
 				mode,
 				customModes: state?.customModes,
-				experiments: state?.experiments,
+				experiments: effectivePolicy.experiments,
 				apiConfiguration,
-				disabledTools: state?.disabledTools,
+				disabledTools: effectivePolicy.disabledTools,
 				modelInfo,
 				includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
 			})
@@ -6135,6 +6521,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted during retry`,
 					)
 				}
+
+				// P1-1: this recursive retry with auto-approval is an unbounded path
+				// (only context-window errors are otherwise capped), so bound it for a
+				// background child. No-op for a normal task.
+				this.noteBackgroundChildRetry()
 
 				// Delegate generator output from the recursive call with
 				// incremented retry count.

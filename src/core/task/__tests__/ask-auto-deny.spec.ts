@@ -82,7 +82,7 @@ function attachTurnHarness(task: Task) {
 	Object.defineProperty(task, "streamingToolCallIndices", { value: new Map() })
 	Object.defineProperty(task, "activeToolContexts", { value: new Map() })
 	task["saveApiConversationHistory"] = vi.fn(async () => true)
-	task["say"] = vi.fn(async () => undefined)
+	task["say"] = vi.fn<Task["say"]>(async () => ({ ts: 0, type: "say" as const, say: "text", text: "" }))
 	// The loop rewrites the newest api_req_started row with cost data; the
 	// no-op `say` stub above never adds one itself.
 	task["clineMessages"].push({ type: "say", say: "api_req_started", text: "{}", ts: Date.now() })

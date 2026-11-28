@@ -352,6 +352,21 @@
 			"copy_code": "Code kopieren"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Parallele Untersuchungen",
+		"progress": "{{completed}} von {{total}} abgeschlossen",
+		"status": {
+			"queued": "In Warteschlange",
+			"running": "Wird ausgeführt",
+			"completed": "Abgeschlossen",
+			"failed": "Fehlgeschlagen",
+			"aborted": "Abgebrochen"
+		},
+		"openReport": "Bericht",
+		"openDebugLog": "JSON-Protokoll",
+		"goToTask": "Zur Aufgabe",
+		"noReport": "Noch kein Bericht verfügbar"
+	},
 	"profileViolationWarning": "Das aktuelle Profil ist nicht kompatibel mit den Einstellungen deiner Organisation",
 	"shellIntegration": {
 		"title": "Befehlsausführungswarnung",

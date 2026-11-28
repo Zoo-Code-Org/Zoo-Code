@@ -450,7 +450,9 @@ export async function checkAutoApproval({
 			return state.alwaysAllowModeSwitch === true ? { decision: "approve" } : { decision: "ask" }
 		}
 
-		if (["newTask", "finishTask"].includes(tool?.tool)) {
+		// `parallelSubtasks` is the parallel fan-out counterpart of `newTask`, so
+		// the same subtask switch approves it: one approval point for spawning work.
+		if (["newTask", "finishTask", "parallelSubtasks"].includes(tool?.tool)) {
 			return state.alwaysAllowSubtasks === true ? { decision: "approve" } : { decision: "ask" }
 		}
 

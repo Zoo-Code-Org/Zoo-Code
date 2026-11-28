@@ -38,6 +38,7 @@ import { updateTodoListTool } from "../tools/UpdateTodoListTool"
 import { runSlashCommandTool } from "../tools/RunSlashCommandTool"
 import { skillTool } from "../tools/SkillTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
+import { parallelSubtasksTool } from "../tools/ParallelSubtasksTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { buildToolRequirements, type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
@@ -522,6 +523,10 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						const message = block.params.message ?? "(no message)"
 						const modeName = getModeBySlug(mode, customModes)?.name ?? mode
 						return `[${block.name} in ${modeName} mode: '${message}']`
+					}
+					case "parallel_subtasks": {
+						const taskCount = block.nativeArgs?.tasks?.length ?? 0
+						return `[${block.name} for ${taskCount} read-only investigation(s)]`
 					}
 					case "run_slash_command":
 						return `[${block.name} for '${block.params.command}'${block.params.args ? ` with args: ${block.params.args}` : ""}]`
@@ -1031,6 +1036,15 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						toolCallId,
 					})
 					break
+				case "parallel_subtasks": {
+					await parallelSubtasksTool.handle(cline, block as ToolUse<"parallel_subtasks">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+						toolCallId,
+					})
+					break
+				}
 				case "attempt_completion": {
 					const completionCallbacks: AttemptCompletionCallbacks = {
 						askApproval,

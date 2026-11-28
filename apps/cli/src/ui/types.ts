@@ -62,6 +62,19 @@ export interface ToolData {
 		}>
 	}>
 
+	// Parallel subtask fields
+	/** Child rows reported by the parallel_subtasks tool (approval asks use `tasks`, progress rows use `subtasks`) */
+	subtasks?: Array<{
+		taskId?: string
+		label?: string
+		mode?: string
+		message?: string
+		status?: string
+		reportPath?: string
+		summary?: string
+		error?: string
+	}>
+
 	// Question/completion fields
 	/** Question text for ask_followup_question */
 	question?: string

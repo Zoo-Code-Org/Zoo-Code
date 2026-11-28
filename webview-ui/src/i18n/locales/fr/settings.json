@@ -940,6 +940,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Effort de réflexion dynamique",
 			"description": "Prépare l'outil set_thinking_effort pour une prise en charge ultérieure : ce réglage ne stocke que la préférence, le comportement par requête arrivera dans un travail ultérieur. (expérimental)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Activer les sous-tâches parallèles",
+			"description": "Lorsqu'elle est activée, Zoo peut lancer plusieurs tâches d'investigation en arrière-plan en lecture seule dans différents modes et modèles, puis collecter leurs rapports. Les tâches enfant sont structurellement bloquées : elles ne peuvent pas écrire de fichiers, exécuter de commandes ni déléguer de nouvelles sous-tâches."
 		}
 	},
 	"temperature": {

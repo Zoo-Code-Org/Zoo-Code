@@ -25,6 +25,19 @@ import { MCP_TOOL_PREFIX, MCP_TOOL_SEPARATOR, parseMcpToolName, normalizeMcpTool
 type NativeArgsFor<TName extends ToolName> = TName extends keyof NativeToolArgs ? NativeToolArgs[TName] : never
 
 /**
+ * Hard ceiling on the `tasks` array of one `parallel_subtasks` call. The tool
+ * documents a per-call fan-out of 6 with excess entries dropped; this ceiling
+ * bounds the call itself so one model response cannot post an unbounded
+ * approval payload, mint N-6 progress rows, or drive the label de-duplication
+ * in the tool with an unbounded entry count. The parser keeps one entry past
+ * the ceiling so the tool can tell an over-limit request from an at-limit one.
+ */
+export const MAX_REQUESTED_PARALLEL_SUBTASKS = 50
+
+/** Collection stops here; one past the ceiling is what makes an over-limit call detectable. */
+const MAX_COLLECTED_PARALLEL_SUBTASKS = MAX_REQUESTED_PARALLEL_SUBTASKS + 1
+
+/**
  * Parser for native tool calls (OpenAI-style function calling).
  * Converts native tool call format to ToolUse format for compatibility
  * with existing tool execution infrastructure.
@@ -441,6 +454,59 @@ export class NativeToolCallParser {
 	}
 
 	/**
+	 * Normalize raw `parallel_subtasks` task entries into the tool's native args
+	 * shape. Accepts the array directly or a JSON-stringified array (some models
+	 * double-stringify), and drops entries that lack a string mode and message so
+	 * a partially streamed call surfaces only the entries that are complete.
+	 * Collection stops one past `MAX_REQUESTED_PARALLEL_SUBTASKS`, so the array
+	 * is bounded at parse time and the tool can still report an over-limit call.
+	 *
+	 * @returns The qualifying tasks, or undefined when no entry qualifies yet.
+	 */
+	private static normalizeParallelSubtaskTasks(
+		value: unknown,
+	): NativeToolArgs["parallel_subtasks"]["tasks"] | undefined {
+		let entries: unknown[] | undefined
+		if (Array.isArray(value)) {
+			entries = value
+		} else if (typeof value === "string") {
+			try {
+				const parsed: unknown = JSON.parse(value)
+				if (Array.isArray(parsed)) {
+					entries = parsed
+				}
+			} catch {
+				// Not valid JSON (yet); nothing to surface.
+			}
+		}
+
+		if (!entries) {
+			return undefined
+		}
+
+		const tasks: NativeToolArgs["parallel_subtasks"]["tasks"] = []
+		for (const entry of entries) {
+			if (tasks.length >= MAX_COLLECTED_PARALLEL_SUBTASKS) {
+				break
+			}
+			if (typeof entry !== "object" || entry === null) {
+				continue
+			}
+			const record = entry as Record<string, unknown>
+			if (typeof record.mode !== "string" || typeof record.message !== "string") {
+				continue
+			}
+			tasks.push({
+				...(typeof record.label === "string" ? { label: record.label } : {}),
+				mode: record.mode,
+				message: record.message,
+			})
+		}
+
+		return tasks.length > 0 ? tasks : undefined
+	}
+
+	/**
 	 * Create a partial ToolUse from currently parsed arguments.
 	 * Used during streaming to show progress.
 	 * @param originalName - The original tool name as called by the model (if different from canonical name)
@@ -711,6 +777,14 @@ export class NativeToolCallParser {
 					}
 				}
 				break
+
+			case "parallel_subtasks": {
+				const tasks = this.normalizeParallelSubtaskTasks(partialArgs.tasks)
+				if (tasks) {
+					nativeArgs = { tasks }
+				}
+				break
+			}
 
 			default:
 				break
@@ -1066,6 +1140,14 @@ export class NativeToolCallParser {
 						} as NativeArgsFor<TName>
 					}
 					break
+
+				case "parallel_subtasks": {
+					const tasks = this.normalizeParallelSubtaskTasks(args.tasks)
+					if (tasks) {
+						nativeArgs = { tasks } as NativeArgsFor<TName>
+					}
+					break
+				}
 
 				default:
 					if (customToolRegistry.has(resolvedName)) {

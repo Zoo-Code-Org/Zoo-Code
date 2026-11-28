@@ -6,6 +6,7 @@ export const EXPERIMENT_IDS = {
 	RUN_SLASH_COMMAND: "runSlashCommand",
 	CUSTOM_TOOLS: "customTools",
 	PARALLEL_TOOL_EXECUTION: "parallelToolExecution",
+	PARALLEL_SUBTASKS: "parallelSubtasks",
 	DYNAMIC_THINKING_EFFORT: "dynamicThinkingEffort",
 } as const satisfies Record<string, ExperimentId>
 
@@ -26,6 +27,11 @@ export const experimentConfigsMap: Record<ExperimentKey, ExperimentConfig> = {
 	CUSTOM_TOOLS: { enabled: false },
 	// TODO: add i18n keys (settings:experimental.PARALLEL_TOOL_EXECUTION.name/.description) in the same PR that sets showInSettings: true
 	PARALLEL_TOOL_EXECUTION: { enabled: false, showInSettings: false },
+	// Rollout gate for the parallel_subtasks tool (design §14). The Settings
+	// label/description keys (settings:experimental.PARALLEL_SUBTASKS.*) live in
+	// the webview locale bundles and ship with the feature, so the Settings
+	// panel can render this entry.
+	PARALLEL_SUBTASKS: { enabled: false, showInSettings: true },
 	DYNAMIC_THINKING_EFFORT: { enabled: false },
 }
 

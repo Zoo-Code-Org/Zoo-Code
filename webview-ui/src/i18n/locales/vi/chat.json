@@ -350,6 +350,21 @@
 			"copy_code": "Sao chép mã"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Điều tra song song",
+		"progress": "Hoàn thành {{completed}} trong tổng số {{total}}",
+		"status": {
+			"queued": "Đang chờ",
+			"running": "Đang chạy",
+			"completed": "Hoàn thành",
+			"failed": "Thất bại",
+			"aborted": "Đã hủy"
+		},
+		"openReport": "Báo cáo",
+		"openDebugLog": "Nhật ký JSON",
+		"goToTask": "Đến nhiệm vụ",
+		"noReport": "Chưa có báo cáo nào"
+	},
 	"profileViolationWarning": "Hồ sơ hiện tại không tương thích với cài đặt của tổ chức của bạn",
 	"shellIntegration": {
 		"title": "Cảnh báo thực thi lệnh",

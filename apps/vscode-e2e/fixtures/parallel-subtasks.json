@@ -1,0 +1,198 @@
+{
+	"fixtures": [
+		{
+			"match": { "model": "pst-e2e-fanout", "userMessage": "PST_E2E_SMOKE_A", "sequenceIndex": 0 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "parallel_subtasks",
+						"arguments": "{\"tasks\":[{\"label\":\"api-surface\",\"mode\":\"code\",\"message\":\"PST_E2E_CHILD_A: Read the file parallel-subtasks-probe.txt in the current working directory and report what it contains.\"},{\"label\":\"debug-logs\",\"mode\":\"debug\",\"message\":\"PST_E2E_CHILD_B: Read the file parallel-subtasks-probe.txt in the current working directory and report what it contains.\"},{\"label\":\"test-plan\",\"mode\":\"ask\",\"message\":\"PST_E2E_CHILD_C: Read the file parallel-subtasks-probe.txt in the current working directory and report what it contains.\"}]}",
+						"id": "call_pst_a_ps_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-fanout", "userMessage": "PST_E2E_CHILD_A", "sequenceIndex": 0 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"parallel-subtasks-probe.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":50}",
+						"id": "call_pst_a_child_a_read_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-fanout", "userMessage": "PST_E2E_CHILD_B", "sequenceIndex": 0 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"parallel-subtasks-probe.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":50}",
+						"id": "call_pst_a_child_b_read_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-fanout", "userMessage": "PST_E2E_CHILD_C", "sequenceIndex": 0 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"parallel-subtasks-probe.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":50}",
+						"id": "call_pst_a_child_c_read_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "pst-e2e-fanout",
+				"systemMessage": "highly skilled software engineer with extensive knowledge"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"PST_E2E_CHILD_A_RESULT: probe file lists the three fan-out markers.\"}",
+						"id": "call_pst_a_child_a_done_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "pst-e2e-fanout",
+				"systemMessage": "expert software debugger specializing in systematic problem diagnosis"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"PST_E2E_CHILD_B_RESULT: probe file lists the three fan-out markers.\"}",
+						"id": "call_pst_a_child_b_done_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "pst-e2e-fanout",
+				"systemMessage": "knowledgeable technical assistant focused on answering questions"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"PST_E2E_CHILD_C_RESULT: probe file lists the three fan-out markers.\"}",
+						"id": "call_pst_a_child_c_done_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-fanout", "systemMessage": "experienced technical leader who is inquisitive" },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"PST_E2E_PARENT_A_RESULT\"}",
+						"id": "call_pst_a_parent_done_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-cancel", "userMessage": "PST_E2E_CANCEL", "sequenceIndex": 0 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "parallel_subtasks",
+						"arguments": "{\"tasks\":[{\"label\":\"slow-a\",\"mode\":\"code\",\"message\":\"PST_E2E_CANCEL_CHILD_A: Read the file parallel-subtasks-probe.txt in the current working directory and report what it contains.\"},{\"label\":\"slow-b\",\"mode\":\"debug\",\"message\":\"PST_E2E_CANCEL_CHILD_B: Read the file parallel-subtasks-probe.txt in the current working directory and report what it contains.\"}]}",
+						"id": "call_pst_b_ps_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-cancel", "userMessage": "PST_E2E_CANCEL_CHILD_A", "sequenceIndex": 0 },
+			"streamingProfile": { "ttft": 15000 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"parallel-subtasks-probe.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":50}",
+						"id": "call_pst_b_child_a_read_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-cancel", "userMessage": "PST_E2E_CANCEL_CHILD_B", "sequenceIndex": 0 },
+			"streamingProfile": { "ttft": 15000 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"parallel-subtasks-probe.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":50}",
+						"id": "call_pst_b_child_b_read_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-depth1", "userMessage": "PST_E2E_DEPTH1", "sequenceIndex": 0 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "parallel_subtasks",
+						"arguments": "{\"tasks\":[{\"label\":\"depth1-probe\",\"mode\":\"code\",\"message\":\"PST_E2E_DEPTH1_CHILD: You are investigating alone. Try to spawn a nested parallel_subtasks child, observe the outcome, then read the file parallel-subtasks-probe.txt and report what it contains.\"}]}",
+						"id": "call_pst_c_ps_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-depth1", "userMessage": "PST_E2E_DEPTH1_CHILD", "sequenceIndex": 0 },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "parallel_subtasks",
+						"arguments": "{\"tasks\":[{\"label\":\"grandchild\",\"mode\":\"code\",\"message\":\"PST_E2E_DEPTH1_GRANDCHILD: read the probe file.\"}]}",
+						"id": "call_pst_c_child_ps_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "pst-e2e-depth1",
+				"systemMessage": "highly skilled software engineer with extensive knowledge"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"PST_E2E_DEPTH1_CHILD_RESULT: nested fan-out was rejected, probe file contents reported instead.\"}",
+						"id": "call_pst_c_child_done_001"
+					}
+				]
+			}
+		},
+		{
+			"match": { "model": "pst-e2e-depth1", "systemMessage": "experienced technical leader who is inquisitive" },
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"PST_E2E_DEPTH1_PARENT_RESULT\"}",
+						"id": "call_pst_c_parent_done_001"
+					}
+				]
+			}
+		}
+	]
+}

@@ -352,6 +352,21 @@
 			"copy_code": "Code kopiëren"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Parallelle onderzoeken",
+		"progress": "{{completed}} van {{total}} voltooid",
+		"status": {
+			"queued": "In wachtrij",
+			"running": "Bezig",
+			"completed": "Voltooid",
+			"failed": "Mislukt",
+			"aborted": "Afgebroken"
+		},
+		"openReport": "Rapport",
+		"openDebugLog": "JSON-log",
+		"goToTask": "Naar taak",
+		"noReport": "Nog geen rapport beschikbaar"
+	},
 	"profileViolationWarning": "Het huidige profiel is niet compatibel met de instellingen van uw organisatie",
 	"shellIntegration": {
 		"title": "Waarschuwing commando-uitvoering",

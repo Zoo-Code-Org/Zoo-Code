@@ -380,6 +380,21 @@
 			"copy_code": "Copy code"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Parallel investigations",
+		"progress": "{{completed}} of {{total}} complete",
+		"status": {
+			"queued": "Queued",
+			"running": "Running",
+			"completed": "Completed",
+			"failed": "Failed",
+			"aborted": "Aborted"
+		},
+		"openReport": "Report",
+		"openDebugLog": "JSON log",
+		"goToTask": "Go to task",
+		"noReport": "No report available yet"
+	},
 	"profileViolationWarning": "The current profile isn't compatible with your organization's settings",
 	"shellIntegration": {
 		"title": "Command Execution Warning",

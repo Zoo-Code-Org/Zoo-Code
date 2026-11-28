@@ -3,6 +3,7 @@ import * as vscode from "vscode"
 import { RooCodeEventName, type HistoryItem, type PendingTaskAction } from "@roo-code/types"
 
 import { Task } from "../task/Task"
+import type { BackgroundSubtaskHost } from "../background-subtasks/types"
 import { formatResponse } from "../prompts/responses"
 import { Package } from "../../shared/package"
 import type { ToolUse } from "../../shared/tools"
@@ -101,6 +102,55 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			// fallthrough flush from double-reporting when delegation falls through to
 			// "continue" instead of returning.
 			let hasFlushedTelemetry = false
+
+			// Background (read-only) child completion branch, design D5.
+			//
+			// A background child is non-interactive: it reports its findings through
+			// attempt_completion and the host collects them, so it must never fall through
+			// to the completion_result ask below (F8: a rejected completion injects user
+			// feedback and loops). The branch sits before the parentTaskId delegation
+			// check so a background child, which does carry parentTaskId for lineage,
+			// never enters the interactive delegation state machine either. The say and
+			// mistake reset above already ran for this call.
+			if (task.isBackgroundSubtaskChild) {
+				// The same installment the delegation branch flushes before it hands
+				// control back, so a background child is not invisible in usage.
+				task.emitFinalTokenUsageUpdate()
+				task.flushTelemetryInstallment("attempt_completion")
+
+				// ClineProvider does not statically declare BackgroundSubtaskHost in this
+				// unit (the provider wires it), so the deref needs an explicit widening;
+				// the method-existence check below keeps this safe at runtime.
+				const host = task.providerRef.deref() as unknown as BackgroundSubtaskHost | undefined
+				if (host?.resolveBackgroundChild) {
+					host.resolveBackgroundChild(task.taskId, result)
+				} else {
+					// The host is gone (provider disposed mid-fan-out), so no host
+					// record exists to settle. The abort below still ends this
+					// child's run loop, and the spawning host's run-settled catch-all
+					// then settles the handle as failed instead of leaving the
+					// parent's Promise.all join pending forever (F-02/F-03).
+					console.warn(
+						`[AttemptCompletionTool] Background child ${task.taskId} completed but no BackgroundSubtaskHost is registered; aborting the child so its handle settles as failed.`,
+					)
+				}
+
+				// End the child's own run loop now. The loop's abort/abandoned guard
+				// (Task.recursivelyMakeClineRequests) throws into the loop's
+				// didEndLoop catch and run() settles, so no runaway loop outlives the
+				// result -- and in the no-host branch that same run-settled path is
+				// what fails the handle. requestAbort(true) over requestAbandon():
+				// the run-state reducer rejects abandonRequested while the abort
+				// latch is unset, and this also advances the S4a
+				// cancellationGeneration. abortTask() is deliberately not used: its
+				// TaskAborted emit would settle the host handle as "aborted" and
+				// overwrite the terminal status the host just persisted.
+				task.requestAbort(true)
+
+				// Empty tool result: the child's loop ends here. No ask, no user feedback.
+				pushToolResult("")
+				return
+			}
 
 			// Check for subtask using parentTaskId (metadata-driven delegation)
 			if (task.parentTaskId) {
