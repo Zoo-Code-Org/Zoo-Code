@@ -1,5 +1,4 @@
 import { execa, ExecaError } from "execa"
-import psTree from "ps-tree"
 import process from "process"
 
 import type { RooTerminal } from "./types"
@@ -7,6 +6,7 @@ import { BaseTerminal } from "./BaseTerminal"
 import { BaseTerminalProcess } from "./BaseTerminalProcess"
 import { getShell } from "../../utils/shell"
 import { getUtf8LocaleEnv } from "./localeEnv"
+import { getChildProcesses } from "../../utils/processTree"
 
 export class ExecaTerminalProcess extends BaseTerminalProcess {
 	private terminalRef: WeakRef<RooTerminal>
@@ -62,16 +62,24 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 			if (this.pid) {
 				this.pidUpdatePromise = new Promise<void>((resolve) => {
 					setTimeout(() => {
-						psTree(this.pid!, (err, children) => {
-							if (!err && children.length > 0) {
-								// Update PID to the first child (the actual command)
-								const actualPid = parseInt(children[0].PID)
-								if (!isNaN(actualPid)) {
-									this.pid = actualPid
-								}
-							}
+						const subprocess = this.subprocess
+						if (!subprocess || !this.pid) {
 							resolve()
-						})
+							return
+						}
+						void getChildProcesses(this.pid)
+							.then((children) => {
+								// A short command may have finished while CIM/ps was running.
+								if (this.subprocess === subprocess && children[0] && children[0].pid !== process.pid) {
+									this.pid = children[0].pid
+								}
+							})
+							.catch((error: unknown) => {
+								console.warn(
+									`[ExecaTerminalProcess] Process lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+								)
+							})
+							.finally(resolve)
 					}, 100)
 				})
 			}
@@ -180,7 +188,7 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 			}
 
 			// Kill the stored PID (which should be the actual command after our update)
-			if (this.pid) {
+			if (this.pid && this.pid !== process.pid) {
 				try {
 					process.kill(this.pid, "SIGKILL")
 				} catch (e) {
@@ -193,19 +201,18 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 
 		// If PID update is in progress, wait for it before killing
 		if (this.pidUpdatePromise) {
-			this.pidUpdatePromise.then(performKill).catch(() => performKill())
+			void this.pidUpdatePromise.then(performKill).catch(() => performKill())
 		} else {
 			performKill()
 		}
 
 		// Continue with the rest of the abort logic
-		if (this.pid) {
+		if (this.pid && this.pid !== process.pid) {
 			// Also check for any child processes
-			psTree(this.pid, async (err, children) => {
-				if (!err) {
-					const pids = children.map((p) => parseInt(p.PID))
-
-					for (const pid of pids) {
+			void getChildProcesses(this.pid)
+				.then((children) => {
+					for (const { pid } of children) {
+						if (pid === process.pid) continue
 						try {
 							process.kill(pid, "SIGKILL")
 						} catch (e) {
@@ -214,12 +221,12 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 							)
 						}
 					}
-				} else {
+				})
+				.catch((error: unknown) => {
 					console.error(
-						`[ExecaTerminalProcess#abort] Failed to get process tree for PID ${this.pid}: ${err.message}`,
+						`[ExecaTerminalProcess#abort] Failed to get process tree for PID ${this.pid}: ${error instanceof Error ? error.message : String(error)}`,
 					)
-				}
-			})
+				})
 		}
 	}
 
