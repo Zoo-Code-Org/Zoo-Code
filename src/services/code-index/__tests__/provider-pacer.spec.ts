@@ -174,9 +174,15 @@ describe("ProviderPacerRegistry", () => {
 			registry.get("openai:1").run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(5000))),
 		)
 		await vi.advanceTimersByTimeAsync(0)
-		const same = settle(registry.get("openai:1").run("a.ts", undefined, vi.fn().mockResolvedValue("ok")))
+		const sameRequest = vi.fn().mockResolvedValue("ok")
+		const same = settle(registry.get("openai:1").run("a.ts", undefined, sameRequest))
 		const other = vi.fn().mockResolvedValue("other")
-		await expect(registry.get("qdrant:2").run("b.ts", undefined, other)).resolves.toBe("other")
+		const otherRun = registry.get("openai:2").run("b.ts", undefined, other)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(sameRequest).not.toHaveBeenCalled()
+		expect(other).toHaveBeenCalledTimes(1)
+		await expect(otherRun).resolves.toBe("other")
+		expect(registry.get("openai:2").resumeAt).toBeUndefined()
 
 		expect(registry.providerWaits()).toEqual([{ service: "openai", resumeAt: 5000, waitingFiles: ["a.ts"] }])
 		expect(registry.waitingPaths()).toEqual(["a.ts"])

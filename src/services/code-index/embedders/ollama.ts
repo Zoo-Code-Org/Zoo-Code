@@ -117,13 +117,12 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 				embeddings: embeddings,
 			}
 		} catch (error: any) {
-			if (error instanceof EmbeddingError) throw error
-			// Capture telemetry before reformatting the error
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
 				stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
 				location: "OllamaEmbedder:createEmbeddings",
 			})
+			if (error instanceof EmbeddingError) throw error
 
 			// Log the original error for debugging purposes
 			console.error("Ollama embedding failed:", error)

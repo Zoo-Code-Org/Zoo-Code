@@ -30,6 +30,8 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
+import { ProviderPacerRegistry } from "../provider-pacer"
+import { createPacedEmbeddings } from "../shared/retry-policy"
 
 export class DirectoryScanner implements IDirectoryScanner {
 	private readonly batchSegmentThreshold: number
@@ -41,6 +43,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		private readonly cacheManager: CacheManager,
 		private readonly ignoreInstance: Ignore,
 		batchSegmentThreshold?: number,
+		private readonly pacers: Pick<ProviderPacerRegistry, "get"> = new ProviderPacerRegistry(),
 	) {
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
@@ -445,7 +448,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 				// --- End Deletion Step ---
 
 				// Create embeddings for batch
-				const { embeddings } = await this.embedder.createEmbeddings(batchTexts)
+				const { embeddings } = await createPacedEmbeddings(this.embedder, this.pacers, batchTexts)
 
 				// Prepare points for Qdrant
 				const points = batchBlocks.map((block, index) => {

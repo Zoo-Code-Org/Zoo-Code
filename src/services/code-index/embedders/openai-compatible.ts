@@ -238,7 +238,6 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		}
 	}
 
-	/**
 	/** Sends one request; retries and rate-limit waits belong to the caller's retry policy and pacer. */
 	private async _embedBatch(
 		batchTexts: string[],

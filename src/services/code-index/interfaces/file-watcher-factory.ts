@@ -3,6 +3,7 @@ import type { Ignore } from "ignore"
 import type { RooIgnoreController } from "../../../core/ignore/RooIgnoreController"
 import type { CacheManager } from "../cache-manager"
 import type { IEmbedder, IFileWatcher, IVectorStore } from "./index"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 
 export interface FileWatcherFactoryOptions {
 	workspacePath: string
@@ -12,6 +13,7 @@ export interface FileWatcherFactoryOptions {
 	cacheManager: CacheManager
 	ignoreInstance: Ignore
 	rooIgnoreController?: RooIgnoreController
+	pacers: ProviderPacerRegistry
 }
 
 export interface IFileWatcherFactory {

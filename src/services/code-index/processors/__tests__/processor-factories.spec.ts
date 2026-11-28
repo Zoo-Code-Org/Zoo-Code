@@ -45,6 +45,7 @@ describe("processor factories", () => {
 			vectorStore: new QdrantVectorStore("/workspace", "http://localhost:6333", 512),
 			parser: codeParser,
 			ignoreInstance: ignore(),
+			pacers: new ProviderPacerRegistry(),
 		}
 	}
 
@@ -68,6 +69,7 @@ describe("processor factories", () => {
 				options.cacheManager,
 				options.ignoreInstance,
 				batchSize,
+				options.pacers,
 			)
 			expect(FileWatcher).toHaveBeenCalledWith(
 				options.workspacePath,
@@ -78,6 +80,7 @@ describe("processor factories", () => {
 				options.ignoreInstance,
 				undefined,
 				batchSize,
+				options.pacers,
 			)
 			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name)
 			expect(configuration.get).toHaveBeenCalledWith("codeIndex.embeddingBatchSize", BATCH_SEGMENT_THRESHOLD)

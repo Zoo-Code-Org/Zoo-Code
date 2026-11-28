@@ -3,6 +3,8 @@ import { FILE_RETRY_ATTEMPTS, FILE_RETRY_BASE_DELAY_MS } from "../constants"
 import { waitForRetry } from "../embedders/cancellation"
 import { classifyIndexingError, IndexingRetryError, type IndexingErrorClassification } from "./indexing-errors"
 import type { FileFailureActivity } from "../file-failure-registry"
+import type { EmbeddingResponse, IEmbedder } from "../interfaces/embedder"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 
 export interface RetryBudget {
 	retriesUsed: number
@@ -62,4 +64,16 @@ export async function retryWithPolicy<T>(
 			await waitForRetry(delayMs, signal)
 		}
 	}
+}
+
+/** Embeds texts through the scope's pacer (429 waits) and the retry policy (other transient errors). */
+export function createPacedEmbeddings(
+	embedder: Pick<IEmbedder, "createEmbeddings" | "rateLimitScope">,
+	pacers: Pick<ProviderPacerRegistry, "get">,
+	texts: string[],
+	path?: string,
+): Promise<EmbeddingResponse> {
+	return retryWithPolicy(() =>
+		pacers.get(embedder.rateLimitScope).run(path, undefined, () => embedder.createEmbeddings(texts)),
+	)
 }

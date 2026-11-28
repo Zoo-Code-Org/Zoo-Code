@@ -13,6 +13,8 @@ import { makeRateLimitScope, type ProviderPacerRegistry } from "../provider-pace
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
+const BEDROCK_VALIDATION_TIMEOUT_MS = 60_000
+
 /**
  * Amazon Bedrock implementation of the embedder interface with batching and rate limiting
  */
@@ -253,16 +255,17 @@ export class BedrockEmbedder implements IEmbedder {
 		return withValidationErrorHandling(async () => {
 			try {
 				// Temporary server, connection and throttling failures recover instead of failing validation.
+				const signal = AbortSignal.timeout(BEDROCK_VALIDATION_TIMEOUT_MS)
 				const result = await retryWithPolicy(
 					() =>
-						this.pacers.get(this.rateLimitScope).run(undefined, undefined, async () => {
+						this.pacers.get(this.rateLimitScope).run(undefined, signal, async () => {
 							try {
 								return await this._invokeEmbeddingModel("test", this.defaultModelId)
 							} catch (error) {
 								throw asRateLimit(error)
 							}
 						}),
-					{ budget: { retriesUsed: 0 } },
+					{ signal, budget: { retriesUsed: 0 } },
 				)
 
 				// Check if we got a valid response

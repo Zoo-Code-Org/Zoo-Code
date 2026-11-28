@@ -6,6 +6,8 @@ import { CodeIndexConfigManager } from "./config-manager"
 import { CodeIndexStateManager } from "./state-manager"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
+import type { ProviderPacerRegistry } from "./provider-pacer"
+import { createPacedEmbeddings } from "./shared/retry-policy"
 
 /**
  * Service responsible for searching the code index.
@@ -16,6 +18,7 @@ export class CodeIndexSearchService {
 		private readonly stateManager: CodeIndexStateManager,
 		private readonly embedder: IEmbedder,
 		private readonly vectorStore: IVectorStore,
+		private readonly pacers: Pick<ProviderPacerRegistry, "get">,
 	) {}
 
 	/**
@@ -42,7 +45,7 @@ export class CodeIndexSearchService {
 
 		try {
 			// Generate embedding for query
-			const embeddingResponse = await this.embedder.createEmbeddings([query])
+			const embeddingResponse = await createPacedEmbeddings(this.embedder, this.pacers, [query])
 			const vector = embeddingResponse?.embeddings[0]
 			if (!vector) {
 				throw new Error("Failed to generate embedding for query.")

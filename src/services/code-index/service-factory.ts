@@ -77,6 +77,7 @@ export class CodeIndexServiceFactory {
 			parser,
 			cacheManager: this.cacheManager,
 			ignoreInstance,
+			pacers: this.pacers,
 		})
 		const fileWatcher = this.fileWatcherFactory.create({
 			workspacePath: this.workspacePath,
@@ -86,6 +87,7 @@ export class CodeIndexServiceFactory {
 			cacheManager,
 			ignoreInstance,
 			rooIgnoreController,
+			pacers: this.pacers,
 		})
 
 		return {

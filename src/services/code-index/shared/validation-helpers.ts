@@ -204,9 +204,6 @@ export async function withValidationErrorHandling<T extends { valid: boolean; er
 }
 
 /**
- * Formats an embedding error message based on the error type and context
- */
-/**
  * Formats a single-attempt embedding failure; the raw error stays in `cause` so retry classification can read
  * its status and Retry-After headers.
  */
@@ -217,6 +214,9 @@ export function toEmbeddingError(error: unknown): EmbeddingError {
 	return new EmbeddingError(formatEmbeddingError(error, 1).message, error)
 }
 
+/**
+ * Formats an embedding error message based on the error type and context
+ */
 export function formatEmbeddingError(error: any, maxRetries: number): Error {
 	const errorMessage = extractErrorMessage(error)
 	const statusCode = extractStatusCode(error)

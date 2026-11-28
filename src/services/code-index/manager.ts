@@ -438,6 +438,7 @@ export class CodeIndexManager {
 			this._stateManager,
 			embedder,
 			vectorStore,
+			this.pacers,
 		)
 
 		// Clear any error state after successful recreation

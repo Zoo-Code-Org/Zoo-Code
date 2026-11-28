@@ -79,7 +79,7 @@ export class ProviderPacer {
 
 	async run<T>(path: string | undefined, signal: AbortSignal | undefined, request: () => Promise<T>): Promise<T> {
 		while (true) {
-			if (Date.now() < this.pausedUntil) await this.wait(path, signal)
+			while (Date.now() < this.pausedUntil) await this.wait(path, signal)
 			signal?.throwIfAborted()
 			try {
 				const result = await request()

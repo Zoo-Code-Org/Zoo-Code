@@ -6,6 +6,7 @@ import type { CodeBlock, ICodeParser, IEmbedder } from "../../interfaces"
 import { MAX_FILE_SIZE_BYTES, QDRANT_CODE_BLOCK_NAMESPACE } from "../../constants"
 import { FilePreparation } from "../file-preparation"
 import type { FilePreparationDependencies } from "../file-preparation-dependencies"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 
 // Keep path spies local to the modules under test, not Node or the test runner.
 vi.mock("path", async (importOriginal) => {
@@ -61,9 +62,22 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 				createEmbeddings: vi
 					.fn<IEmbedder["createEmbeddings"]>()
 					.mockResolvedValue({ embeddings: [[0.1, 0.2]] }),
+				rateLimitScope: "openai:1",
 			},
+			pacers: new ProviderPacerRegistry(),
 		} satisfies FilePreparationDependencies
 	}
+
+	it("waits on the scope's pacer and retries a 429", async () => {
+		const dependencies = setup()
+		const run = vi.spyOn(dependencies.pacers.get("openai:1"), "run")
+		const limited = Object.assign(new Error("limited"), { status: 429, retryAfterMs: 1 })
+		dependencies.embedder.createEmbeddings.mockRejectedValueOnce(limited)
+		const result = await new FilePreparation(dependencies).prepareFile(filePath)
+		expect(result.status).toBe("processed_for_batching")
+		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledTimes(2)
+		expect(run).toHaveBeenCalledWith(filePath, undefined, expect.any(Function))
+	})
 
 	it.each([".git/config", ".hidden/file.ts", "node_modules/pkg/file.ts", "dist/file.js"])(
 		"skips excluded directory %s before access or file reads",
@@ -295,7 +309,17 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		})
 	})
 
-	it.each(["access", "ignore", "stat", "read", "cache", "parse", "embed"])(
+	it("wraps a permanent embed error after the retry policy gives up", async () => {
+		const dependencies = setup()
+		const error = Object.assign(new Error("embed failed"), { status: 400 })
+		dependencies.embedder.createEmbeddings.mockRejectedValue(error)
+		const result = await new FilePreparation(dependencies).prepareFile(filePath)
+		expect(result).toMatchObject({ path: filePath, status: "local_error", embeddingOutcome: "failure" })
+		expect(result.error?.cause).toBe(error)
+		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledTimes(1)
+	})
+
+	it.each(["access", "ignore", "stat", "read", "cache", "parse"])(
 		"returns the original %s error as a local error",
 		async (stage) => {
 			const dependencies = setup()
@@ -309,14 +333,8 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			if (stage === "read") dependencies.fileSystem.readFile.mockRejectedValue(error)
 			if (stage === "cache") dependencies.cacheManager.getHash.mockImplementation(fail)
 			if (stage === "parse") dependencies.parser.parseFile.mockRejectedValue(error)
-			if (stage === "embed") dependencies.embedder.createEmbeddings.mockRejectedValue(error)
 			const result = await new FilePreparation(dependencies).prepareFile(filePath)
-			expect(result).toEqual({
-				path: filePath,
-				status: "local_error",
-				error,
-				...(stage === "embed" ? { embeddingOutcome: "failure" } : {}),
-			})
+			expect(result).toEqual({ path: filePath, status: "local_error", error })
 			expect(result.error).toBe(error)
 		},
 	)

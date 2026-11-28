@@ -1,6 +1,7 @@
 // npx vitest services/code-index/processors/__tests__/scanner.spec.ts
 
 import { DirectoryScanner } from "../scanner"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 import { stat } from "fs/promises"
 
 // Mock TelemetryService
@@ -80,6 +81,7 @@ describe("DirectoryScanner", () => {
 		mockEmbedder = {
 			createEmbeddings: vi.fn().mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] }),
 			embedderInfo: { name: "mock-embedder", dimensions: 384 },
+			rateLimitScope: "openai:1",
 		}
 		mockVectorStore = {
 			upsertPoints: vi.fn().mockResolvedValue(undefined),
@@ -218,6 +220,34 @@ describe("DirectoryScanner", () => {
 			await scanner.scanDirectory("/test")
 			expect(mockEmbedder.createEmbeddings).toHaveBeenCalled()
 			expect(mockVectorStore.upsertPoints).toHaveBeenCalled()
+		})
+
+		it("waits on the scope's pacer and retries a 429 in the batch", async () => {
+			const pacers = new ProviderPacerRegistry()
+			const run = vi.spyOn(pacers.get("openai:1"), "run")
+			const pacedScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				1,
+				pacers,
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/file1.js"], false])
+			mockCodeParser.parseFile.mockResolvedValue([
+				{ file_path: "test/file1.js", content: "c", start_line: 1, end_line: 2, segmentHash: "s" },
+			])
+			mockEmbedder.createEmbeddings.mockRejectedValueOnce(
+				Object.assign(new Error("limited"), { status: 429, retryAfterMs: 1 }),
+			)
+
+			await pacedScanner.scanDirectory("/test")
+
+			expect(run).toHaveBeenCalled()
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(2)
+			expect(mockVectorStore.upsertPoints).toHaveBeenCalledTimes(1)
 		})
 
 		it("should clean up a threshold-triggered batch", async () => {

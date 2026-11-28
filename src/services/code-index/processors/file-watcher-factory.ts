@@ -12,6 +12,7 @@ export class FileWatcherFactory implements IFileWatcherFactory {
 		vectorStore,
 		ignoreInstance,
 		rooIgnoreController,
+		pacers,
 	}: FileWatcherFactoryOptions): IFileWatcher {
 		return new FileWatcher(
 			workspacePath,
@@ -22,6 +23,7 @@ export class FileWatcherFactory implements IFileWatcherFactory {
 			ignoreInstance,
 			rooIgnoreController,
 			getEmbeddingBatchSize(),
+			pacers,
 		)
 	}
 }
