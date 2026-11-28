@@ -21,7 +21,10 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		vi.spyOn(path, "normalize").mockImplementation(path[platform].normalize)
 	})
 
-	afterEach(() => vi.restoreAllMocks())
+	afterEach(() => {
+		vi.useRealTimers()
+		vi.restoreAllMocks()
+	})
 
 	const filePath = "/workspace/src/file.ts"
 	const relativeFilePath = path[platform].join("src", "file.ts")
@@ -79,7 +82,6 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledTimes(1)
 		await vi.advanceTimersByTimeAsync(1)
 		const result = await pending
-		vi.useRealTimers()
 		expect(result.status).toBe("processed_for_batching")
 		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledTimes(2)
 		expect(run).toHaveBeenCalledWith(filePath, expect.any(AbortSignal), expect.any(Function))

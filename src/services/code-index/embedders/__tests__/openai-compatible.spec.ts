@@ -82,6 +82,7 @@ describe("OpenAICompatibleEmbedder", () => {
 	})
 
 	afterEach(() => {
+		vi.useRealTimers()
 		restoreGlobals()
 	})
 
@@ -755,6 +756,22 @@ describe("OpenAICompatibleEmbedder", () => {
 					expectEmbeddingValues(result.embeddings[1], [2])
 				})
 
+				it("drops batches that succeeded before a non-rate-limit failure", async () => {
+					const embedder = new OpenAICompatibleEmbedder(azureUrl, testApiKey, testModelId, MAX_BATCH_TOKENS)
+					const texts = ["a", "b"].map((letter) => letter.repeat((MAX_BATCH_TOKENS - 1) * 4))
+					const ok = (values: number[]) =>
+						createMockResponse({ data: [{ embedding: createBase64Embedding(values) }], usage: {} })
+					vi.mocked(global.fetch)
+						.mockResolvedValueOnce(ok([1]))
+						.mockResolvedValueOnce(new Response("bad", { status: 400 }))
+						.mockResolvedValueOnce(ok([3]))
+						.mockResolvedValueOnce(ok([2]))
+					await expect(embedder.createEmbeddings(texts)).rejects.toBeDefined()
+					const result = await embedder.createEmbeddings(texts)
+					expect(global.fetch).toHaveBeenCalledTimes(4)
+					expectEmbeddingValues(result.embeddings[0], [3])
+				})
+
 				it("returns direct-fetch rate limits without retrying", async () => {
 					const embedder = new OpenAICompatibleEmbedder(azureUrl, testApiKey, testModelId)
 					vi.mocked(global.fetch).mockResolvedValue(new Response("rate limited", { status: 429 }))
@@ -981,7 +998,6 @@ describe("OpenAICompatibleEmbedder", () => {
 			const pending = embedder.validateConfiguration()
 			await vi.advanceTimersByTimeAsync(1500)
 			const result = await pending
-			vi.useRealTimers()
 
 			expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(3)
 			expect(result.valid).toBe(false)
@@ -999,7 +1015,6 @@ describe("OpenAICompatibleEmbedder", () => {
 			expect(mockEmbeddingsCreate).toHaveBeenCalledOnce()
 			await vi.advanceTimersByTimeAsync(1)
 			await expect(pending).resolves.toEqual({ valid: true })
-			vi.useRealTimers()
 		})
 	})
 })

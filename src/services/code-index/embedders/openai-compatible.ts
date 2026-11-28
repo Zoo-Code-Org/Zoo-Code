@@ -5,7 +5,7 @@ import { getDefaultModelId, getModelQueryPrefix } from "../../../shared/embeddin
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, HttpError, toEmbeddingError } from "../shared/validation-helpers"
 import { retryWithPolicy } from "../shared/retry-policy"
-import { IndexingRetryError } from "../shared/indexing-errors"
+import { classifyIndexingError, IndexingRetryError } from "../shared/indexing-errors"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
@@ -155,7 +155,11 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 				const cached = currentBatch.map((text) => this.completedEmbeddings.get(`${modelToUse}\0${text}`))
 				const batchResult = cached.every((embedding) => embedding !== undefined)
 					? { embeddings: cached as number[][], usage: { promptTokens: 0, totalTokens: 0 } }
-					: await this._embedBatch(currentBatch, modelToUse)
+					: await this._embedBatch(currentBatch, modelToUse).catch((error: unknown) => {
+							// Only a paced 429 rerun reuses these; after any other failure nothing would delete them.
+							if (classifyIndexingError(error) !== "rate-limit") this.completedEmbeddings.clear()
+							throw error
+						})
 				currentBatch.forEach((text, index) =>
 					this.completedEmbeddings.set(`${modelToUse}\0${text}`, batchResult.embeddings[index]),
 				)

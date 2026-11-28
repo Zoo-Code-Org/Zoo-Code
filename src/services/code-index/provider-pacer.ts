@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync } from "crypto"
+import { createHmac, randomBytes } from "crypto"
 import type { Disposable, Event } from "vscode"
 import { PACER_MAX_BACKOFF_MS } from "./constants"
 import { classifyIndexingError, EmbeddingError } from "./shared/indexing-errors"
@@ -24,7 +24,8 @@ function serviceLabel(scope: string): string {
 	return /^[a-z][a-z0-9-]{0,63}$/i.test(prefix) ? prefix : "provider"
 }
 
-// Keyed by a salted scrypt digest so the map never retains a raw API key.
+// Keyed by an HMAC with a per-process random key so the map never retains a raw API key.
+// Not scrypt: it blocked the extension host for ~64 ms in every embedder constructor.
 const scopeIds = new Map<string, number>()
 const scopeSalt = randomBytes(16)
 
@@ -47,7 +48,7 @@ export function makeRateLimitScope(provider: string, baseUrl?: string, apiKey?: 
 		parsedUrl.hash = ""
 		normalizedUrl = parsedUrl.toString().replace(/\/+$/, "")
 	}
-	const secret = apiKey ? scryptSync(apiKey, scopeSalt, 32).toString("base64") : ""
+	const secret = apiKey ? createHmac("sha256", scopeSalt).update(apiKey).digest("base64") : ""
 	const key = JSON.stringify([provider, normalizedUrl, secret, extra ?? ""])
 	let id = scopeIds.get(key)
 	if (id === undefined) {
@@ -119,7 +120,7 @@ export class ProviderPacer {
 		const requested = new EmbeddingError("Provider rate limited", error).retryAfterMs
 		const delay =
 			typeof requested === "number" && requested >= 0 && Number.isFinite(new Date(now + requested).getTime())
-				? requested
+				? Math.max(100, requested) // Retry-After: 0 must not cause a tight retry loop.
 				: Math.min(PACER_MAX_BACKOFF_MS, 1000 * 2 ** Math.min(30, this.consecutiveRateLimits - 1))
 		this.pausedUntil = Math.max(this.pausedUntil, now + delay)
 		this.schedule()

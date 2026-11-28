@@ -69,6 +69,8 @@ vi.mock("../../../glob/list-files", () => ({
 }))
 
 describe("DirectoryScanner", () => {
+	afterEach(() => vi.useRealTimers())
+
 	let scanner: DirectoryScanner
 	let mockEmbedder: any
 	let mockVectorStore: any
@@ -251,7 +253,6 @@ describe("DirectoryScanner", () => {
 			expect(mockVectorStore.upsertPoints).not.toHaveBeenCalled()
 			await vi.advanceTimersByTimeAsync(1)
 			const result = await pending
-			vi.useRealTimers()
 
 			expect(run).toHaveBeenCalledWith(undefined, controller.signal, expect.any(Function))
 			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(2)
@@ -291,7 +292,6 @@ describe("DirectoryScanner", () => {
 			controller.abort()
 			await vi.advanceTimersByTimeAsync(10_000)
 			await pending
-			vi.useRealTimers()
 			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(1)
 			expect(onError).not.toHaveBeenCalled()
 		})

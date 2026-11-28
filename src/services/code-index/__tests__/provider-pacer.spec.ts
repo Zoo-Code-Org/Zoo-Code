@@ -199,10 +199,12 @@ describe("ProviderPacer (CI-PP-02)", () => {
 		await Promise.all([limited, third])
 	})
 
-	it("honors Retry-After: 0 without a backoff pause", async () => {
+	it("applies a 100 ms minimum pause to Retry-After: 0 instead of a backoff", async () => {
 		const pacer = new ProviderPacer("openai:1")
 		const request = vi.fn().mockRejectedValueOnce(rateLimit(0)).mockResolvedValue("ok")
 		const run = pacer.run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(99)
+		expect(request).toHaveBeenCalledTimes(1)
 		await vi.advanceTimersByTimeAsync(1)
 		await expect(run).resolves.toBe("ok")
 		expect(request).toHaveBeenCalledTimes(2)

@@ -7,6 +7,8 @@ import type { IEmbedder, IVectorStore } from "../interfaces"
 vi.mock("@roo-code/telemetry", () => ({ TelemetryService: { instance: { captureEvent: vi.fn() } } }))
 
 describe("CodeIndexSearchService", () => {
+	afterEach(() => vi.useRealTimers())
+
 	it("waits on the scope's pacer and retries a 429", async () => {
 		const pacers = new ProviderPacerRegistry()
 		const run = vi.spyOn(pacers.get("openai:1"), "run")
@@ -37,7 +39,6 @@ describe("CodeIndexSearchService", () => {
 		expect(search).not.toHaveBeenCalled()
 		await vi.advanceTimersByTimeAsync(1)
 		await expect(pending).resolves.toEqual([])
-		vi.useRealTimers()
 		expect(createEmbeddings).toHaveBeenCalledTimes(2)
 		expect(run).toHaveBeenCalledTimes(1)
 		expect(search).toHaveBeenCalledWith([0.1], undefined, 0.4, 10)
