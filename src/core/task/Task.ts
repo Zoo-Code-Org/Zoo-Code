@@ -1292,16 +1292,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Re-read the auto-approval policy immediately before a queued message would
 	 * stand in for a command ask's approval, and consult the full command policy
-	 * under the fresh state if blanket deny now engages.
+	 * under the fresh state — whether or not blanket deny now engages (#1574).
 	 *
-	 * The queued-answer shortcut skips `checkAutoApproval` and the ask's decision
-	 * otherwise rides on a single settings snapshot taken before the prompt was
-	 * shown. A blanket-deny flip landing between the snapshot and the consume is
-	 * invisible to that frozen gate, and the queued message would auto-approve an
-	 * unallowlisted command — fail-OPEN through a window as wide as the prompt
-	 * dwell. Re-reading here closes it: while blanket deny engages, the message
-	 * is never consumed as approval and the ask gets the structured denial policy
-	 * would have produced without a queued message.
+	 * The queued-answer shortcut forces the `ask` decision while the ask-time
+	 * claim gate (`checkAutoApproval` under the ask-time snapshot) did the
+	 * approving, so a settings flip landing between the snapshot and the consume
+	 * is invisible to that frozen gate. Re-reading here closes it: the fresh
+	 * policy decides every consume, so a command the fresh state no longer
+	 * approves is never consumed as approval and a blanket-deny denial resolves
+	 * the ask with the structured detail policy would have produced without a
+	 * queued message.
 	 *
 	 * With `abortSignal`, the re-check settles on the abort itself instead of
 	 * merely losing a race against it: the fresh-state read ends in uncancellable
@@ -1343,11 +1343,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (freshState === "aborted" || signal?.aborted) {
 			return { action: "release" }
 		}
-		if (!isBlanketDenyEngaged(freshState)) {
-			// Disengaged: the queued answer is a legitimate approval, as before.
-			return { action: "consume" }
-		}
-		// Engaged: the full policy decides, with the fresh state. `cwd` and the
+		// The full policy decides under the fresh state — blanket deny engaged
+		// or not (#1574): a queued message stands in for a command approval only
+		// when the policy itself approves that command. A denial resolves the
+		// ask with the structured detail the no-queued-message path would
+		// produce; a plain `ask` releases the claim, leaving the ask pending for
+		// the user and the message queued for a later turn. `cwd` and the
 		// forwarded DCG verdict match the ask-time `checkAutoApproval` call.
 		const approval = await checkAutoApproval({
 			state: freshState,
@@ -1364,7 +1365,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return { action: "deny", detail: approval.autoDeny }
 		}
 		if (approval.decision === "approve") {
-			return { action: "approve" }
+			// Engaged blanket deny keeps its #1699 contract: the approval comes
+			// from the policy and the message is left in place for a later turn.
+			// Disengaged, the consume preserves the approve-with-feedback path
+			// the ask-time claim gate already vetted.
+			return isBlanketDenyEngaged(freshState) ? { action: "approve" } : { action: "consume" }
 		}
 		return { action: "release" }
 	}
@@ -1954,6 +1959,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// is on; while it is disengaged, the queued-message shortcut below is
 		// unaffected.
 		const blanketDenyEngaged = isBlanketDenyEngaged(state)
+		// #1574: a queued message must never satisfy a command approval on its
+		// own. For command asks the policy decides first: a queued message may
+		// only be claimed for a command the ask-time `checkAutoApproval` approves,
+		// so a plain non-approved command ask stays pending for an explicit user
+		// click and the queued message remains ordinary conversation input for
+		// the next turn. A claimed (policy-approved) message keeps the existing
+		// approve-with-feedback consume, re-checked under fresh state at the
+		// consume sites below. Tool and use_mcp_server asks keep their existing
+		// queued-feedback semantics; widening this gate to them is a separate
+		// decision.
+		const askTimeCommandApproval =
+			type === "command"
+				? await checkAutoApproval({
+						state,
+						cwd: this.cwd,
+						ask: type,
+						text,
+						isProtected,
+						dcgDecision: autoApprovalContext?.dcgDecision,
+						fileTargets: autoApprovalContext?.fileTargets,
+					})
+				: undefined
 		// A queued message normally answers the pending ask, which for command asks
 		// means an unconditional auto-approve. That shortcut must never bypass
 		// blanket deny: while it is engaged, a command ask keeps its policy
@@ -1964,7 +1991,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// while the policy would have auto-answered it — holding a prompt no user
 		// has to see and stalling a hands-free session. Leaving the message
 		// unclaimed lets the policy decision stand and keeps the message queued.
-		const queueMayAnswerThisAsk = !(blanketDenyEngaged && type === "command")
+		const queueMayAnswerThisAsk =
+			(type !== "command" || askTimeCommandApproval?.decision === "approve") &&
+			!(blanketDenyEngaged && type === "command")
 		// A queued message must not short-circuit protected asks (e.g.
 		// DCG-blocked commands): claiming one here skips checkAutoApproval, and
 		// the drain below would auto-approve what protection intentionally
@@ -1984,15 +2013,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// currently reports.
 		const approval = queuedAskResolution
 			? ({ decision: "ask" } as const)
-			: await checkAutoApproval({
-					state,
-					cwd: this.cwd,
-					ask: type,
-					text,
-					isProtected,
-					dcgDecision: autoApprovalContext?.dcgDecision,
-					fileTargets: autoApprovalContext?.fileTargets,
-				})
+			: askTimeCommandApproval !== undefined
+				? askTimeCommandApproval
+				: await checkAutoApproval({
+						state,
+						cwd: this.cwd,
+						ask: type,
+						text,
+						isProtected,
+						dcgDecision: autoApprovalContext?.dcgDecision,
+						fileTargets: autoApprovalContext?.fileTargets,
+					})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
@@ -2366,11 +2397,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
 					// suggestion click that was incorrectly queued due to UI state), consume it
-					// immediately so the task doesn't hang. Command asks under blanket deny are
-					// excluded (`queueMayAnswerThisAsk`): a queued message must never stand in
-					// for the explicit approval the policy withheld. Protected asks are exempt
-					// too: like the pre-block drain above, they must wait for explicit user
-					// approval.
+					// immediately so the task doesn't hang. Command asks the ask-time policy
+					// did not approve are excluded (`queueMayAnswerThisAsk`, with blanket deny
+					// engaged or not): a queued message must never stand in for the explicit
+					// approval the policy withheld. Protected asks are exempt too: like the
+					// pre-block drain above, they must wait for explicit user approval.
 					if (
 						queueMayAnswerThisAsk &&
 						shouldDrainQueuedMessageForAsk &&

@@ -301,66 +301,86 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		expect(queue.messages).toHaveLength(1)
 	})
 
-	it("still lets a queued message answer a command ask when blanket deny is off", async () => {
-		// Behavior unchanged while the blanket configuration is disengaged: the
-		// queued-message auto-approval shortcut keeps working.
+	it("keeps a non-allowlisted command ask pending when blanket deny is off", async () => {
+		// #1574: with the blanket configuration disengaged, a queued message
+		// is ordinary conversation input — the ask stays pending for an
+		// explicit user click, and the message survives for a later turn.
 		state.alwaysDenyUnapprovedCommands = false
 
 		const task = buildTask(provider, TASK_CWD)
 		const queue = await attachQueue(task)
 		queue.addMessage("queued feedback with blanket deny off")
 
-		const result = await task.ask("command", "rm x", false)
+		const askPromise = task.ask("command", "rm x", false)
 
+		const premature = await Promise.race([
+			askPromise,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(queue.messages).toHaveLength(1)
+
+		task.approveAsk()
+		const result = await askPromise
 		expect(result.response).toBe("yesButtonClicked")
-		expect(result.autoDenyDetail).toBeUndefined()
-		// Non-durable resolution consumed the queued message.
-		expect(queue.messages).toHaveLength(0)
+		expect(result.text).toBeUndefined()
+		expect(result.queuedMessageId).toBeUndefined()
+		await vi.waitFor(() => expect(queue.hasUnclaimed()).toBe(true))
 	})
 
-	it("keeps the queue gate open (queued message answers the command ask) while autoApprovalEnabled is false", async () => {
-		// The blanket gate is a conjunction of three settings; each false member
-		// alone must disengage it, so the queued shortcut stays live.
-		state.autoApprovalEnabled = false
-
-		const task = buildTask(provider, TASK_CWD)
-		const queue = await attachQueue(task)
-		queue.addMessage("queued feedback with the conjunction incomplete")
-
-		const result = await task.ask("command", "rm x", false)
-
-		expect(result.response).toBe("yesButtonClicked")
-		expect(result.text).toBe("queued feedback with the conjunction incomplete")
-		expect(queue.messages).toHaveLength(0)
-	})
-
-	it("keeps the queue gate open (queued message answers the command ask) while alwaysAllowExecute is false", async () => {
-		state.alwaysAllowExecute = false
-
-		const task = buildTask(provider, TASK_CWD)
-		const queue = await attachQueue(task)
-		queue.addMessage("queued feedback with the conjunction incomplete")
-
-		const result = await task.ask("command", "rm x", false)
-
-		expect(result.response).toBe("yesButtonClicked")
-		expect(result.text).toBe("queued feedback with the conjunction incomplete")
-		expect(queue.messages).toHaveLength(0)
-	})
-
-	it("denies the command ask when blanket deny engages between the snapshot and the immediate queued consume", async () => {
-		// The ask-time snapshot must not be the last word: the queued shortcut
-		// skips checkAutoApproval, so a blanket-deny engagement landing after the
-		// snapshot is invisible to it and would auto-approve an unallowlisted
-		// command. Interleaving here: first getState = snapshot (deny OFF, so the
-		// message is claimed); second getState = the consume-site re-check, at
-		// which the settings save has landed (deny ON).
+	it.each([
+		[
+			"autoApprovalEnabled is false",
+			(): void => {
+				state.autoApprovalEnabled = false
+			},
+		],
+		[
+			"alwaysAllowExecute is false",
+			(): void => {
+				state.alwaysAllowExecute = false
+			},
+		],
+	] as const)("keeps a non-allowlisted command ask pending while %s", async (_label, flip) => {
+		// The blanket gate is a conjunction of three settings; each false
+		// member alone disengages it, and no member approves the command —
+		// the queued message still cannot answer the ask (#1574).
 		state.alwaysDenyUnapprovedCommands = false
+		flip()
+
+		const task = buildTask(provider, TASK_CWD)
+		const queue = await attachQueue(task)
+		queue.addMessage("queued feedback with the conjunction incomplete")
+
+		const askPromise = task.ask("command", "rm x", false)
+
+		const premature = await Promise.race([
+			askPromise,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(queue.messages).toHaveLength(1)
+
+		task.approveAsk()
+		const result = await askPromise
+		expect(result.response).toBe("yesButtonClicked")
+		expect(result.text).toBeUndefined()
+		expect(result.queuedMessageId).toBeUndefined()
+		await vi.waitFor(() => expect(queue.hasUnclaimed()).toBe(true))
+	})
+
+	it("keeps the command ask pending when the allowlist drops the command between the snapshot and the consume", async () => {
+		// The ask-time gate approved the claim, but the consume-site re-check
+		// re-runs the full policy under fresh state (#1574): a command the fresh
+		// policy no longer approves cannot be consumed as approval — the claim
+		// is released, the ask stays pending, the message survives.
+		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
 		let getStateCalls = 0
 		provider.getState = async () => {
 			getStateCalls++
 			if (getStateCalls >= 2) {
-				state.alwaysDenyUnapprovedCommands = true
+				state.allowedCommands = []
 			}
 			return state
 		}
@@ -369,22 +389,32 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		const queue = await attachQueue(task)
 		queue.addMessage("queued feedback arriving during the flip window")
 
-		const result = await task.ask("command", "rm x", false)
+		const askPromise = task.ask("command", "rm x", false)
 
-		expect(result.response).toBe("noButtonClicked")
-		expect(result.autoDenyDetail?.kind).toBe("not_allowlisted")
-		// The claimed message was released, not consumed as a fake approval.
-		expect(result.queuedMessageId).toBeUndefined()
+		const premature = await Promise.race([
+			askPromise,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
 		expect(queue.messages).toHaveLength(1)
-		expect(queue.hasUnclaimed()).toBe(true)
+
+		task.approveAsk()
+		const result = await askPromise
+		expect(result.response).toBe("yesButtonClicked")
+		expect(result.autoDenyDetail).toBeUndefined()
+		expect(result.queuedMessageId).toBeUndefined()
+		await vi.waitFor(() => expect(queue.hasUnclaimed()).toBe(true))
 	})
 
 	it("the user's Deny during the immediate re-check await is not overwritten", async () => {
-		// The Deny lands while the fresh policy read is pending (queued behind
-		// the backlog). The re-check itself still resolves `consume` — applying
-		// that outcome would answer the ask with the queued message's
-		// yesButtonClicked over the user's decision.
+		// The ask-time policy approves the allowlisted command, so the message
+		// is claimed and the immediate re-check runs. The Deny lands while the
+		// fresh policy read is pending (queued behind the backlog). The re-check
+		// itself still resolves `consume` — applying that outcome would answer
+		// the ask with the queued message's yesButtonClicked over the user's
+		// decision.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
 		const task = buildTask(provider, TASK_CWD)
 		let getStateCalls = 0
 		provider.getState = async () => {
@@ -409,10 +439,12 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 	})
 
 	it("a throwing re-check at the immediate site releases the claim and leaves the prompt pending", async () => {
-		// A rejected policy read must neither reject ask() nor strand the claim:
-		// the prompt stays pending for the user and the message survives for a
-		// later consumer.
+		// The ask-time policy approves the allowlisted command, so the message
+		// is claimed. A rejected policy read must neither reject ask() nor
+		// strand the claim: the prompt stays pending for the user and the
+		// message survives for a later consumer.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
 		let getStateCalls = 0
 		// Sticky: every read after the snapshot fails, so the drain site's
 		// re-check also fails and the released claim survives for the assertion
@@ -444,56 +476,77 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		expect(queue.messages).toHaveLength(1)
 	})
 
-	it("denies the command ask when blanket deny engages during the prompt dwell and the drain claims a message", async () => {
-		// The seconds-wide fail-open window: the flip and the queue arrival both
-		// land during the pWaitFor dwell, after the frozen snapshot gate opened.
+	it("keeps the command ask pending when the allowlist drops the command during the dwell and the drain re-checks", async () => {
+		// The ask-time gate approved and the immediate re-check released the
+		// claim; a message arriving during the dwell is then re-claimed by the
+		// drain, whose own fresh re-check must keep the ask pending (#1574):
+		// the queued message is conversation input, not approval.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
+		let getStateCalls = 0
+		provider.getState = async () => {
+			getStateCalls++
+			if (getStateCalls >= 2) {
+				state.allowedCommands = []
+			}
+			return state
+		}
 
 		const task = buildTask(provider, TASK_CWD)
 		const queue = await attachQueue(task)
-		const addToClineMessages = task["addToClineMessages"] as ReturnType<typeof vi.fn>
+		queue.addMessage("queued before the ask begins")
 
 		const askPromise = task.ask("command", "rm x", false)
-		// Past the snapshot read, into the prompt dwell.
-		await vi.waitFor(() => expect(addToClineMessages).toHaveBeenCalledTimes(1))
-		state.alwaysDenyUnapprovedCommands = true
+		// Past the prompt post and the immediate re-check's release, into the
+		// dwell.
+		await vi.waitFor(() => expect(queue.hasUnclaimed()).toBe(true))
 		queue.addMessage("queued during the dwell")
 
-		const result = await askPromise
+		const premature = await Promise.race([
+			askPromise,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 350)),
+		])
+		expect(premature).toBe("pending")
+		expect(queue.messages).toHaveLength(2)
 
-		expect(result.response).toBe("noButtonClicked")
-		expect(result.autoDenyDetail?.kind).toBe("not_allowlisted")
+		task.approveAsk()
+		const result = await askPromise
+		expect(result.response).toBe("yesButtonClicked")
 		expect(result.queuedMessageId).toBeUndefined()
-		expect(queue.messages).toHaveLength(1)
-		expect(queue.hasUnclaimed()).toBe(true)
+		expect(queue.messages).toHaveLength(2)
+		await vi.waitFor(() => expect(queue.hasUnclaimed()).toBe(true))
 	})
 
 	it("the user's Deny landing while the drain-site re-check awaits is not overwritten", async () => {
-		// Distinct from the immediate-site supersede case: the message arrives
-		// during the prompt dwell, so the claim and the policy re-check run
-		// inside the pWaitFor predicate's drain closure. The Deny lands while
-		// that re-check awaits; without the closure's bail-out guard the drained
-		// message would answer the ask over the user's decision.
+		// Distinct from the immediate-site supersede case: the immediate
+		// re-check released the claim (the allowlist dropped the command), so
+		// the re-claim and the policy re-check run inside the pWaitFor
+		// predicate's drain closure. The Deny lands while that re-check awaits;
+		// without the closure's bail-out guard the drained message would answer
+		// the ask over the user's decision.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
 		const task = buildTask(provider, TASK_CWD)
 		let getStateCalls = 0
 		provider.getState = async () => {
 			getStateCalls++
 			if (getStateCalls === 2) {
+				// The immediate re-check drops the command from the allowlist:
+				// the fresh policy asks, the claim is released, the prompt dwells.
+				state.allowedCommands = []
+			}
+			if (getStateCalls === 3) {
 				// The Deny lands while the drain closure's fresh policy read is
-				// pending (first call is the ask's snapshot).
+				// pending (calls 1-2 are the ask snapshot and the immediate
+				// re-check).
 				task.handleWebviewAskResponse("noButtonClicked")
 			}
 			return state
 		}
 		const queue = await attachQueue(task)
-		const addToClineMessages = task["addToClineMessages"] as ReturnType<typeof vi.fn>
+		queue.addMessage("queued before the ask begins")
 
 		const askPromise = task.ask("command", "rm x", false)
-		// Past the snapshot read, into the dwell; the message arriving now
-		// forces the drain site rather than the immediate consume path.
-		await vi.waitFor(() => expect(addToClineMessages).toHaveBeenCalledTimes(1))
-		queue.addMessage("queued during the dwell, superseded by the user's Deny")
 
 		const result = await askPromise
 
@@ -503,7 +556,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// The provisional claim was released, not consumed: the message
 		// survives for the next consumer.
 		expect(queue.messages).toHaveLength(1)
-		expect(queue.hasUnclaimed()).toBe(true)
+		await vi.waitFor(() => expect(queue.hasUnclaimed()).toBe(true))
 	})
 
 	it("latches the turn when the denial fires at the drain site and the latch blocks the follow-up ask", async () => {
@@ -511,19 +564,33 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// (the deny branch of `applyQueuedCommandPolicyAction`); the follow-up
 		// ask proves the latch — not just this ask's denial result — keeps
 		// queue messages from standing in as approval for the rest of the turn.
+		// The ask-time gate approved the claim (the command was allowlisted);
+		// the immediate re-check released it (the allowlist dropped the
+		// command); the blanket deny engaged during the dwell, so the denial is
+		// produced by the drain site's re-check rather than the ask-time gate.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
+		let getStateCalls = 0
+		provider.getState = async () => {
+			getStateCalls++
+			if (getStateCalls === 2) {
+				state.allowedCommands = []
+			}
+			if (getStateCalls >= 3) {
+				state.alwaysDenyUnapprovedCommands = true
+			}
+			return state
+		}
 
 		const task = buildTask(provider, TASK_CWD)
 		const queue = await attachQueue(task)
 		const addToClineMessages = task["addToClineMessages"] as ReturnType<typeof vi.fn>
+		queue.addMessage("queued before the ask begins")
 
 		const askPromise = task.ask("command", "rm x", false)
-		// Past the snapshot read, into the prompt dwell: the flip and the
-		// message arrival both land during the dwell, so the denial is produced
-		// by the drain site's re-check rather than the frozen snapshot gate.
+		// Past the prompt post and the immediate re-check's release, into the
+		// prompt dwell; the drain re-claims the released message.
 		await vi.waitFor(() => expect(addToClineMessages).toHaveBeenCalledTimes(1))
-		state.alwaysDenyUnapprovedCommands = true
-		queue.addMessage("queued during the dwell")
 
 		const denied = await askPromise
 		expect(denied.response).toBe("noButtonClicked")
@@ -717,15 +784,24 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// re-check's finally releases the claim, and `ask()` rejects at the
 		// post-abort throw.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
 
 		const task = buildTask(provider, TASK_CWD)
 		const queue = await attachQueue(task)
 		const addToClineMessages = recordClineMessages(task)
+		queue.addMessage("queued before the ask begins")
 
 		let getStateCalls = 0
 		provider.getState = () => {
 			getStateCalls++
-			if (getStateCalls >= 2) {
+			if (getStateCalls === 2) {
+				// The immediate re-check drops the command from the allowlist,
+				// so the fresh policy asks and the claim is released: the ask
+				// dwells pending instead of consuming the message.
+				state.allowedCommands = []
+				return Promise.resolve(state)
+			}
+			if (getStateCalls >= 3) {
 				// The drain-site re-check never settles: nothing resolves it,
 				// only the abort race ends the ask's dependence on it.
 				return new Promise<Partial<ExtensionState>>(() => {})
@@ -737,11 +813,11 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval")
 
 		const askPromise = task.ask("command", "rm x", false)
+		// Past the prompt post and the immediate re-check's release, into the
+		// dwell; the drain re-claims the released message, and its re-check
+		// read stays pending.
 		await vi.waitFor(() => expect(addToClineMessages).toHaveBeenCalledTimes(1))
-		// The message arriving during the dwell routes the re-check through the
-		// drain site, where the provisional claim and the pending read live.
-		queue.addMessage("queued during the dwell")
-		await vi.waitFor(() => expect(getStateCalls).toBe(2))
+		await vi.waitFor(() => expect(getStateCalls).toBe(3))
 		expect(queue.hasUnclaimed()).toBe(false)
 
 		setAbortLatch(task, true)
@@ -904,11 +980,13 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 
 	it("settles ask() and releases the claim when the task aborts while the immediate re-check is pending", async () => {
 		// The immediate site's fresh policy read ends in the same uncancellable
-		// `provider.getState()` as the drain site's. With the claim held and the
-		// read pending before the wait even starts, an abort must settle the
-		// re-check through the abort race, release the claim from its `finally`,
-		// tear the watcher down, and reject `ask()`.
+		// `provider.getState()` as the drain site's. The ask-time policy approved
+		// the allowlisted command, so the claim is held. With the read pending
+		// before the wait even starts, an abort must settle the re-check through
+		// the abort race, release the claim from its `finally`, tear the watcher
+		// down, and reject `ask()`.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
 
 		const task = buildTask(provider, TASK_CWD)
 		const queue = await attachQueue(task)
@@ -967,6 +1045,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// abort, with deny now ON — the settled re-check must not take it
 		// through the policy, and the claimed message must stay unconsumed.
 		state.alwaysDenyUnapprovedCommands = false
+		state.allowedCommands = ["rm x"]
 		const checkAutoApprovalSpy = vi.spyOn(autoApprovalModule, "checkAutoApproval")
 
 		let resolveLateState: (() => void) | undefined
@@ -994,6 +1073,10 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		await vi.waitFor(() => expect(getStateCalls).toBe(2))
 		expect(queue.hasUnclaimed()).toBe(false)
 
+		// The ask-time policy call for the command claim is legitimate; record
+		// it as the baseline the post-abort behavior must not add to.
+		const callsBeforeAbort = checkAutoApprovalSpy.mock.calls.length
+
 		setAbortLatch(task, true)
 
 		// `ask()` must reject on abort; racing a deadline distinguishes a wrong
@@ -1014,7 +1097,9 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// Past a full abort-watcher poll: enough for any retained continuation
 		// of the late read to have run and been caught by the spy.
 		await new Promise((resolve) => setTimeout(resolve, 150))
-		expect(checkAutoApprovalSpy).not.toHaveBeenCalled()
+		// No post-abort policy consultation: the call count did not grow past
+		// the ask-time baseline.
+		expect(checkAutoApprovalSpy.mock.calls.length).toBe(callsBeforeAbort)
 		// No post-abort consume: the message survives, unclaimed, for a later
 		// consumer.
 		expect(queue.messages).toHaveLength(1)
