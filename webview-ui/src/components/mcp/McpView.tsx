@@ -7,7 +7,6 @@ import type { McpServer } from "@roo-code/types"
 import { vscode } from "@src/utils/vscode"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
-import { useTooManyTools } from "@src/hooks/useTooManyTools"
 import {
 	Button,
 	Dialog,
@@ -41,7 +40,6 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 	const mcpEnabled = propsMcpEnabled ?? contextMcpEnabled
 
 	const { t } = useAppTranslation()
-	const { isOverThreshold, title, message } = useTooManyTools()
 
 	return (
 		<div>
@@ -68,31 +66,6 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 
 				{mcpEnabled && (
 					<>
-						{/* Too Many Tools Warning */}
-						{isOverThreshold && (
-							<div style={{ marginBottom: 15 }}>
-								<div
-									style={{
-										display: "flex",
-										alignItems: "center",
-										gap: "6px",
-										fontWeight: "500",
-										color: "var(--vscode-editorWarning-foreground)",
-										marginBottom: "5px",
-									}}>
-									<span className="codicon codicon-warning" />
-									{title}
-								</div>
-								<div
-									style={{
-										fontSize: "12px",
-										color: "var(--vscode-descriptionForeground)",
-									}}>
-									{message}
-								</div>
-							</div>
-						)}
-
 						{/* Server List */}
 						{servers.length > 0 && (
 							<div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>

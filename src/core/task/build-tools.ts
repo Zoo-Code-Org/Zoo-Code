@@ -20,7 +20,7 @@ import {
 } from "../prompts/tools/filter-tools-for-mode"
 
 interface BuildToolsOptions {
-	task?: Pick<Task, "attachedMcpToolNames" | "initializeAttachedMcpTools">
+	task?: Pick<Task, "attachedMcpToolNames" | "initializeAttachedMcpTools" | "mcpToolStatus">
 	mcpDynamicLoadThreshold?: number
 	mcpDynamicLoadInitialK?: number
 	mcpDynamicLoadSearchTurns?: number
@@ -98,6 +98,9 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		includeAllToolsWithRestrictions,
 	} = options
 
+	// Take the build order before the first await.
+	const reportMcpToolStatus = options.task?.mcpToolStatus.begin()
+
 	const mcpHub = provider.getMcpHub()
 
 	// Get CodeIndexManager for feature checking.
@@ -151,7 +154,9 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		options.mcpDynamicLoadInitialK,
 		options.mcpDynamicLoadSearchTurns,
 	)
-	if (options.task && searchTurns > 0 && filteredMcpTools.length > threshold) {
+	const totalScoped = filteredMcpTools.length
+	const gated = options.task !== undefined && searchTurns > 0 && totalScoped > threshold
+	if (options.task && gated) {
 		const scopedNames = new Set(filteredMcpTools.map(getToolName))
 		const scopedTools = getMcpToolCatalog(mcpHub, allowedMcpServers)
 			.filter(({ name }) => scopedNames.has(name))
@@ -164,6 +169,11 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		// Gemini also receives only attached MCP definitions, not the full catalog.
 		advertisedMcpTools = mcpTools.filter((tool) => attached.has(getToolName(tool)))
 	}
+	reportMcpToolStatus?.(
+		filteredMcpTools.length < totalScoped
+			? { attachedToolNames: filteredMcpTools.map(getToolName), totalScoped }
+			: null,
+	)
 
 	// Add custom tools if they are available and the experiment is enabled.
 	let nativeCustomTools: OpenAI.Chat.ChatCompletionFunctionTool[] = []

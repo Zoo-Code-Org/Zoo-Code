@@ -11,7 +11,7 @@ import type { TodoItem } from "./todo.js"
 import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList, ShareVisibility } from "./cloud.js"
 import type { SerializedCustomToolDefinition } from "./custom-tool.js"
 import type { GitCommit } from "./git.js"
-import type { McpServer } from "./mcp.js"
+import type { McpServer, McpToolStatus } from "./mcp.js"
 import { RouterModelsMessageType, type ModelInfo, type ModelRecord, type RouterModels } from "./model.js"
 import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
@@ -418,6 +418,8 @@ export type ExtensionState = Pick<
 	"mcp.dynamicLoad.threshold"?: number
 	"mcp.dynamicLoad.initialK"?: number
 	"mcp.dynamicLoad.searchTurns"?: number
+	/** `null` clears the webview value. An absent key keeps it. */
+	mcpToolStatus?: McpToolStatus | null
 
 	mode: string
 	customModes: ModeConfig[]

@@ -55,6 +55,7 @@ function setup(count: number, savedNames?: string[]) {
 		getMcpHub: () => ({ getServers: () => servers }),
 		getState: async () => ({ mode: "code", currentApiConfigName: "default" }),
 		log: vi.fn(),
+		postStateToWebviewWithoutClineMessages: vi.fn().mockResolvedValue(undefined),
 	} as unknown as ClineProvider
 	const task = new Task({
 		provider,
@@ -90,8 +91,46 @@ function setup(count: number, savedNames?: string[]) {
 		experiments: {},
 		apiConfiguration: {},
 	}
-	return { server, servers, task, options }
+	return { server, servers, task, options, provider }
 }
+
+describe("MCP tool status", () => {
+	it.each([1, 2, 3, 4])("shows status only for a partial selection with initialK %s", async (initialK) => {
+		const { task, options } = setup(3)
+		const result = await buildNativeToolsArrayWithRestrictions({
+			...options,
+			mcpDynamicLoadThreshold: 0,
+			mcpDynamicLoadInitialK: initialK,
+		})
+		const attachedToolNames = names(result.tools).filter((name) => name.startsWith("mcp--"))
+		expect(task.mcpToolStatus.value).toEqual(
+			attachedToolNames.length < 3 ? { attachedToolNames, totalScoped: 3 } : null,
+		)
+	})
+
+	it("reports the declared tools of a gated build one time", async () => {
+		const { task, options, provider } = setup(100)
+		const result = await buildNativeToolsArrayWithRestrictions({ ...options, mcpDynamicLoadInitialK: 3 })
+		await buildNativeToolsArrayWithRestrictions({ ...options, mcpDynamicLoadInitialK: 3 })
+
+		expect(task.mcpToolStatus.value).toEqual({
+			attachedToolNames: names(result.tools).filter((name) => name.startsWith("mcp--")),
+			totalScoped: 100,
+		})
+		expect(task.mcpToolStatus.value?.attachedToolNames).toHaveLength(3)
+		expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(1)
+	})
+
+	it("clears the status when a later build is at the threshold", async () => {
+		const { server, task, options, provider } = setup(100)
+		await buildNativeToolsArrayWithRestrictions(options)
+		server.tools = server.tools?.slice(0, 50)
+		await buildNativeToolsArrayWithRestrictions(options)
+
+		expect(task.mcpToolStatus.value).toBeNull()
+		expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(2)
+	})
+})
 
 describe.each([false, true])("MCP dynamic loading (all definitions: %s)", (includeAllToolsWithRestrictions) => {
 	it.each([0, 49, 50])("keeps %s tools at or below the threshold", async (count) => {
@@ -185,6 +224,7 @@ describe.each([false, true])("MCP dynamic loading (all definitions: %s)", (inclu
 		})
 		expect(names(result.tools).filter((name) => name.startsWith("mcp--"))).toHaveLength(advertised)
 		expect(task.initializeAttachedMcpTools).toHaveBeenCalledTimes(ranked ? 1 : 0)
+		expect(task.mcpToolStatus.value?.attachedToolNames.length).toBe(ranked ? advertised : undefined)
 	})
 
 	it("uses a configured threshold, including zero", async () => {

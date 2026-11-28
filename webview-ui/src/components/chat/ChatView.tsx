@@ -66,6 +66,7 @@ import { ChatTextArea } from "./ChatTextArea"
 import TaskHeader from "./TaskHeader"
 import ProfileViolationWarning from "./ProfileViolationWarning"
 import { CheckpointWarning } from "./CheckpointWarning"
+import { DynamicToolsStatus } from "./DynamicToolsStatus"
 import { QueuedMessages } from "./QueuedMessages"
 import { WorktreeSelector } from "./WorktreeSelector"
 import FileChangesPanel from "./FileChangesPanel"
@@ -1093,6 +1094,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		// Remove the 500-message limit to prevent array index shifting
 		// Virtuoso is designed to efficiently handle large lists through virtualization
 		const newVisibleMessages = modifiedMessages.filter((message) => {
+			// Old task histories can contain this warning. Zoo Code does not show it now.
+			if (message.say === "too_many_tools_warning") {
+				return false
+			}
+
 			// Filter out checkpoint_saved messages that should be suppressed
 			if (message.say === "checkpoint_saved") {
 				// Check if this checkpoint has the suppressMessage flag set
@@ -1775,6 +1781,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						handleCondenseContext={handleCondenseContext}
 						todos={latestTodos}
 					/>
+
+					<DynamicToolsStatus />
 
 					{checkpointWarning && (
 						<div className="px-3">

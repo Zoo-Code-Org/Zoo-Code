@@ -101,6 +101,7 @@ import type { InstructionFailureCollector } from "../prompts/sections/custom-ins
 import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 import { McpToolSelection, type McpSelectionLimits } from "./mcpToolSelection"
+import { McpToolStatusTracker } from "./mcpToolStatus"
 import type { ToolDoc } from "../../services/tools/types"
 
 // core modules
@@ -304,6 +305,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
 	private readonly mcpToolSelection: McpToolSelection
+	readonly mcpToolStatus = new McpToolStatusTracker(() => {
+		this.providerRef
+			.deref()
+			?.postStateToWebviewWithoutClineMessages()
+			.catch((error) => console.error("Failed to post the MCP tool status:", error))
+	})
 
 	get attachedMcpToolNames(): Set<string> {
 		return this.mcpToolSelection.names

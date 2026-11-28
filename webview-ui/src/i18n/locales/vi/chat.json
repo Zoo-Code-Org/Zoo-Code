@@ -471,12 +471,8 @@
 			"confirm": "Xóa"
 		}
 	},
-	"tooManyTools": {
-		"title": "Đã bật quá nhiều công cụ",
-		"toolsPart_other": "{{count}} công cụ",
-		"serversPart_other": "{{count}} máy chủ MCP",
-		"messageTemplate": "Bạn đã bật {{tools}} qua {{servers}}. Số lượng lớn như vậy có thể khiến mô hình bối rối và dẫn đến lỗi. Cố gắng giữ nó dưới {{threshold}}.",
-		"openMcpSettings": "Mở cài đặt MCP"
+	"dynamicToolsStatus": {
+		"summary": "Công cụ MCP được đính kèm trong lượt này: {{attached}} trên {{total}}"
 	},
 	"ignoredDisabledTools": {
 		"title": "Đã bỏ qua công cụ bị tắt",

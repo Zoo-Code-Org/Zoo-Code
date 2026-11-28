@@ -1621,34 +1621,6 @@ export const ChatRowContent = ({
 							<ImageBlock imageUri={imageInfo.imageUri} imagePath={imageInfo.imagePath} />
 						</div>
 					)
-				case "too_many_tools_warning": {
-					// Historical messages only; Task no longer emits this warning.
-					const warningData = safeJsonParse<{
-						toolCount: number
-						serverCount: number
-						threshold: number
-					}>(message.text || "{}")
-					if (!warningData) return null
-					const toolsPart = t("chat:tooManyTools.toolsPart", { count: warningData.toolCount })
-					const serversPart = t("chat:tooManyTools.serversPart", { count: warningData.serverCount })
-					return (
-						<WarningRow
-							title={t("chat:tooManyTools.title")}
-							message={t("chat:tooManyTools.messageTemplate", {
-								tools: toolsPart,
-								servers: serversPart,
-								threshold: warningData.threshold,
-							})}
-							actionText={t("chat:tooManyTools.openMcpSettings")}
-							onAction={() =>
-								window.postMessage(
-									{ type: "action", action: "settingsButtonClicked", values: { section: "mcp" } },
-									"*",
-								)
-							}
-						/>
-					)
-				}
 				case "ignored_disabled_tools_warning": {
 					const ignoredData = safeJsonParse<{ ignoredTools: unknown }>(message.text || "{}")
 					const ignoredTools = ignoredData?.ignoredTools

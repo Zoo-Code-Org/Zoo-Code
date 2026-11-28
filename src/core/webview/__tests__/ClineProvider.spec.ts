@@ -4444,6 +4444,56 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test("getStateToPostToWebview sends the MCP tool status of the current task, or null", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		expect((await provider.getStateToPostToWebview()).mcpToolStatus).toBeNull()
+
+		const status = { attachedToolNames: ["mcp--s--a"], totalScoped: 60 }
+		const task = new Task(defaultTaskOptions)
+		await provider.addClineToStack(task)
+		vi.spyOn(provider, "getCurrentTask").mockReturnValue(Object.assign(task, { mcpToolStatus: { value: status } }))
+
+		expect((await provider.getStateToPostToWebview()).mcpToolStatus).toEqual(status)
+	})
+
+	test("getStateToPostToWebview reads the MCP tool status after its last await", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const task = Object.assign(new Task(defaultTaskOptions), { mcpToolStatus: { value: null as unknown } })
+		await provider.addClineToStack(task)
+		vi.spyOn(provider, "getCurrentTask").mockReturnValue(task)
+		const status = { attachedToolNames: ["mcp--s--a"], totalScoped: 60 }
+		const { kimiCodeOAuthManager } = await import("../../../integrations/kimi-code/oauth")
+		// A build finishes while the snapshot waits for this late lookup.
+		vi.spyOn(kimiCodeOAuthManager, "isAuthenticated").mockImplementation(async () => {
+			task.mcpToolStatus.value = status
+			return false
+		})
+
+		expect((await provider.getStateToPostToWebview()).mcpToolStatus).toEqual(status)
+	})
+
+	it.each([null, { attachedToolNames: ["mcp--s--new"], totalScoped: 60 }])(
+		"reads the current instance status after replacement: %j",
+		async (status) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const oldTask = Object.assign(new Task(defaultTaskOptions), {
+				mcpToolStatus: { value: { attachedToolNames: ["mcp--s--old"], totalScoped: 60 } },
+			})
+			const replacement = Object.assign(new Task(defaultTaskOptions), {
+				taskId: oldTask.taskId,
+				mcpToolStatus: { value: status },
+			})
+			await provider.addClineToStack(oldTask)
+			const current = vi.spyOn(provider, "getCurrentTask").mockReturnValue(oldTask)
+			const { kimiCodeOAuthManager } = await import("../../../integrations/kimi-code/oauth")
+			vi.spyOn(kimiCodeOAuthManager, "isAuthenticated").mockImplementation(async () => {
+				current.mockReturnValue(replacement)
+				return false
+			})
+			expect((await provider.getStateToPostToWebview()).mcpToolStatus).toEqual(status)
+		},
+	)
+
 	test("getStateToPostToWebview defaults allowed read files to an empty list", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 

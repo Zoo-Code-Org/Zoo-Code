@@ -480,16 +480,8 @@
 			"confirm": "Elimina"
 		}
 	},
-	"tooManyTools": {
-		"title": "Massa eines habilitades",
-		"toolsPart_one": "{{count}} eina",
-		"toolsPart_many": "{{count}} eines",
-		"toolsPart_other": "{{count}} eines",
-		"serversPart_one": "{{count}} servidor MCP",
-		"serversPart_many": "{{count}} servidors MCP",
-		"serversPart_other": "{{count}} servidors MCP",
-		"messageTemplate": "Tens {{tools}} habilitades via {{servers}}. Un nombre tant alt pot confondre el model i portar a errors. Intenta mantenir-lo per sota de {{threshold}}.",
-		"openMcpSettings": "Obrir configuració de MCP"
+	"dynamicToolsStatus": {
+		"summary": "Eines MCP adjuntes en aquest torn: {{attached}} de {{total}}"
 	},
 	"ignoredDisabledTools": {
 		"title": "Eina desactivada ignorada",

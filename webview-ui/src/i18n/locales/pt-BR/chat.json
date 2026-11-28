@@ -480,16 +480,8 @@
 			"confirm": "Excluir"
 		}
 	},
-	"tooManyTools": {
-		"title": "Muitas ferramentas habilitadas",
-		"toolsPart_one": "{{count}} ferramenta",
-		"toolsPart_many": "{{count}} ferramentas",
-		"toolsPart_other": "{{count}} ferramentas",
-		"serversPart_one": "{{count}} servidor MCP",
-		"serversPart_many": "{{count}} servidores MCP",
-		"serversPart_other": "{{count}} servidores MCP",
-		"messageTemplate": "Você tem {{tools}} habilitadas via {{servers}}. Um número tão alto pode confundir o modelo e levar a erros. Tente mantê-lo abaixo de {{threshold}}.",
-		"openMcpSettings": "Abrir Configurações MCP"
+	"dynamicToolsStatus": {
+		"summary": "Ferramentas MCP anexadas neste turno: {{attached}} de {{total}}"
 	},
 	"ignoredDisabledTools": {
 		"title": "Ferramenta desativada ignorada",

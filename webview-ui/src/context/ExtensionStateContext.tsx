@@ -223,6 +223,7 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 		// the pinned ID when it describes another task; same-task item updates still apply.
 		if (newState.currentTaskId !== prevState.currentTaskId) {
 			rest.currentTaskItem = prevState.currentTaskItem
+			rest.mcpToolStatus = prevState.mcpToolStatus
 		}
 		rest.currentTaskId = prevState.currentTaskId
 	} else {
