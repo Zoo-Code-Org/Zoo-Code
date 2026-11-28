@@ -5,6 +5,8 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	isDelegatedChildLive,
+	isLivenessSignalFresh,
 	LifecycleTransitionError,
 	settleRejectedCreateSubtaskAction,
 } from "../taskLifecycle"
@@ -102,6 +104,80 @@ describe("task lifecycle transitions", () => {
 		const abandoned = abandonDelegatedChild(parent, { ...activeChild, status: "interrupted" })
 		expect(abandoned.parent).toMatchObject({ status: "active", awaitingChildId: undefined })
 		expect(abandoned.child).toMatchObject({ parentTaskId: undefined, rootTaskId: undefined })
+	})
+})
+
+describe("isLivenessSignalFresh", () => {
+	const NOW = 1_756_886_400_000
+	const THRESHOLD = 5 * 60 * 1000
+
+	it("treats a timestamp inside the threshold as fresh", () => {
+		expect(isLivenessSignalFresh(NOW - THRESHOLD + 1, NOW, THRESHOLD)).toBe(true)
+	})
+
+	it("treats a timestamp exactly at the threshold as stale (strict '<' boundary)", () => {
+		expect(isLivenessSignalFresh(NOW - THRESHOLD, NOW, THRESHOLD)).toBe(false)
+	})
+
+	it("treats an absent timestamp as never fresh", () => {
+		expect(isLivenessSignalFresh(undefined, NOW, THRESHOLD)).toBe(false)
+	})
+
+	it("treats a near-future timestamp as fresh (clock skew and the transient-stat sentinel)", () => {
+		// The transient-stat sentinel is `now + THRESHOLD - 1`, one millisecond
+		// inside the strict bound; keeping it inside the window is what makes a
+		// stat failure skip repair instead of cutting a possibly-live child out
+		// of its delegation link.
+		expect(isLivenessSignalFresh(NOW + THRESHOLD - 1, NOW, THRESHOLD)).toBe(true)
+		expect(isLivenessSignalFresh(NOW + 1_000, NOW, THRESHOLD)).toBe(true)
+	})
+
+	it("treats a far-future timestamp as stale (clock rollback or restored archive)", () => {
+		// A dead child stamped far ahead must not stay live forever: otherwise
+		// startup and every periodic tick keep the parent delegated to a record
+		// no session owns.
+		expect(isLivenessSignalFresh(NOW + THRESHOLD, NOW, THRESHOLD)).toBe(false)
+		expect(isLivenessSignalFresh(NOW + 365 * 24 * 60 * 60 * 1000, NOW, THRESHOLD)).toBe(false)
+	})
+})
+
+describe("isDelegatedChildLive", () => {
+	const NOW = 1_756_886_400_000
+	const THRESHOLD = 5 * 60 * 1000
+
+	it("is live when only the history-file mtime is fresh", () => {
+		expect(isDelegatedChildLive({}, NOW, THRESHOLD, NOW - 60_000)).toBe(true)
+	})
+
+	it("is live when only the persisted heartbeat is fresh (long streaming turn)", () => {
+		expect(isDelegatedChildLive({ lastActivityAt: NOW - 60_000 }, NOW, THRESHOLD, NOW - 10 * 60 * 1000)).toBe(true)
+	})
+
+	it("is live when only the heartbeat is fresh and the file mtime is unreadable", () => {
+		expect(isDelegatedChildLive({ lastActivityAt: NOW - 60_000 }, NOW, THRESHOLD, undefined)).toBe(true)
+	})
+
+	it("is not live when both signals are stale (genuine crash orphan)", () => {
+		expect(
+			isDelegatedChildLive({ lastActivityAt: NOW - 10 * 60 * 1000 }, NOW, THRESHOLD, NOW - 10 * 60 * 1000),
+		).toBe(false)
+	})
+
+	it("is not live when both signals are absent", () => {
+		expect(isDelegatedChildLive({}, NOW, THRESHOLD, undefined)).toBe(false)
+	})
+
+	it("is not live when both signals are far in the future", () => {
+		// Far-future mtime AND far-future heartbeat: the record claims life from
+		// a clock that no longer matches, so repair must proceed.
+		const far = NOW + 365 * 24 * 60 * 60 * 1000
+		expect(isDelegatedChildLive({ lastActivityAt: far }, NOW, THRESHOLD, far)).toBe(false)
+	})
+
+	it("stays live when only the mtime is near-future (the transient-stat sentinel)", () => {
+		// The sentinel must keep working: a stat failure reports `now + THRESHOLD - 1`,
+		// which is inside the bounded window, so repair is skipped and retried.
+		expect(isDelegatedChildLive({}, NOW, THRESHOLD, NOW + THRESHOLD - 1)).toBe(true)
 	})
 })
 
