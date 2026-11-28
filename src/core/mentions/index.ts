@@ -28,9 +28,19 @@ import type { SkillContent } from "../../shared/skills"
 /**
  * Extensions the extractor converts instead of reading raw. For these, the
  * extracted line numbers are not the coordinates read_file slices by, so the
- * recovery guidance must not advertise an offset.
+ * recovery guidance must not advertise an offset. Computed on first use and
+ * memoized: importing this module performs no call into extract-text, so
+ * consumers may mock that module with partial factories (the ClineProvider
+ * specs do not define every export).
  */
-const EXTRACTED_FORMATS = new Set(getSupportedBinaryFormats())
+let extractedFormats: Set<string> | undefined
+
+function getExtractedFormats(): Set<string> {
+	if (!extractedFormats) {
+		extractedFormats = new Set(getSupportedBinaryFormats())
+	}
+	return extractedFormats
+}
 
 /**
  * Recovery guidance for a truncated inline. Plain files keep the offset that
@@ -40,7 +50,7 @@ const EXTRACTED_FORMATS = new Set(getSupportedBinaryFormats())
  * name the wrong lines; the guidance points at the file without one.
  */
 function folderInlineRecoveryHint(slice: FolderInlineFileSlice): string {
-	const extractedFormat = EXTRACTED_FORMATS.has(path.extname(slice.relPath).toLowerCase())
+	const extractedFormat = getExtractedFormats().has(path.extname(slice.relPath).toLowerCase())
 	return extractedFormat
 		? `Use the read_file tool on '${slice.relPath}' to read it directly.`
 		: `Use the read_file tool on '${slice.relPath}' with offset=${slice.shownLines + 1} to read more.`
