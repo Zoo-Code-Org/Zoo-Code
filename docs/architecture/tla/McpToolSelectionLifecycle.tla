@@ -10,6 +10,12 @@
 \*   since the last condensation.
 \* Invariant 3: FrozenAfterWindow — after SearchTurns user turns since the last condensation, the selection does not grow.
 \* Invariant 4: RollingCapped — supplemental ranks never grow the selection past MaxAttached.
+\* Failure 5: a reader of the stored searchTurns value gets a value that differs from the other readers.
+\* Invariant 5: SharedDefault. Each reader gets a valid stored value, 0 included, or else the shared default.
+\* Source: the stored mcp.dynamicLoad.searchTurns. Sinks: ClineProvider.getState, getStateToPostToWebview,
+\*   buildNativeToolsArrayWithRestrictions, and McpToolSelection.select. All use resolveMcpDynamicLoadSettings.
+\* Oracle: the schema. It rejects Unset and Invalid and accepts each natural number.
+\* Expect (Failure 5): a null result. FalsyDefault, a reader that replaces 0 with the default, violates SharedDefault.
 \* Oracle: the ranker returns relevant tools from scope, capped at k.
 \* Scope: one task with up to MaxTurns user messages. The task message is turn 1. The catalog has two topic groups.
 \* Expect: NoSupplement and TaskTextRerank violate TopicReachable. NoPrune violates PrunedSinceCondense.
@@ -28,6 +34,10 @@
 \* Not modeled: tool order. Any change to the tools array ends the prompt cache, an append too.
 \*   So order matters only for an unchanged set, and build-tools filters the catalog in a fixed order.
 \* Baseline: Fixed holds. Each variant fails its invariant.
+\* CI: PR 2323, job platform-unit-test, 0 covered, 1 added (SharedDefault), 0 gap.
+\* The failure was a stale property test. It did not include searchTurns. The spec cannot express a stale test.
+\* Findings (SharedDefault): no new defect (null result). The invariant is a static check of four readers.
+\* Replay: a reader with `|| default` in resolveMcpDynamicLoadSettings fails mcp-dynamic-load.property.test.ts.
 \* Cost: each config under 1 second.
 
 EXTENDS Integers, FiniteSets
@@ -41,7 +51,9 @@ CONSTANTS
     SearchTurns,     \* user turns since the last condensation that still get a supplemental rank
     MaxAttached,     \* attach cap for supplemental ranks
     MaxTurns,        \* max user turns to explore
-    Variant          \* "Fixed" | "NoSupplement" | "NoPrune" | "TaskTextRerank" | "NoFreeze" | "NoCap"
+    StoredValues,    \* stored searchTurns inputs. Negative numbers stand for rejected values.
+    DefaultSearchTurns,
+    Variant          \* "Fixed" or the name of one fault
 
 VARIABLES
     selection,       \* set of tool names currently selected
@@ -68,6 +80,21 @@ InWindow == turn - condensedTurn <= SearchTurns
 
 \* The task text always describes the first topic. The latest user message describes the current one.
 RankQueryTools == IF Variant = "TaskTextRerank" THEN TopicA ELSE RelevantTools
+
+\* resolveMcpDynamicLoadSettings
+Resolve(v) == IF v < 0 THEN DefaultSearchTurns ELSE v
+
+\* Each reader gets the output of the reader before it. getState reads storage.
+StateRead(v) == Resolve(v)
+WebviewRead(v) == Resolve(StateRead(v))
+GateRead(v) == Resolve(StateRead(v))
+WindowRead(v) ==
+    IF Variant = "FalsyDefault" /\ GateRead(v) = 0 THEN DefaultSearchTurns ELSE Resolve(GateRead(v))
+
+\* TLC and check.sh report a violation only for a state-level invariant, so it names a variable.
+SharedDefault ==
+    phase \in {"idle", "needs_supplement", "model_ready"} => \A v \in StoredValues :
+        {StateRead(v), WebviewRead(v), GateRead(v), WindowRead(v)} = {IF v < 0 THEN DefaultSearchTurns ELSE v}
 
 RankedResult(scope, k, topicTools) ==
     LET relevant == scope \cap topicTools

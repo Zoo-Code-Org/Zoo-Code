@@ -105,8 +105,9 @@ wiring. Every stage must be reachable with no cancellation and with abort or
 abandonment. Missing start or commit guards must produce counterexamples. The
 bounds are eight events and 100 states per path.
 
-Catalog lookup and setting defaults remain property tests rather than separate
-state machines. `mcpCatalog.spec.ts` checks enabled servers, project priority,
+Catalog lookup and setting defaults are not separate state machines.
+`McpToolSelectionLifecycle.tla` checks the readers of `searchTurns`. Property
+tests check the production code. `mcpCatalog.spec.ts` checks enabled servers, project priority,
 mode scope, canonical collisions, and altered separators. The defaults test
 checks pairs of valid and invalid inputs and repeated reads. Existing provider,
 handler, parser-to-presenter, and real-filesystem tests cover their boundaries.
