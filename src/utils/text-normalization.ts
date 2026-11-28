@@ -77,6 +77,22 @@ export function normalizeString(str: string, options: NormalizeOptions = DEFAULT
 }
 
 /**
+ * Strips streamed `<thinking>` tags from model text.
+ *
+ * The streaming presenter strips these before writing a chat bubble, but the API
+ * turn is built from the raw accumulator, so the two texts differ by exactly this
+ * markup. Resume-time matching has to re-apply the same strip to compare them, and
+ * it must stay byte-identical to the streaming one; a divergence would silently
+ * stop matching bubbles from being restored.
+ *
+ * @param text The text to strip
+ * @returns The text with `<thinking>` and `</thinking>` tags and their adjacent whitespace removed
+ */
+export function stripThinkingTags(text: string): string {
+	return text.replace(/<thinking>\s?/g, "").replace(/\s?<\/thinking>/g, "")
+}
+
+/**
  * Unescapes common HTML entities in a string
  *
  * @param text The string containing HTML entities to unescape
