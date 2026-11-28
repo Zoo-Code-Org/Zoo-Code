@@ -2209,6 +2209,54 @@ describe("DeepSeekHandler", () => {
 			assertNoDanglingLocalRefs(params)
 		})
 
+		it("keeps a surviving reference's literal sibling unrewritten (review 4725307765)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							$defs: { base: { type: "object" } },
+							patternProperties: {
+								"^x": {
+									$defs: { v: { type: "string" } },
+									$ref: "#/$defs/base",
+									const: { $ref: "#/patternProperties/^x/$defs/v" },
+									properties: { kept: { $ref: "#/patternProperties/^x/$defs/v" } },
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The rule's own reference survives compilation ($defs stays at its
+			// location), so the sibling walk keeps it. The walk must still
+			// relocate the sibling schema map, and it must treat the const
+			// sibling as instance data: a "$ref"-shaped value there is the
+			// literal a caller asserts against, and rewriting it changed the
+			// accepted inputs.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [
+					{ type: "number" },
+					{
+						$defs: { v: { type: "string" } },
+						$ref: "#/$defs/base",
+						const: { $ref: "#/patternProperties/^x/$defs/v" },
+						properties: { kept: { type: "string" } },
+					},
+				],
+			})
+			// assertNoDanglingLocalRefs does not apply here: the literal's
+			// pointer is instance data under const, which a validator compares
+			// for equality and never resolves.
+		})
+
 		it("keeps a $ref-shaped const literal unrewritten (review 4723722038)", () => {
 			const literal = { $ref: "#/patternProperties/^x/$defs/v" }
 			const tools = convert([

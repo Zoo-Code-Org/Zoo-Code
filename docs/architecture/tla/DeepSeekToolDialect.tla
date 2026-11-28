@@ -40,78 +40,38 @@
 \*             the pattern rules evaluated were exempt from it, and the
 \*             retained rule then rejects values the original accepted
 \*             (review 4719336022).
-\* Failure 15: a moved pattern rule keeps a $ref whose pointer only resolves
-\*             through the removed patternProperties location - the compiled
-\*             document has no such location left, and the value the original accepted for the key
-\*             breaks (review 6089521528).
-\* Failure 16: a literal-valued keyword inside a moved pattern rule carries
-\*             instance data whose "$ref"-shaped value is rewritten as a
-\*             schema - the literal changes and inputs the original
-\*             accepted break (review 4723722038).
-\* Failure 17: a moved rule references an acyclic branched graph and
-\*             relocation without a bound grows its output exponentially,
-\*             blocking the synchronous request path (review 4723722021).
-\* Failure 18: a moved reference's sibling evaluation keyword moves inside
-\*             the allOf conjunct - it no longer sees the inlined target's
-\*             annotations and rejects values the original accepted
-\*             (review 4723722028).
-\* Failure 19: a moved rule's existing allOf conjunct keeps its own $ref
-\*             through the removed patternProperties location un-relocated -
-\*             the pointer dangles in the compiled document and the conjunct
-\*             rejects values the original accepted (review 4724111350).
-\* Failure 20: a schema-map entry inside a moved rule whose NAME matches a
-\*             literal keyword keeps its schema unrelocated - the map's keys
-\*             are property names, not keywords, so the literal exclusion
-\*             must not suppress relocation there (review 4724111355).
-\* Failure 21: a moved rule's own $ref pointer survives compilation but
-\*             the walk stops at it - the rule's sibling schema maps can
-\*             still carry references through the removed location, and an
-\*             unrelocated sibling pointer dangles after patternProperties
-\*             is deleted (review 4724550474).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
-\*             SatPreserved, SiblingConjunctKept, ArraySatKept,
-\*             MovedRefResolvable, LiteralPreserved, ExpansionBounded,
-\*             MovedRefSiblingOuter, MovedConjunctResolvable,
-\*             MapEntryResolvable, SurvivingRefSiblingResolvable.
+\*             SatPreserved, SiblingConjunctKept, ArraySatKept. The
+\*             reference-relocation invariants live in DeepSeekRefRelocation.tla.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
 \* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate, KeepUnevaluated and
 \* Expect: KeepUepSchema fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept.
 \* Expect: KeepDependent fails ForbiddenAbsent. KeepContainsUneval and
-\* Expect: KeepPrefixEvaluator fail ArraySatKept. KeepMovedRef fails
-\* Expect: MovedRefResolvable. RewriteLiteral fails LiteralPreserved.
-\* Expect: UnboundedDiamond fails ExpansionBounded. AbsorbRefSibling fails
-\* Expect: MovedRefSiblingOuter. KeepRefConjunct fails
-\* Expect: MovedConjunctResolvable. KeepMapEntryRef fails
-\* Expect: MapEntryResolvable. KeepSurvivingRefSibling fails
-\* Expect: SurvivingRefSiblingResolvable.
+\* Expect: KeepPrefixEvaluator fail ArraySatKept. The relocation
+\* Expect: sabotage expectations live in DeepSeekRefRelocation.tla.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
 \* limit or offset, and 422 on a pattern keyword. The in-tree sanitizer does not
-\* strip pattern. Not modeled: recursion into nested nodes (the rule is the same
-\* per node; the depth-32 stop and its uncompiled pass-through are pinned by the
-\* deep-schema test in the same block), the compile work count (a chain of
-\* unchanged conditionals must compile each predicate once per level, review
-\* 4714821172 - work is not expressible in this model's source-to-sink
-\* abstraction, pinned by the linear-work timing test; the same holds for the
-\* reference-target memoization (review 4719419419, pinned by the
-\* repeated-reference timing test)), the relocation budget is modeled as
-\* the relaxation decision ExpansionBounded, its constant is pinned by the
-\* branched-graph regression test (review 4723722021), surrogate sanitization,
-\* the strict flag plumbing, MCP name checks,
-\* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
-\* regression test for review 4712438384).
+\* strip pattern. Not modeled: recursion into nested nodes (the rule is the
+\* same per node; the depth-32 stop is pinned by the deep-schema test), the
+\* compile work count (review 4714821172; also reference-target memoization,
+\* review 4719419419 - work counts are not expressible in this model's
+\* source-to-sink abstraction; both are pinned by the linear-work and
+\* repeated-reference timing tests), surrogate sanitization, the strict flag
+\* plumbing, MCP name checks, prototype-key fidelity (a JS runtime artifact,
+\* pinned by the JSON.parse regression test for review 4712438384).
+\* The reference-relocation subsystem (moved-rule re-admission, its literal
+\* values, sibling keywords, conjuncts, map entries, budget, surviving
+\* references) is modeled in DeepSeekRefRelocation.tla.
 \* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).
-\* Result: Fixed holds in 67108864 states. ForceRequired fails RequiredPreserved.
+\* Result: Fixed holds in 524288 states. ForceRequired fails RequiredPreserved.
 \* KeepPattern fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded.
 \* NotTighten, KeepOneOf, KeepClosed and KeepConditional each fail
 \* SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. TLC found no state
-\* outside the sabotages. RewriteLiteral fails LiteralPreserved;
-\* UnboundedDiamond fails ExpansionBounded; AbsorbRefSibling fails
-\* MovedRefSiblingOuter; KeepRefConjunct fails MovedConjunctResolvable;
-\* KeepMapEntryRef fails MapEntryResolvable; KeepSurvivingRefSibling fails
-\* SurvivingRefSiblingResolvable.
+\* outside the sabotages. The relocation verdicts live in
+\* DeepSeekRefRelocation.tla.
 \* Cost: TLC runs in seconds. Agent time is not measured.
 \* Review: 3 added (4712438380, 4712438393, 4712438405), 1 gap (4712438384
 \* __proto__ own-property semantics are a JS artifact, pinned by the
@@ -119,10 +79,10 @@
 \* changed conditional, 4713747398 sibling anyOf). Round 5 (reviews
 \* 4716476931, 4716476940, 4716476950): 3 added (dependentSchemas traversal,
 \* reference-target tracking, unevaluatedProperties relaxation), 0 covered,
-\* 0 gap. Round 6 (reviews 4719419419, 4719419428): 1 added (contains
-\* removal relaxes the stranded unevaluatedItems: false, ArraySatKept),
-\* 1 added, 0 gap (4719419419 memoization is a work-count property, pinned by the
-\* repeated-reference timing test). Round 7 (reviews 4719935091, 4719336022):
+\* 0 gap. Round 6 (reviews 4719419419, 4719419428): 2 added (contains removal
+\* relaxes the stranded unevaluatedItems: false, ArraySatKept; the 4719419419
+\* memoization is a work-count property, pinned by the repeated-reference
+\* timing test). Round 7 (reviews 4719935091, 4719336022):
 \* 2 added (a partial prefixItems no longer counts as a complete array
 \* evaluator, ArraySatKept; a schema-valued closed rule re-admits the removed
 \* pattern rules as alternatives, SatPreserved), 0 covered, 0 gap.
@@ -130,21 +90,21 @@
 \* reference that only resolves through a removed location, the pointer is
 \* inlined with its compiled target and a self-referencing rule relaxes the
 \* retained rule instead, MovedRefResolvable), 0 covered, 0 gap.
-\* Round 9 (reviews 4723722021, 4723722028, 4723722038): 3 added (literal
-\* values under const, enum, default and examples are never rewritten,
-\* LiteralPreserved; a relocation that exceeds the expansion budget relaxes
-\* the retained closed rule instead of shipping the expanded tree,
-\* ExpansionBounded; a moved reference's sibling evaluation keywords stay on
-\* the outer schema beside the inlined allOf target,
-\* MovedRefSiblingOuter), 0 covered, 0 gap.
-\* Round 10 (reviews 4724111350, 4724111355): 2 added (a moved rule's
-\* existing allOf conjunct relocates its own removed-location reference,
-\* MovedConjunctResolvable; a schema-map entry named after a literal
-\* keyword keeps relocating its schema, MapEntryResolvable), 0 covered,
-\* 0 gap.
+\* Round 9 (reviews 4723722021, 4723722028, 4723722038): 3 added (literals
+\* under const, enum, default and examples are never rewritten,
+\* LiteralPreserved; a past-budget relocation relaxes the retained rule,
+\* ExpansionBounded; a moved reference's sibling keywords stay on the outer
+\* schema, MovedRefSiblingOuter), 0 covered, 0 gap.
+\* Round 10 (reviews 4724111350, 4724111355): 2 added (a moved rule's allOf
+\* conjunct relocates its own removed-location reference,
+\* MovedConjunctResolvable; a map entry named after a literal keyword keeps
+\* relocating, MapEntryResolvable), 0 covered, 0 gap.
 \* Round 11 (review 4724550474): 1 added (a surviving reference's sibling
-\* schema maps still relocate, SurvivingRefSiblingResolvable), 0 covered,
-\* 0 gap.
+\* schema maps still relocate, SurvivingRefSiblingResolvable), 0 covered, 0 gap.
+\* Round 12 (reviews 4725327182, 4725307765): the relocation subsystem moved
+\* to DeepSeekRefRelocation.tla (failures 15 to 21 with their 7 invariants
+\* and inputs); 1 added there (a surviving reference's literal sibling stays
+\* verbatim, SurvivingRefLiteralPreserved), 0 covered, 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
@@ -152,10 +112,6 @@ CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "KeepDependent", "KeepRefPredicate",
                                   \* "KeepUnevaluated", "KeepContainsUneval",
                                   \* "KeepPrefixEvaluator", "KeepUepSchema"
-                                  \* or "KeepMovedRef", "RewriteLiteral",
-                                  \* "UnboundedDiamond", "AbsorbRefSibling",
-                                  \* "KeepRefConjunct", "KeepMapEntryRef",
-                                  \* "KeepSurvivingRefSibling"
 
 VARIABLE in
 
@@ -164,45 +120,25 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* One optional property (2) next to a required one (1). The optional property
 \* may carry rejected keywords (kw2) and may be composed: a not whose child
 \* carries a rejected keyword (not2, childKw), a oneOf of two
-\* pattern-distinguished branches whose branch carries a rejected keyword
-\* (oneOf2, branchKw), a closed object whose extra key is legal only
-\* through patternProperties (closed2), a conditional whose if predicate
-\* carries a rejected keyword (cond2, ifKw), an unchanged anyOf sibling
-\* next to the oneOf (anyOf2), the keyword carried inside a
-\* dependentSchemas entry instead of directly on the property (dep2), a
-\* predicate whose child is only a $ref to a kw2-carrying target (ref2),
-\* and the closed-object rule shaped as unevaluatedProperties: false
-\* instead of additionalProperties: false (uneval2), the closed-array rule
-\* carrying contains beside unevaluatedItems: false (containsClosed2) with
-\* and without a second items evaluator that keeps the array evaluated
-\* (arrEvaluator2), with a partial prefixItems as the second evaluator
-\* instead (partialPrefix2 - it evaluates only its listed positions), and
-\* the closed-object rule shaped as a schema-valued unevaluatedProperties
-\* restriction that must re-admit the removed pattern rules (uepSchema2),
-\* and the pattern rule itself being only a $ref whose pointer resolves
-\* through the removed patternProperties location (movedRef2), the moved
-\* rule carrying a literal-valued keyword with a "$ref"-shaped value
-\* (literalRef2), the moved rule referencing an acyclic branched graph that
-\* exceeds the relocation budget (budgetDiamond2), the moved $ref
-\* carrying a sibling evaluation keyword (refSibling2), the moved rule's
-\* existing allOf conjunct carrying its own reference through the removed
-\* location (refConjunct2), and the moved rule's properties map holding an
-\* entry named after a literal keyword whose schema carries such a
-\* reference (mapKeyLiteral2), and the moved rule carrying its own
-\* surviving $ref - a pointer that resolves outside the removed location -
-\* beside a schema-map sibling holding a reference through the removed
-\* location (survivingRefSibling2).
+\* pattern-distinguished branches (oneOf2, branchKw), a closed object whose
+\* extra key is legal only through patternProperties (closed2), a conditional
+\* whose if predicate carries a rejected keyword (cond2, ifKw), an unchanged
+\* anyOf sibling (anyOf2), the keyword inside a dependentSchemas entry (dep2),
+\* a predicate whose child is only a $ref to a kw2-carrying target (ref2), the
+\* closed-object rule shaped as unevaluatedProperties: false (uneval2), the
+\* closed-array rule with contains beside unevaluatedItems: false
+\* (containsClosed2), a second complete items evaluator (arrEvaluator2), a
+\* partial prefixItems that evaluates only its listed positions
+\* (partialPrefix2), and the closed rule shaped as a schema-valued
+\* unevaluatedProperties restriction that must re-admit the removed pattern
+\* rules (uepSchema2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
            anyOf2 : BOOLEAN, dep2 : BOOLEAN, ref2 : BOOLEAN,
            uneval2 : BOOLEAN, containsClosed2 : BOOLEAN,
            arrEvaluator2 : BOOLEAN, partialPrefix2 : BOOLEAN,
-           uepSchema2 : BOOLEAN, movedRef2 : BOOLEAN,
-           literalRef2 : BOOLEAN, budgetDiamond2 : BOOLEAN,
-           refSibling2 : BOOLEAN, refConjunct2 : BOOLEAN,
-           mapKeyLiteral2 : BOOLEAN,
-           survivingRefSibling2 : BOOLEAN]
+           uepSchema2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -229,8 +165,6 @@ Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 \* array restriction. KeepPrefixEvaluator keeps treating a partial prefixItems
 \* as a complete evaluator. KeepUepSchema keeps a schema-valued closed rule
 \* unmerged, so it rejects the keys the pattern rules evaluated.
-\* KeepMovedRef keeps the moved rule's reference as a pointer, although the
-\* compiled document has no patternProperties location for it to resolve.
 Decisions(i) ==
     LET refChanged == i.ref2 /\ i.kw2 # {}
     IN LET fixed ==
@@ -241,13 +175,6 @@ Decisions(i) ==
          uepRelaxed |-> i.closed2 /\ i.uneval2 /\ ~i.uepSchema2,
          uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
-         movedRefInlined |-> i.closed2 /\ i.uepSchema2 /\ i.movedRef2,
-         conjunctRelocated |-> TRUE,
-         literalKept |-> TRUE,
-         mapEntryRelocated |-> TRUE,
-         survivingSiblingRelocated |-> TRUE,
-         diamondRelaxed |-> i.budgetDiamond2,
-         siblingOnOuter |-> TRUE,
          siblingKept |-> TRUE,
          uiRelaxed |-> i.containsClosed2 /\ (~i.arrEvaluator2 \/ i.partialPrefix2)]
     IN CASE Variant = "ForceRequired" ->
@@ -283,20 +210,6 @@ Decisions(i) ==
         [fixed EXCEPT !["uiRelaxed"] = i.containsClosed2 /\ ~i.arrEvaluator2]
     [] Variant = "KeepUepSchema" ->
         [fixed EXCEPT !["uepSchemaKept"] = FALSE]
-    [] Variant = "KeepMovedRef" ->
-        [fixed EXCEPT !["movedRefInlined"] = FALSE]
-    [] Variant = "RewriteLiteral" ->
-        [fixed EXCEPT !["literalKept"] = FALSE]
-    [] Variant = "UnboundedDiamond" ->
-        [fixed EXCEPT !["diamondRelaxed"] = FALSE]
-    [] Variant = "AbsorbRefSibling" ->
-        [fixed EXCEPT !["siblingOnOuter"] = FALSE]
-    [] Variant = "KeepRefConjunct" ->
-        [fixed EXCEPT !["conjunctRelocated"] = FALSE]
-    [] Variant = "KeepMapEntryRef" ->
-        [fixed EXCEPT !["mapEntryRelocated"] = FALSE]
-    [] Variant = "KeepSurvivingRefSibling" ->
-        [fixed EXCEPT !["survivingSiblingRelocated"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -311,13 +224,6 @@ TypeOK ==
     /\ Decisions(in).condRelaxed \in BOOLEAN
     /\ Decisions(in).siblingKept \in BOOLEAN
     /\ Decisions(in).uiRelaxed \in BOOLEAN
-    /\ Decisions(in).movedRefInlined \in BOOLEAN
-    /\ Decisions(in).literalKept \in BOOLEAN
-    /\ Decisions(in).diamondRelaxed \in BOOLEAN
-    /\ Decisions(in).siblingOnOuter \in BOOLEAN
-    /\ Decisions(in).conjunctRelocated \in BOOLEAN
-    /\ Decisions(in).mapEntryRelocated \in BOOLEAN
-    /\ Decisions(in).survivingSiblingRelocated \in BOOLEAN
 
 Init == in \in Inputs
 Next == UNCHANGED in
@@ -387,67 +293,5 @@ SiblingConjunctKept ==
 ArraySatKept ==
     (in.containsClosed2 /\ ((~in.arrEvaluator2) \/ in.partialPrefix2)) => Decisions(in).uiRelaxed
 
-\* Safety (review 6089521528): a pattern rule that is only a $ref through the
-\* removed patternProperties location is re-admitted as an inlined compiled
-\* target, never as the pointer itself - the compiled document has no such
-\* location left, so a retained pointer could not resolve and the key it
-\* admitted would break. The re-admission happens under a schema-valued
-\* closed rule (closed2 with the uepSchema2 shape); without one the rule has
-\* no moved position at all.
-MovedRefResolvable ==
-    (in.movedRef2 /\ in.closed2 /\ in.uepSchema2) => Decisions(in).movedRefInlined
-
-\* Safety (review 4723722038): a literal-valued keyword inside a moved rule
-\* (const, enum, default, examples) carries instance data - a "$ref"-shaped
-\* value there is data the caller asserts against, never a schema reference,
-\* and relocation must leave it verbatim. The observable scenario is the
-\* moved-rule re-admission shape (closed2 with the uepSchema2 rule), where
-\* the rule re-enters the compiled document.
-LiteralPreserved ==
-    (in.literalRef2 /\ in.closed2 /\ in.uepSchema2) => Decisions(in).literalKept
-
-\* Safety (review 4723722021): a moved rule may reference an acyclic branched
-\* graph whose relocation output grows exponentially; past the expansion
-\* budget the relocation abandons and the retained closed rule relaxes
-\* instead of shipping the expanded tree.
-ExpansionBounded ==
-    (in.budgetDiamond2 /\ in.closed2 /\ in.uepSchema2) => Decisions(in).diamondRelaxed
-
-\* Safety (review 4723722028): a moved reference's sibling evaluation keyword
-\* stays on the outer schema beside the inlined target's allOf - Draft
-\* 2020-12 collects evaluation annotations from adjacent keywords and the
-\* schemas one object applies in place, and a sibling allOf branch is not
-\* one of those, so a sibling moved inside the conjunct would lose the
-\* target's annotations and reject values the original accepted.
-MovedRefSiblingOuter ==
-    (in.movedRef2 /\ in.closed2 /\ in.uepSchema2 /\ in.refSibling2) => Decisions(in).siblingOnOuter
-
-\* Safety (review 4724111350): a moved rule's existing allOf conjuncts stay
-\* conjuncts and relocate: a conjunct can carry its own reference through
-\* the removed patternProperties location, the compiled document has no
-\* such location left, and an unrelocated conjunct pointer would dangle and
-\* reject values the original accepted.
-MovedConjunctResolvable ==
-    (in.movedRef2 /\ in.closed2 /\ in.uepSchema2 /\ in.refConjunct2) =>
-        Decisions(in).conjunctRelocated
-
-\* Safety (review 4724111355): inside a schema map the keys are property or
-\* definition names, not keywords - an entry named after a literal keyword
-\* carries a schema whose reference must relocate, while a literal VALUE
-\* under const inside a schema object stays verbatim (LiteralPreserved).
-MapEntryResolvable ==
-    (in.closed2 /\ in.uepSchema2 /\ in.mapKeyLiteral2) =>
-        Decisions(in).mapEntryRelocated
-
-\* Safety (review 4724550474): a moved rule's own $ref whose pointer
-\* survives compilation (it resolves outside the removed location) must
-\* not stop the relocation walk - the rule's sibling schema maps can
-\* still carry references through the removed location, compilation
-\* deletes that location, and an unrelocated sibling pointer would
-\* dangle in the compiled document and reject values the original
-\* accepted.
-SurvivingRefSiblingResolvable ==
-    (in.closed2 /\ in.uepSchema2 /\ in.survivingRefSibling2) =>
-        Decisions(in).survivingSiblingRelocated
 
 ====

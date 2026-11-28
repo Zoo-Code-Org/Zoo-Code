@@ -31,7 +31,9 @@
  *   never rewritten (issue #547 review 4723722038), a moved reference's
  *   sibling keywords stay on the outer schema beside the inlined target so
  *   Draft 2020-12 annotation visibility survives (issue #547 review
- *   4723722028), removing contains relaxes a
+ *   4723722028), a surviving reference's literal-valued siblings stay
+ *   verbatim while its schema-map siblings relocate (issue #547 review
+ *   4725307765), removing contains relaxes a
  *   retained unevaluatedItems restriction the same way, and a retained
  *   prefixItems is no complete evaluator: only a retained items keeps the
  *   array restriction (issue #547 review 4719935091), a oneOf whose branches - or
@@ -257,8 +259,9 @@ function pointerTraversesLostKey(ref: string): boolean {
  * The rule's reference is kept when its pointer is external, never resolved
  * locally even in the original, or still resolves in the compiled document;
  * a surviving reference's sibling keywords still relocate through the same
- * walk, while an unresolvable pointer keeps the rule exactly as the
- * untouched pass-through would (issue #547 review 4724550474). An acyclic
+ * walk while its literal-valued siblings stay verbatim, and an unresolvable
+ * pointer keeps the rule exactly as the untouched pass-through would
+ * (issue #547 review 4724550474, review 4725307765). An acyclic
  * reference graph can still branch, so relocation
  * counts the nodes it creates and abandons past MAX_RELOCATION_NODES - the
  * caller then relaxes instead of moving the rule (issue #547 review
@@ -307,6 +310,13 @@ function relocateMovedRefs(
 			}
 			const out: Record<string, unknown> = {}
 			for (const [key, value] of Object.entries(node)) {
+				// A literal-valued sibling carries instance data, not a
+				// schema: a "$ref"-shaped value under const stays verbatim
+				// (issue #547 review 4723722038, review 4725307765).
+				if (LITERAL_VALUE_KEYWORDS.has(key)) {
+					defineOwnKey(out, key, value)
+					continue
+				}
 				defineOwnKey(
 					out,
 					key,
