@@ -600,6 +600,25 @@ describe("abort-signal utilities", () => {
 			expect(createAbortError("Qwen Code").message).toBe("The Qwen Code request was aborted")
 		})
 
+		it("keeps the supplied cause under the contract name and message", () => {
+			const cause = new Error("socket reset by peer")
+			const error = createAbortError("OpenAI", cause)
+
+			expect(error.name).toBe("AbortError")
+			expect(error.message).toBe("The OpenAI request was aborted")
+			expect(error.cause).toBe(cause)
+		})
+
+		it("leaves the cause unset when the caller supplies none", () => {
+			const error = createAbortError("OpenAI")
+
+			expect(error.name).toBe("AbortError")
+			expect(error.message).toBe("The OpenAI request was aborted")
+			// A bare new Error(message, { cause: undefined }) defines the property, so the absence is
+			// asserted rather than compared with undefined.
+			expect("cause" in error).toBe(false)
+		})
+
 		it("returns a fresh error on each call", () => {
 			expect(createAbortError("X")).not.toBe(createAbortError("X"))
 		})

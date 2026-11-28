@@ -39,15 +39,27 @@ import { getModelParams } from "../transform/model-params"
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
-import { handleOpenAIError } from "./utils/error-handler"
+import { handleOpenAIError, handleOpenAIRequestError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import {
 	bridgeExternalAbortSignal,
 	createAbortError,
 	isRequestAborted,
 	hasUsableTimeout,
+	mergeAbortSignalAndTimeout,
+	throwIfAborted,
 	toSdkTimeoutMs,
 } from "./utils/abort-signal"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
+
+/** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
+type OpenAiRequestConfig = {
+	path?: string
+	signal?: AbortSignal
+	/** Per-request SDK timeout; a positive timeoutMs overrides the client default. */
+	timeout?: number
+}
 
 function isAzureV1BaseUrl(baseUrl?: string): boolean {
 	try {
@@ -145,21 +157,31 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		const signal = metadata?.abortSignal
+
 		const modelId = this.options.openAiModelId ?? ""
 		// Opt-in Responses API path: some OpenAI-compatible endpoints (e.g. Azure
 		// OpenAI deployments of reasoning models behind corporate gateways) reject
 		// `reasoning_effort` combined with function tools on /chat/completions and
 		// require /responses instead.
 		if (this.options.openAiUseResponsesApi) {
+			// The Responses route hands the caller's signal to the SDK at request construction,
+			// where it is bridged, so the SDK rejects it there. Throwing before the handoff would
+			// skip the request entirely and drop the signal the caller passed.
 			yield* this.handleResponsesApiMessage(systemPrompt, messages, metadata)
 			return
 		}
 
+		// The routes below attach the caller's signal to the request they issue themselves, so a
+		// signal that is already aborted fails before any of that work happens. The Responses route
+		// above hands its own bridged signal to the SDK, and is guarded there rather than here.
+		throwIfAborted(signal)
+
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+
 		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
-		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
@@ -253,12 +275,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let stream
 			try {
-				stream = await this.client.chat.completions.create(requestOptions, {
-					signal: metadata?.abortSignal,
-					...(isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
-				})
+				stream = await this.client.chat.completions.create(
+					requestOptions,
+					this.buildChatRequestConfig(isAzureAiInference, metadata),
+				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			const matcher = new TagMatcher(
@@ -273,34 +295,63 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			let lastUsage
 			const activeToolCallIds = new Set<string>()
 
-			for await (const chunk of stream) {
-				const delta = chunk.choices?.[0]?.delta ?? {}
-				const finishReason = chunk.choices?.[0]?.finish_reason
+			try {
+				for await (const chunk of stream) {
+					// Streaming-loop abort defense: the for-await above already pulled this
+					// chunk; the top-of-loop break stops *processing* (and yielding) buffered
+					// content that arrived after the caller's signal aborted.
+					if (signal?.aborted) {
+						break
+					}
+					const delta = chunk.choices?.[0]?.delta ?? {}
+					const finishReason = chunk.choices?.[0]?.finish_reason
 
-				const reasoningText = extractReasoningFromDelta(delta)
-				if (reasoningText) {
-					yield { type: "reasoning", text: reasoningText }
-				}
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
 
-				if (delta.content) {
-					for (const chunk of matcher.update(delta.content)) {
-						yield chunk
+					if (delta.content) {
+						for (const chunk of matcher.update(delta.content)) {
+							// Same-chunk abort defense: the reasoning yield above may already have been
+							// the last event the caller wanted, so the signal is re-read between the yields a
+							// single chunk produces instead of only between chunks.
+							if (signal?.aborted) {
+								break
+							}
+
+							yield chunk
+						}
+					}
+
+					yield* this.processToolCalls(delta, finishReason, activeToolCallIds, signal)
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
+			} catch (error) {
+				// The creation-site catch does not cover errors raised by the async
+				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+			}
 
-				yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
+			// Usage before the verdict: a stream that recorded usage and then observed the cancellation
+			// still has to hand that usage record to the caller, or the cost of the tokens it already
+			// streamed disappears from the task's accounting exactly when the stream stops early.
+			if (lastUsage) {
+				yield this.processUsageMetrics(lastUsage, modelInfo)
+			}
 
-				if (chunk.usage) {
-					lastUsage = chunk.usage
-				}
+			// Post-loop abort defense: a signal that aborted while the loop was running must
+			// surface the Task.ts abort contract instead of letting the stream end normally
+			// with the buffered matcher content below.
+			if (signal?.aborted) {
+				throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
 			}
 
 			for (const chunk of matcher.final()) {
 				yield chunk
-			}
-
-			if (lastUsage) {
-				yield this.processUsageMetrics(lastUsage, modelInfo)
 			}
 		} else {
 			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
@@ -321,19 +372,26 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let response
 			try {
-				response = await this.client.chat.completions.create(requestOptions, {
-					signal: metadata?.abortSignal,
-					...(this._isAzureAiInference(modelUrl) ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
-				})
+				response = await this.client.chat.completions.create(
+					requestOptions,
+					this.buildChatRequestConfig(this._isAzureAiInference(modelUrl), metadata),
+				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
+
+			// A cancellation that lands while the response is in flight must not be reported as
+			// completed work: the arrived text and tool calls are discarded and the abort contract
+			// is raised instead, so Task.ts never sees content the caller already cancelled.
+			this.throwIfRequestAborted(signal)
 
 			const message = response.choices?.[0]?.message
 
 			if (message?.tool_calls) {
 				for (const toolCall of message.tool_calls) {
 					if (toolCall.type === "function") {
+						// A yield suspends this generator: the caller can cancel before the next piece of content.
+						this.throwIfRequestAborted(signal)
 						yield {
 							type: "tool_call",
 							id: toolCall.id,
@@ -344,11 +402,15 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 			}
 
+			// A yield suspends this generator: the caller can cancel before the next piece of content.
+			this.throwIfRequestAborted(signal)
 			yield {
 				type: "text",
 				text: message?.content || "",
 			}
 
+			// A cancellation after the last content chunk must not be reported as usage metrics.
+			this.throwIfRequestAborted(signal)
 			yield this.processUsageMetrics(response.usage, modelInfo)
 		}
 	}
@@ -501,6 +563,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
+
 		try {
 			if (this.options.openAiUseResponsesApi) {
 				const model = this.getModel()
@@ -547,19 +611,44 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
+			const requestConfig = this.buildCompletePromptRequestConfig(isAzureAiInference, options)
 			try {
-				response = await this.client.chat.completions.create(
-					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-				)
+				response = await this.client.chat.completions.create(requestOptions, requestConfig)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(
+					error,
+					this.providerName,
+					options?.abortSignal,
+					requestConfig.signal ?? undefined,
+				)
+			}
+
+			// A cancellation that lands while the response is in flight must not be reported as a
+			// completed prompt: the answer is discarded and the abort contract is raised instead.
+			if (options?.abortSignal?.aborted) {
+				throw handleOpenAIRequestError(
+					createAbortError(this.providerName),
+					this.providerName,
+					options.abortSignal,
+					requestConfig.signal ?? undefined,
+				)
 			}
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof OutputTokenLimitError) throw error
-			if (isRequestAborted(error, options?.abortSignal)) throw createAbortError(this.providerName)
+			if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+				// The request-site handler already turned this into the contract error and chained
+				// the underlying failure as its cause. Re-wrapping it here would drop that cause, so
+				// name, message and cause are preserved exactly as they arrive.
+				throw error
+			}
+			// A raw SDK abort (name APIUserAbortError) or a signal that aborted mid-flight still
+			// needs the contract error, with the failure that triggered it kept as the cause.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError(this.providerName, error)
+			}
+
 			if (error instanceof Error) {
 				const wrapped = new Error(`${this.providerName} completion error: ${error.message}`, { cause: error })
 				const source = error as Error & { status?: number; errorDetails?: unknown; code?: unknown }
@@ -574,6 +663,44 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
+	/**
+	 * Builds the per-request OpenAI SDK options for a chat completions create
+	 * (createMessage paths): the Azure AI Inference path when applicable, plus
+	 * the caller's abort signal, via RequestConfigBuilder adoption.
+	 */
+	private buildChatRequestConfig(
+		isAzureAiInference: boolean,
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): OpenAI.RequestOptions {
+		return (
+			new RequestConfigBuilder<OpenAiRequestConfig>()
+				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)
+				.setAbortSignal(metadata)
+				.build() ?? {}
+		)
+	}
+
+	/**
+	 * Builds the per-request options for completePrompt. CompletePromptOptions
+	 * is not ApiHandlerCreateMessageMetadata (required taskId), so the merged
+	 * abort/timeout signal and the per-request SDK timeout (a positive timeoutMs
+	 * overrides the client-level default) go through setOption instead of
+	 * setAbortSignal.
+	 */
+	private buildCompletePromptRequestConfig(
+		isAzureAiInference: boolean,
+		options?: CompletePromptOptions,
+	): OpenAI.RequestOptions {
+		const requestTimeout = getRequestTimeoutMs(options?.timeoutMs)
+		return (
+			new RequestConfigBuilder<OpenAiRequestConfig>()
+				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)
+				.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+				.setOption("timeout", requestTimeout)
+				.build() ?? {}
+		)
+	}
+
 	private async *handleO3FamilyMessage(
 		modelId: string,
 		systemPrompt: string,
@@ -582,10 +709,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	): ApiStream {
 		const { info: modelInfo, reasoning } = this.getModel()
 		const methodIsAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
-		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
 		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
-		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
+		const signal = metadata?.abortSignal
 
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
@@ -617,15 +743,28 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let stream
 			try {
-				stream = await this.client.chat.completions.create(requestOptions, {
-					signal: metadata?.abortSignal,
-					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
-				})
+				stream = await this.client.chat.completions.create(
+					requestOptions,
+					this.buildChatRequestConfig(methodIsAzureAiInference, metadata),
+				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
-			yield* this.handleStreamResponse(stream)
+			try {
+				yield* this.handleStreamResponse(stream, signal)
+			} catch (error) {
+				// The creation-site catch does not cover errors raised by the async
+				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
+				throw handleOpenAIRequestError(error, this.providerName, signal)
+			}
+
+			// Post-loop abort defense: a signal that aborted while the loop was running
+			// must surface the Task.ts abort contract instead of letting the stream end
+			// normally with the buffered content it may have pulled.
+			if (signal?.aborted) {
+				throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
+			}
 		} else {
 			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
@@ -652,18 +791,25 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let response
 			try {
-				response = await this.client.chat.completions.create(requestOptions, {
-					signal: metadata?.abortSignal,
-					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
-				})
+				response = await this.client.chat.completions.create(
+					requestOptions,
+					this.buildChatRequestConfig(methodIsAzureAiInference, metadata),
+				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
+
+			// A cancellation that lands while the response is in flight must not be reported as
+			// completed work: the arrived text and tool calls are discarded and the abort contract
+			// is raised instead, so Task.ts never sees content the caller already cancelled.
+			this.throwIfRequestAborted(signal)
 
 			const message = response.choices?.[0]?.message
 			if (message?.tool_calls) {
 				for (const toolCall of message.tool_calls) {
 					if (toolCall.type === "function") {
+						// A yield suspends this generator: the caller can cancel before the next piece of content.
+						this.throwIfRequestAborted(signal)
 						yield {
 							type: "tool_call",
 							id: toolCall.id,
@@ -674,18 +820,44 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 			}
 
+			// A yield suspends this generator: the caller can cancel before the next piece of content.
+			this.throwIfRequestAborted(signal)
 			yield {
 				type: "text",
 				text: message?.content || "",
 			}
+			// A cancellation after the last content chunk must not be reported as usage metrics.
+			this.throwIfRequestAborted(signal)
 			yield this.processUsageMetrics(response.usage)
 		}
 	}
 
-	private async *handleStreamResponse(stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>): ApiStream {
+	/**
+	 * Raise the normalized abort contract for this provider when the caller has cancelled.
+	 *
+	 * A `yield` suspends this generator, so the caller can cancel between yields. Each piece of
+	 * content a non-streaming response hands over is therefore re-checked before it is yielded, not
+	 * only the first piece after the response arrives.
+	 */
+	private throwIfRequestAborted(signal?: AbortSignal): void {
+		if (signal?.aborted) {
+			throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
+		}
+	}
+
+	private async *handleStreamResponse(
+		stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+		signal?: AbortSignal,
+	): ApiStream {
 		const activeToolCallIds = new Set<string>()
 
 		for await (const chunk of stream) {
+			// Streaming-loop abort defense: the for-await above already pulled this
+			// chunk; the top-of-loop break stops *processing* (and yielding) buffered
+			// content that arrived after the caller's signal aborted.
+			if (signal?.aborted) {
+				break
+			}
 			const delta = chunk.choices?.[0]?.delta
 			const finishReason = chunk.choices?.[0]?.finish_reason
 
@@ -697,7 +869,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					}
 				}
 
-				yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
+				yield* this.processToolCalls(delta, finishReason, activeToolCallIds, signal)
 			}
 
 			if (chunk.usage) {
@@ -712,11 +884,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	 * @param delta - The delta object from the stream chunk
 	 * @param finishReason - The finish_reason from the stream chunk
 	 * @param activeToolCallIds - Set to track active tool call IDs (mutated in place)
+	 * @param signal - Caller abort signal, re-read before each yield so a cancelled caller stops
+	 * receiving tool-call events instead of draining the ones that already arrived
 	 */
 	protected *processToolCalls(
 		delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta | undefined,
 		finishReason: string | null | undefined,
 		activeToolCallIds: Set<string>,
+		signal?: AbortSignal,
 	): Generator<
 		| { type: "tool_call_partial"; index: number; id?: string; name?: string; arguments?: string }
 		| { type: "tool_call_end"; id: string }
@@ -725,6 +900,11 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			for (const toolCall of delta.tool_calls) {
 				if (toolCall.id) {
 					activeToolCallIds.add(toolCall.id)
+				}
+				// A cancelled caller must not receive tool-call partials that arrived after the
+				// cancellation; the guard is read before the yield, not after it.
+				if (signal?.aborted) {
+					break
 				}
 				yield {
 					type: "tool_call_partial",
@@ -740,6 +920,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		// This ensures tool calls are finalized even if the stream doesn't properly close
 		if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
 			for (const id of activeToolCallIds) {
+				if (signal?.aborted) {
+					break
+				}
 				yield { type: "tool_call_end", id }
 			}
 			activeToolCallIds.clear()

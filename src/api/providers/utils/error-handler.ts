@@ -9,7 +9,11 @@
  * - Enables telemetry and debugging with complete error context
  */
 
+import { APIUserAbortError } from "openai"
+
 import i18n from "../../../i18n/setup"
+import { createAbortError, isTimeoutAbort } from "./abort-signal"
+import { createTimeoutError } from "./request-timeout"
 
 /**
  * Handles API provider errors and transforms them into user-friendly messages
@@ -162,4 +166,38 @@ export function handleProviderError(
  */
 export function handleOpenAIError(error: unknown, providerName: string): Error {
 	return handleProviderError(error, providerName, { messagePrefix: "completion" })
+}
+
+/**
+ * Handles errors from OpenAI Node SDK request sites with abort awareness.
+ *
+ * An abort failure (the external signal already aborted, the SDK's
+ * APIUserAbortError, or a fetch-level AbortError) is normalized to a fresh
+ * Error with name "AbortError" and a message ending in "aborted" (the Task.ts
+ * contract) instead of being wrapped as a regular completion error, which a
+ * plain rethrow of the SDK abort error would produce.
+ */
+export function handleOpenAIRequestError(
+	error: unknown,
+	providerName: string,
+	abortSignal?: AbortSignal,
+	requestSignal?: AbortSignal,
+): Error {
+	if (error instanceof APIUserAbortError && !abortSignal?.aborted && isTimeoutAbort(requestSignal)) {
+		// The abort came from this merged signal's own deadline, not the caller's stop: a timeout
+		// must stay distinguishable from a user cancellation, so the shared helper's name and
+		// message are used and the SDK abort is attached as the cause. A caller that pressed stop
+		// never reaches here - error-handler.spec.ts:483-492 pins the abort for that interleaving.
+		const timeoutError = createTimeoutError(providerName, "completion request")
+		timeoutError.cause = error
+		return timeoutError
+	}
+
+	if (
+		abortSignal?.aborted ||
+		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
+	) {
+		return createAbortError(providerName, error)
+	}
+	return handleOpenAIError(error, providerName)
 }

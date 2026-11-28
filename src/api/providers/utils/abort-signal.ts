@@ -159,8 +159,8 @@ export function isRequestAborted(error: unknown, signal?: AbortSignal): boolean 
  * message "Request was aborted."), so raw SDK abort errors must be
  * normalized instead of rethrown.
  */
-export function createAbortError(providerName: string): Error {
-	const abortError = new Error(`The ${providerName} request was aborted`)
+export function createAbortError(providerName: string, cause?: unknown): Error {
+	const abortError = new Error(`The ${providerName} request was aborted`, cause === undefined ? undefined : { cause })
 	abortError.name = "AbortError"
 	return abortError
 }
@@ -312,9 +312,10 @@ export function createTimeoutError(providerName: string): Error {
  * caller's stop signal.
  */
 export function isTimeoutAbort(requestSignal: AbortSignal | undefined): boolean {
-	// Classify by the merged signal's retained abort reason: if its own timeout fired first, the
-	// reason stays the TimeoutError even when the caller aborts later, so the failure must still be
-	// reported as a deadline. A caller-first abort retains the caller's reason instead.
+	// Classify by the merged signal's retained abort reason: a deadline that fired first keeps the
+	// TimeoutError reason even if the caller stops later, so this answers only which signal fired
+	// first. handleOpenAIRequestError answers a caller that also pressed stop with the abort
+	// contract - error-handler.spec.ts:483-492 pins that answer for the interleaving.
 	return Boolean(
 		requestSignal?.aborted && (requestSignal.reason as { name?: string } | undefined)?.name === "TimeoutError",
 	)

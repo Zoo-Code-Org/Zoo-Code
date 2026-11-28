@@ -1,4 +1,13 @@
-import { getNumericHttpStatus, handleOpenAIError, handleProviderError, hasNumericHttpStatus } from "../error-handler"
+import { APIUserAbortError } from "openai"
+
+import {
+	getNumericHttpStatus,
+	handleOpenAIError,
+	handleOpenAIRequestError,
+	handleProviderError,
+	hasNumericHttpStatus,
+} from "../error-handler"
+import { isTimeoutAbort, mergeAbortSignals } from "../abort-signal"
 
 describe("handleProviderError", () => {
 	const providerName = "TestProvider"
@@ -422,5 +431,117 @@ describe("getNumericHttpStatus", () => {
 		// A callable is not an HTTP error carrier even when a numeric status is attached.
 		expect(getNumericHttpStatus(Object.assign(() => undefined, { status: 429 }))).toBeUndefined()
 		expect(getNumericHttpStatus(Object.assign(() => undefined, { statusCode: 429 }))).toBeUndefined()
+	})
+})
+
+describe("handleOpenAIRequestError (abort awareness)", () => {
+	it("normalizes a generic error to a fresh AbortError when the caller signal aborted", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const original = new Error("network failure")
+
+		const result = handleOpenAIRequestError(original, "OpenAI", controller.signal)
+
+		expect(result).not.toBe(original)
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The OpenAI request was aborted")
+		expect((result as Error & { cause?: unknown }).cause).toBe(original)
+	})
+
+	it("normalizes the SDK user-abort error when no signal was passed", () => {
+		const result = handleOpenAIRequestError(new APIUserAbortError(), "Zai")
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The Zai request was aborted")
+	})
+
+	it("keeps a timeout-triggered SDK abort classified as a timeout when the caller did not abort", () => {
+		const original = new APIUserAbortError()
+		const requestSignal = AbortSignal.abort(new DOMException("The operation was aborted", "TimeoutError"))
+
+		const result = handleOpenAIRequestError(original, "OpenAI", undefined, requestSignal)
+
+		expect(result.name).toBe("TimeoutError")
+		expect(result.message).toBe("The OpenAI completion request timed out")
+		expect((result as Error & { cause?: unknown }).cause).toBe(original)
+	})
+
+	it("keeps the abort contract when the request signal has not aborted", () => {
+		// The guard must not assume a reason exists: an SDK abort can arrive while the
+		// merged request signal is still live, and reading .name on an undefined reason
+		// would turn a cancellation into a TypeError.
+		const result = handleOpenAIRequestError(
+			new APIUserAbortError(),
+			"OpenAI",
+			undefined,
+			new AbortController().signal,
+		)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The OpenAI request was aborted")
+	})
+	it("keeps a caller cancellation classified as an abort even when the request signal timed out", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const requestSignal = AbortSignal.abort(new DOMException("The operation was aborted", "TimeoutError"))
+
+		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", controller.signal, requestSignal)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The OpenAI request was aborted")
+	})
+	it("keeps the abort contract for a caller that stops after a real merged signal timed out", () => {
+		// The row above approximates this interleaving with a signal it builds by hand. This one merges the
+		// way the providers merge: mergeAbortSignals is AbortSignal.any([caller, timeout]) (abort-signal.ts:67),
+		// reached from mergeAbortSignalAndTimeout (abort-signal.ts:52) and from
+		// config-builder/request-config-builder.ts:94 - the composition that produces the requestSignal handed
+		// to the guard at base-openai-compatible-provider.ts:344 and openai.ts:617. The timeout signal is
+		// already aborted when the merge is built, so "the deadline fired first" is a property of the fixture
+		// and not a race; the caller then stops its own controller, and the aggregate keeps the TimeoutError
+		// reason. Only the !abortSignal?.aborted term at error-handler.ts:186 can route this call to the abort
+		// contract, so this row is what pins "the caller's stop wins" for a genuine merged signal.
+		const caller = new AbortController()
+		const timedOut = AbortSignal.abort(new DOMException("The operation was aborted", "TimeoutError"))
+		const requestSignal = mergeAbortSignals(caller.signal, timedOut)
+		caller.abort()
+
+		// These three assertions are the premise the classification rests on. A merged signal that stopped
+		// carrying a TimeoutError reason would make isTimeoutAbort false, and the fall-through at
+		// error-handler.ts:196-201 would then answer AbortError for the wrong reason - this row would stay
+		// green while the guard meant nothing.
+		expect(requestSignal.aborted, "the merge is already aborted by the timeout").toBe(true)
+		expect((requestSignal.reason as { name?: string } | undefined)?.name).toBe("TimeoutError")
+		expect(isTimeoutAbort(requestSignal), "the predicate the guard consults").toBe(true)
+
+		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", caller.signal, requestSignal)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The OpenAI request was aborted")
+	})
+
+	it("normalizes a native fetch-level AbortError when no signal was passed", () => {
+		const result = handleOpenAIRequestError(
+			Object.assign(new Error("aborted"), { name: "AbortError" }),
+			"Fireworks",
+		)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The Fireworks request was aborted")
+	})
+
+	it("keeps the provider-prefix wrap for a non-abort failure", () => {
+		const original = new Error("rate limited")
+
+		const result = handleOpenAIRequestError(original, "OpenAI", new AbortController().signal)
+
+		expect(result).not.toBe(original)
+		expect(result.name).toBe("Error")
+		expect(result.message).toBe("OpenAI completion error: rate limited")
+	})
+
+	it("falls back to the provider-prefix wrap when no signal is available", () => {
+		const result = handleOpenAIRequestError(new Error("boom"), "Kimi Code")
+
+		expect(result.message).toBe("Kimi Code completion error: boom")
 	})
 })
