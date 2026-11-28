@@ -41,7 +41,7 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 		}
 
 		this.defaultModelId = options.openAiEmbeddingModelId || "text-embedding-3-small"
-		this.rateLimitScope = makeRateLimitScope("openai", "https://api.openai.com/v1", apiKey)
+		this.rateLimitScope = makeRateLimitScope("openai", this.embeddingsClient.baseURL, apiKey)
 	}
 
 	/**

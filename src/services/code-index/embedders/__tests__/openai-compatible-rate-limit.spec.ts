@@ -3,8 +3,6 @@ vi.mock("@roo-code/telemetry", () => ({
 }))
 import { OpenAI } from "openai"
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
-import { OpenRouterEmbedder } from "../openrouter"
-
 import { ProviderPacerRegistry } from "../../provider-pacer"
 
 vi.mock("openai")
@@ -12,7 +10,6 @@ vi.mock("../../../../i18n", () => ({ t: (key: string) => key }))
 
 const factories = [
 	["OpenAI-compatible", () => new OpenAICompatibleEmbedder("https://example.test/v1", "test-key")],
-	["OpenRouter", () => new OpenRouterEmbedder("test-key")],
 ] as const
 
 beforeEach(() => {

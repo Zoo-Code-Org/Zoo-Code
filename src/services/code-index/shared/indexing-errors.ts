@@ -58,7 +58,7 @@ function parseRawRetryAfterMs(source: unknown, now: number): number | undefined 
 			if (name.toLowerCase() === "retry-after") retryAfter = value
 		}
 	}
-	const parsedMilliseconds = nonnegativeNumber(milliseconds)
+	const parsedMilliseconds = validDelay(nonnegativeNumber(milliseconds), now)
 	if (parsedMilliseconds !== undefined) return parsedMilliseconds
 	const seconds = nonnegativeNumber(retryAfter)
 	if (seconds !== undefined && Number.isFinite(seconds * 1000)) return seconds * 1000
@@ -116,7 +116,8 @@ export function classifyIndexingError(error: unknown, signal?: AbortSignal): Ind
 	const status = getIndexingErrorStatusCode(error)
 	if (status !== undefined) {
 		if (status === 429) return isQuotaExhausted(chain) ? "permanent" : "rate-limit"
-		return status >= 500 && status < 600 ? "server" : "permanent"
+		// 408 and 409 are temporary; the OpenAI SDK retried them before SDK retries were turned off.
+		return (status >= 500 && status < 600) || status === 408 || status === 409 ? "server" : "permanent"
 	}
 	const networkCodes = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "EPIPE"])
 	for (const entry of chain) {

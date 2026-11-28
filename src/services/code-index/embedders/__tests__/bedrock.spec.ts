@@ -697,16 +697,46 @@ describe("BedrockEmbedder", () => {
 			})
 			afterEach(() => vitest.useRealTimers())
 
+			const modelNotReady = () => Object.assign(new Error("Warming"), { name: "ModelNotReadyException" })
+			const throttleWithHeader = () =>
+				Object.assign(throttle(), { $response: { headers: { "retry-after": "10" } } })
+
 			it.each([
-				["two server failures", [serverError(), serverError()], 1500],
-				["a throttle", [throttle()], 1000],
-			])("recovers after %s and reports success", async (_label, failures, waitMs) => {
+				["two server failures", [serverError(), serverError()], [500, 1000]],
+				["a throttle", [throttle()], [1000]],
+				["a throttle with Retry-After: 10", [throttleWithHeader()], [10_000]],
+				["a model warm-up", [modelNotReady()], [500]],
+			])("recovers after %s and reports success", async (_label, failures, waits) => {
 				for (const failure of failures) mockSend.mockRejectedValueOnce(failure)
 				mockSend.mockResolvedValueOnce(okResponse)
 				const pending = embedder.validateConfiguration()
-				await vitest.advanceTimersByTimeAsync(waitMs)
+				for (const [index, wait] of waits.entries()) {
+					await vitest.advanceTimersByTimeAsync(wait - 1)
+					expect(mockSend).toHaveBeenCalledTimes(index + 1)
+					await vitest.advanceTimersByTimeAsync(1)
+				}
 				await expect(pending).resolves.toEqual({ valid: true })
 				expect(mockSend).toHaveBeenCalledTimes(failures.length + 1)
+			})
+
+			it("keeps a model warm-up out of the shared throttle pause", async () => {
+				const registry = new ProviderPacerRegistry()
+				embedder = new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0", registry)
+				mockSend.mockRejectedValueOnce(modelNotReady()).mockResolvedValueOnce(okResponse)
+				const pending = embedder.validateConfiguration()
+				await vitest.advanceTimersByTimeAsync(0)
+				expect(registry.providerWaits()).toEqual([])
+				await vitest.advanceTimersByTimeAsync(500)
+				await expect(pending).resolves.toEqual({ valid: true })
+			})
+
+			it("passes the validation deadline to the active request", async () => {
+				mockSend.mockResolvedValueOnce(okResponse)
+				await expect(embedder.validateConfiguration()).resolves.toEqual({ valid: true })
+				expect(mockSend).toHaveBeenCalledWith(
+					expect.anything(),
+					expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+				)
 			})
 
 			it("stops after three requests and returns a validation failure", async () => {

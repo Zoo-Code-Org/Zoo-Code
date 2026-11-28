@@ -97,9 +97,11 @@ describe("createPacedEmbeddings", () => {
 		const embedder = limitedEmbedder()
 		const controller = new AbortController()
 		const reason = new Error("stopped")
-		const pending = createPacedEmbeddings(embedder, new ProviderPacerRegistry(), ["x"], controller.signal, "a.ts")
+		const registry = new ProviderPacerRegistry()
+		const pending = createPacedEmbeddings(embedder, registry, ["x"], controller.signal, "a.ts")
 		const settled = pending.catch((error: unknown) => error)
 		await vi.advanceTimersByTimeAsync(0)
+		expect(registry.hasWaitingRequests()).toBe(true)
 		controller.abort(reason)
 		expect(await settled).toBe(reason)
 		await vi.advanceTimersByTimeAsync(600_000)
@@ -110,11 +112,11 @@ describe("createPacedEmbeddings", () => {
 		// AbortSignal.timeout runs on Node's internal timers, which fake timers do not control.
 		const controller = new AbortController()
 		const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal)
-		const settled = createPacedEmbeddings(limitedEmbedder(), new ProviderPacerRegistry(), ["x"]).catch(
-			(error: unknown) => error,
-		)
+		const registry = new ProviderPacerRegistry()
+		const settled = createPacedEmbeddings(limitedEmbedder(), registry, ["x"]).catch((error: unknown) => error)
 		expect(timeout).toHaveBeenCalledWith(PACED_EMBEDDING_TIMEOUT_MS)
 		await vi.advanceTimersByTimeAsync(0)
+		expect(registry.hasWaitingRequests()).toBe(true)
 		const reason = new DOMException("timed out", "TimeoutError")
 		controller.abort(reason)
 		expect(await settled).toBe(reason)
@@ -122,23 +124,35 @@ describe("createPacedEmbeddings", () => {
 	})
 })
 
-it("CI-RP-02: abort ends a wait at once without another request", async () => {
+it("CI-RP-02: abort ends a wait at once without another request and returns the reservation", async () => {
 	const controller = new AbortController()
+	const budget = { retriesUsed: 0 }
 	const request = vi.fn().mockRejectedValue(new EmbeddingError("unavailable", { status: 503 }))
-	const pending = retryWithPolicy(request, { signal: controller.signal }).catch((error) => error)
+	const pending = retryWithPolicy(request, { signal: controller.signal, budget }).catch((error) => error)
 	await vi.advanceTimersByTimeAsync(0)
+	expect(vi.getTimerCount()).toBe(1)
+	expect(budget.retriesUsed).toBe(1)
 	controller.abort()
 	expect(await pending).toBe(controller.signal.reason)
+	expect(budget.retriesUsed).toBe(0)
 	await vi.advanceTimersByTimeAsync(120_000)
 	expect(request).toHaveBeenCalledOnce()
 })
 
-it.each([401, 408, 409])("CI-RP-04: does not retry permanent HTTP %s", async (status) => {
-	const request = vi.fn().mockRejectedValue(new EmbeddingError("failed", { status }))
-	await expect(retryWithPolicy(request)).rejects.toMatchObject({
-		attempts: 1,
-	})
+it("CI-RP-04: does not retry permanent HTTP 401", async () => {
+	const request = vi.fn().mockRejectedValue(new EmbeddingError("failed", { status: 401 }))
+	await expect(retryWithPolicy(request)).rejects.toMatchObject({ attempts: 1 })
 	expect(request).toHaveBeenCalledOnce()
+})
+
+it.each([408, 409])("retries temporary HTTP %s once, then succeeds", async (status) => {
+	const request = vi.fn().mockRejectedValueOnce(new EmbeddingError("failed", { status })).mockResolvedValue("ok")
+	const pending = retryWithPolicy(request)
+	await vi.advanceTimersByTimeAsync(499)
+	expect(request).toHaveBeenCalledOnce()
+	await vi.advanceTimersByTimeAsync(1)
+	await expect(pending).resolves.toBe("ok")
+	expect(request).toHaveBeenCalledTimes(2)
 })
 
 it("returns a successful value and never issues an aborted first request", async () => {

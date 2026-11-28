@@ -71,9 +71,15 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 	it("waits on the scope's pacer and retries a 429", async () => {
 		const dependencies = setup()
 		const run = vi.spyOn(dependencies.pacers.get("openai:1"), "run")
-		const limited = Object.assign(new Error("limited"), { status: 429, retryAfterMs: 1 })
+		const limited = Object.assign(new Error("limited"), { status: 429, retryAfterMs: 5000 })
 		dependencies.embedder.createEmbeddings.mockRejectedValueOnce(limited)
-		const result = await new FilePreparation(dependencies).prepareFile(filePath)
+		vi.useFakeTimers()
+		const pending = new FilePreparation(dependencies).prepareFile(filePath)
+		await vi.advanceTimersByTimeAsync(4999)
+		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(1)
+		const result = await pending
+		vi.useRealTimers()
 		expect(result.status).toBe("processed_for_batching")
 		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledTimes(2)
 		expect(run).toHaveBeenCalledWith(filePath, expect.any(AbortSignal), expect.any(Function))

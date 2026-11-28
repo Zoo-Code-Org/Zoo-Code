@@ -7,7 +7,7 @@ import { getDefaultModelId } from "../../../shared/embeddingModels"
 import { Package } from "../../../shared/package"
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, toEmbeddingError } from "../shared/validation-helpers"
-import { EmbeddingError } from "../shared/indexing-errors"
+import { EmbeddingError, parseRetryAfterMs } from "../shared/indexing-errors"
 import { retryWithPolicy } from "../shared/retry-policy"
 import { makeRateLimitScope, type ProviderPacerRegistry } from "../provider-pacer"
 import { TelemetryEventName } from "@roo-code/types"
@@ -158,6 +158,7 @@ export class BedrockEmbedder implements IEmbedder {
 	private async _invokeEmbeddingModel(
 		text: string,
 		model: string,
+		abortSignal?: AbortSignal,
 	): Promise<{ embedding: number[]; inputTextTokenCount?: number }> {
 		let requestBody: any
 		const modelId = model
@@ -210,7 +211,8 @@ export class BedrockEmbedder implements IEmbedder {
 
 		const command = new InvokeModelCommand(params)
 
-		const response = await this.bedrockClient.send(command)
+		const response = await this.bedrockClient.send(command, { abortSignal })
+		abortSignal?.throwIfAborted()
 
 		// Parse the response
 		const responseBody = JSON.parse(new TextDecoder().decode(response.body))
@@ -260,7 +262,7 @@ export class BedrockEmbedder implements IEmbedder {
 					() =>
 						this.pacers.get(this.rateLimitScope).run(undefined, signal, async () => {
 							try {
-								return await this._invokeEmbeddingModel("test", this.defaultModelId)
+								return await this._invokeEmbeddingModel("test", this.defaultModelId, signal)
 							} catch (error) {
 								throw asRateLimit(error)
 							}
@@ -319,10 +321,17 @@ export class BedrockEmbedder implements IEmbedder {
 	}
 }
 
-// The AWS SDK reports throttling by name; give it a 429 so the shared classifier treats it as a rate limit.
+// The AWS SDK reports errors by name. Only throttling pauses the shared scope; a model warm-up
+// (ModelNotReadyException) is specific to one model, so it takes the bounded transient retry.
 function asRateLimit(error: unknown): unknown {
-	if (error instanceof Error && error.name === "ThrottlingException") {
-		return new EmbeddingError(error.message, error, { classification: "rate-limit", statusCode: 429 })
-	}
-	return error
+	if (!(error instanceof Error)) return error
+	if (error.name === "ModelNotReadyException")
+		return new EmbeddingError(error.message, error, { classification: "server" })
+	if (error.name !== "ThrottlingException") return error
+	const headers = (error as { $response?: { headers?: Record<string, unknown> } }).$response?.headers
+	return new EmbeddingError(error.message, error, {
+		classification: "rate-limit",
+		statusCode: 429,
+		retryAfterMs: parseRetryAfterMs(headers),
+	})
 }

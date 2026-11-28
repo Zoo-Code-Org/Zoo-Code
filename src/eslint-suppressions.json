@@ -1039,6 +1039,11 @@
 			"count": 10
 		}
 	},
+	"services/code-index/embedders/__tests__/openrouter.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 4
+		}
+	},
 	"services/code-index/embedders/__tests__/vercel-ai-gateway.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -1066,7 +1071,7 @@
 	},
 	"services/code-index/embedders/openrouter.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 2
+			"count": 3
 		}
 	},
 	"services/code-index/interfaces/vector-store.ts": {

@@ -87,7 +87,7 @@ export function extractStatusCode(error: any): number | undefined {
 	if (error?.response?.status) return error.response.status
 
 	// Extract from error message (e.g., "HTTP 404: Not Found")
-	if (error?.message) {
+	if (typeof error?.message === "string") {
 		const match = error.message.match(/HTTP (\d+):/)
 		if (match) {
 			return parseInt(match[1], 10)
@@ -106,7 +106,7 @@ export function extractStatusCode(error: any): number | undefined {
  * Extracts error message from various error formats
  */
 export function extractErrorMessage(error: any): string {
-	if (error?.message) {
+	if (typeof error?.message === "string" && error.message) {
 		return error.message
 	}
 

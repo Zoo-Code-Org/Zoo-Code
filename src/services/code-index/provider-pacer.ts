@@ -1,3 +1,4 @@
+import { randomBytes, scryptSync } from "crypto"
 import type { Disposable, Event } from "vscode"
 import { PACER_MAX_BACKOFF_MS } from "./constants"
 import { classifyIndexingError, EmbeddingError } from "./shared/indexing-errors"
@@ -23,8 +24,19 @@ function serviceLabel(scope: string): string {
 	return /^[a-z][a-z0-9-]{0,63}$/i.test(prefix) ? prefix : "provider"
 }
 
-// In-memory equality ids: hashing the API key would be flagged as weak password hashing and adds nothing here.
+// Keyed by a salted scrypt digest so the map never retains a raw API key.
 const scopeIds = new Map<string, number>()
+const scopeSalt = randomBytes(16)
+
+function notify(listeners: Iterable<() => void>): void {
+	for (const listener of listeners) {
+		try {
+			listener()
+		} catch (error) {
+			console.error("[ProviderPacer] change listener failed:", error)
+		}
+	}
+}
 
 export function makeRateLimitScope(provider: string, baseUrl?: string, apiKey?: string, extra?: string): string {
 	let normalizedUrl = ""
@@ -35,7 +47,8 @@ export function makeRateLimitScope(provider: string, baseUrl?: string, apiKey?: 
 		parsedUrl.hash = ""
 		normalizedUrl = parsedUrl.toString().replace(/\/+$/, "")
 	}
-	const key = JSON.stringify([provider, normalizedUrl, apiKey ?? "", extra ?? ""])
+	const secret = apiKey ? scryptSync(apiKey, scopeSalt, 32).toString("base64") : ""
+	const key = JSON.stringify([provider, normalizedUrl, secret, extra ?? ""])
 	let id = scopeIds.get(key)
 	if (id === undefined) {
 		id = scopeIds.size + 1
@@ -49,6 +62,7 @@ export class ProviderPacer {
 	readonly service: string
 	private pausedUntil = 0
 	private consecutiveRateLimits = 0
+	private pauseCount = 0
 	private timer?: ReturnType<typeof setTimeout>
 	private readonly waiters = new Set<Waiter>()
 	private readonly changes = new Set<() => void>()
@@ -81,13 +95,18 @@ export class ProviderPacer {
 		while (true) {
 			while (Date.now() < this.pausedUntil) await this.wait(path, signal)
 			signal?.throwIfAborted()
+			const startPauseCount = this.pauseCount
 			try {
 				const result = await request()
-				this.consecutiveRateLimits = 0
+				// A success sent before the latest pause must not reset that episode's backoff.
+				if (startPauseCount === this.pauseCount) this.consecutiveRateLimits = 0
 				return result
 			} catch (error) {
-				if (classifyIndexingError(error, signal) !== "rate-limit") throw error
+				// Without the signal: a provider 429 still pauses the scope after this caller aborts.
+				if (classifyIndexingError(error) !== "rate-limit") throw error
 				this.pause(error)
+				// Yield a macrotask so repeated Retry-After: 0 responses cannot starve abort handling.
+				await new Promise((resolve) => setTimeout(resolve, 0))
 			}
 		}
 	}
@@ -96,9 +115,10 @@ export class ProviderPacer {
 		const now = Date.now()
 		// Concurrent 429s from requests sent before the pause belong to the same episode.
 		if (now >= this.pausedUntil) this.consecutiveRateLimits++
+		this.pauseCount++
 		const requested = new EmbeddingError("Provider rate limited", error).retryAfterMs
 		const delay =
-			typeof requested === "number" && requested > 0 && Number.isFinite(new Date(now + requested).getTime())
+			typeof requested === "number" && requested >= 0 && Number.isFinite(new Date(now + requested).getTime())
 				? requested
 				: Math.min(PACER_MAX_BACKOFF_MS, 1000 * 2 ** Math.min(30, this.consecutiveRateLimits - 1))
 		this.pausedUntil = Math.max(this.pausedUntil, now + delay)
@@ -148,7 +168,7 @@ export class ProviderPacer {
 	}
 
 	private changed(): void {
-		for (const listener of this.changes) listener()
+		notify(this.changes)
 	}
 }
 
@@ -168,9 +188,7 @@ export class ProviderPacerRegistry {
 		let pacer = this.pacers.get(scope)
 		if (!pacer) {
 			pacer = new ProviderPacer(scope)
-			pacer.onDidChange(() => {
-				for (const listener of this.changes) listener()
-			})
+			pacer.onDidChange(() => notify(this.changes))
 			this.pacers.set(scope, pacer)
 		}
 		return pacer

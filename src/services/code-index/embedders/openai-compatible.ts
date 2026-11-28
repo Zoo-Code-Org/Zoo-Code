@@ -4,6 +4,8 @@ import { MAX_BATCH_TOKENS, MAX_ITEM_TOKENS } from "../constants"
 import { getDefaultModelId, getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, HttpError, toEmbeddingError } from "../shared/validation-helpers"
+import { retryWithPolicy } from "../shared/retry-policy"
+import { IndexingRetryError } from "../shared/indexing-errors"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
@@ -35,6 +37,8 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	private readonly isFullUrl: boolean
 	private readonly maxItemTokens: number
 	readonly rateLimitScope: string
+	// Batches that succeeded before a 429, so a paced rerun of the same texts does not resend them.
+	private readonly completedEmbeddings = new Map<string, number[]>()
 
 	/**
 	 * Creates a new OpenAI Compatible embedder
@@ -148,13 +152,20 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
-				const batchResult = await this._embedBatch(currentBatch, modelToUse)
+				const cached = currentBatch.map((text) => this.completedEmbeddings.get(`${modelToUse}\0${text}`))
+				const batchResult = cached.every((embedding) => embedding !== undefined)
+					? { embeddings: cached as number[][], usage: { promptTokens: 0, totalTokens: 0 } }
+					: await this._embedBatch(currentBatch, modelToUse)
+				currentBatch.forEach((text, index) =>
+					this.completedEmbeddings.set(`${modelToUse}\0${text}`, batchResult.embeddings[index]),
+				)
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
 			}
 		}
 
+		for (const text of processedTexts) this.completedEmbeddings.delete(`${modelToUse}\0${text}`)
 		return { embeddings: allEmbeddings, usage }
 	}
 
@@ -222,10 +233,17 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 				// Ignore text parsing errors
 				errorText = `Error ${status}`
 			}
-			// Headers carry Retry-After for the shared rate-limit wait.
+			let body: { error?: { code?: string; type?: string } } | undefined
+			try {
+				body = JSON.parse(errorText)
+			} catch {
+				// Non-JSON bodies keep only the text.
+			}
+			// Headers carry Retry-After; the structured error code lets quota errors stay permanent.
 			throw Object.assign(new Error(`HTTP ${status}: ${errorText}`), {
 				status: status || response?.status || 0,
 				headers: response?.headers,
+				error: body?.error,
 			})
 		}
 
@@ -305,19 +323,18 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 				const testTexts = ["test"]
 				const modelToUse = this.defaultModelId
 
-				let response: OpenAIEmbeddingResponse
-
-				if (this.isFullUrl) {
-					// Test direct HTTP request for full endpoint URLs
-					response = await this.makeDirectEmbeddingRequest(this.baseUrl, testTexts, modelToUse)
-				} else {
-					// Test using OpenAI SDK for base URLs
-					response = (await this.embeddingsClient.embeddings.create({
-						input: testTexts,
-						model: modelToUse,
-						encoding_format: "base64",
-					})) as OpenAIEmbeddingResponse
-				}
+				// SDK retries are off, so a bounded retry keeps a temporary 5xx from failing validation.
+				const response = await retryWithPolicy(async () =>
+					this.isFullUrl
+						? await this.makeDirectEmbeddingRequest(this.baseUrl, testTexts, modelToUse)
+						: ((await this.embeddingsClient.embeddings.create({
+								input: testTexts,
+								model: modelToUse,
+								encoding_format: "base64",
+							})) as OpenAIEmbeddingResponse),
+				).catch((error: unknown) => {
+					throw error instanceof IndexingRetryError ? error.cause : error
+				})
 
 				// Check if we got a valid response
 				if (!response?.data || response.data.length === 0) {

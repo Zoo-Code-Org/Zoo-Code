@@ -61,7 +61,13 @@ export async function retryWithPolicy<T>(
 					throw error
 				throw new IndexingRetryError(error, attempt, classification, activity)
 			}
-			await waitForRetry(delayMs, signal)
+			try {
+				await waitForRetry(delayMs, signal)
+			} catch (abortError) {
+				// The retry never started, so the shared budget gets its reservation back.
+				budget.retriesUsed--
+				throw abortError
+			}
 		}
 	}
 }

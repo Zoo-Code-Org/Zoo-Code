@@ -1,7 +1,7 @@
 import type { MockedClass, MockedFunction } from "vitest"
 import { OpenAI } from "openai"
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
-import { MAX_ITEM_TOKENS } from "../../constants"
+import { MAX_BATCH_TOKENS, MAX_ITEM_TOKENS } from "../../constants"
 import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
 
 // Mock the OpenAI SDK
@@ -728,6 +728,33 @@ describe("OpenAICompatibleEmbedder", () => {
 					await expect(embedder.createEmbeddings(["test"])).rejects.toThrow(expectedMessage)
 				})
 
+				it("keeps the structured quota code from a direct-fetch 429", async () => {
+					const embedder = new OpenAICompatibleEmbedder(azureUrl, testApiKey, testModelId)
+					const body = JSON.stringify({ error: { code: "insufficient_quota" } })
+					vi.mocked(global.fetch).mockResolvedValue(new Response(body, { status: 429 }))
+					await expect(embedder.createEmbeddings(["test"])).rejects.toMatchObject({
+						classification: "permanent",
+						message: "embeddings:quotaExceeded",
+					})
+				})
+
+				it("does not resend a batch that succeeded before a later 429", async () => {
+					const embedder = new OpenAICompatibleEmbedder(azureUrl, testApiKey, testModelId, MAX_BATCH_TOKENS)
+					// Each text fills most of a batch, so the two texts go in two requests.
+					const texts = ["a", "b"].map((letter) => letter.repeat((MAX_BATCH_TOKENS - 1) * 4))
+					const ok = (values: number[]) =>
+						createMockResponse({ data: [{ embedding: createBase64Embedding(values) }], usage: {} })
+					vi.mocked(global.fetch)
+						.mockResolvedValueOnce(ok([1]))
+						.mockResolvedValueOnce(new Response("limited", { status: 429 }))
+						.mockResolvedValueOnce(ok([2]))
+					await expect(embedder.createEmbeddings(texts)).rejects.toMatchObject({ statusCode: 429 })
+					const result = await embedder.createEmbeddings(texts)
+					expect(global.fetch).toHaveBeenCalledTimes(3)
+					expectEmbeddingValues(result.embeddings[0], [1])
+					expectEmbeddingValues(result.embeddings[1], [2])
+				})
+
 				it("returns direct-fetch rate limits without retrying", async () => {
 					const embedder = new OpenAICompatibleEmbedder(azureUrl, testApiKey, testModelId)
 					vi.mocked(global.fetch).mockResolvedValue(new Response("rate limited", { status: 429 }))
@@ -943,17 +970,36 @@ describe("OpenAICompatibleEmbedder", () => {
 			expect(result).toEqual({ valid: false, error: "embeddings:validation.serviceUnavailable" })
 		})
 
-		it("should fail validation with generic error", async () => {
+		it("should fail validation with generic error after bounded retries", async () => {
+			vi.useFakeTimers()
 			embedder = new OpenAICompatibleEmbedder(testBaseUrl, testApiKey, testModelId)
 
 			const genericError = new Error("Unknown error")
 			Object.assign(genericError, { status: 500 })
 			mockEmbeddingsCreate.mockRejectedValue(genericError)
 
-			const result = await embedder.validateConfiguration()
+			const pending = embedder.validateConfiguration()
+			await vi.advanceTimersByTimeAsync(1500)
+			const result = await pending
+			vi.useRealTimers()
 
+			expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(3)
 			expect(result.valid).toBe(false)
 			expect(result.error).toBe("embeddings:validation.configurationError")
+		})
+
+		it("recovers from a temporary 503 during validation", async () => {
+			vi.useFakeTimers()
+			embedder = new OpenAICompatibleEmbedder(testBaseUrl, testApiKey, testModelId)
+			mockEmbeddingsCreate
+				.mockRejectedValueOnce(Object.assign(new Error("unavailable"), { status: 503 }))
+				.mockResolvedValueOnce({ data: [{ embedding: [0.1] }], usage: {} })
+			const pending = embedder.validateConfiguration()
+			await vi.advanceTimersByTimeAsync(499)
+			expect(mockEmbeddingsCreate).toHaveBeenCalledOnce()
+			await vi.advanceTimersByTimeAsync(1)
+			await expect(pending).resolves.toEqual({ valid: true })
+			vi.useRealTimers()
 		})
 	})
 })

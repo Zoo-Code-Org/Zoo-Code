@@ -490,6 +490,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 				}
 				success = true
 			} catch (error) {
+				// A stop is not a batch failure: do not retry or report it.
+				if (signal?.aborted) return
 				lastError = error as Error
 				console.error(
 					`[DirectoryScanner] Error processing batch (attempt ${attempts}) in workspace ${scanWorkspace}:`,

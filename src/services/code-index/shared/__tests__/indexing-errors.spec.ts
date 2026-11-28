@@ -45,8 +45,8 @@ describe("indexing error classification", () => {
 		[{ statusCode: 503 }, "server"],
 		[{ response: { status: 502 } }, "server"],
 		[{ $metadata: { httpStatusCode: 503 } }, "server"],
-		[{ status: 408 }, "permanent"],
-		[{ status: 409 }, "permanent"],
+		[{ status: 408 }, "server"],
+		[{ status: 409 }, "server"],
 		[{ status: 401 }, "permanent"],
 		[{ status: "500", statusCode: 429 }, "rate-limit"],
 		[{ status: 400, statusCode: 503 }, "permanent"],
@@ -148,6 +148,7 @@ describe("parseRetryAfterMs", () => {
 		[-1, undefined],
 		[Infinity, undefined],
 		[{ "retry-after-ms": "1e308" }, undefined],
+		[{ "retry-after-ms": "1e308", "retry-after": "60" }, 60_000],
 		[1e300, undefined],
 		[undefined, undefined],
 	] as const)("parses %o", (source, expected) => {
@@ -177,6 +178,13 @@ it.each(["2", "invalid", undefined])(
 		expect(get.mock.calls.filter(([name]) => name === "retry-after")).toHaveLength(1)
 	},
 )
+
+it("keeps a non-string message from replacing the original rejection", () => {
+	const original = { message: { detail: "request failed" }, status: 503 }
+	const error = toEmbeddingError(original)
+	expect(error).toBeInstanceOf(EmbeddingError)
+	expect(error).toMatchObject({ cause: original, classification: "server", statusCode: 503 })
+})
 
 it("explicit delay wins without reading headers", () => {
 	const get = vi.fn()

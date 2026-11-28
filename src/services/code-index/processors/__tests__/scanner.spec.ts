@@ -240,15 +240,60 @@ describe("DirectoryScanner", () => {
 			mockCodeParser.parseFile.mockResolvedValue([
 				{ file_path: "test/file1.js", content: "c", start_line: 1, end_line: 2, segmentHash: "s" },
 			])
-			mockEmbedder.createEmbeddings.mockRejectedValueOnce(
-				Object.assign(new Error("limited"), { status: 429, retryAfterMs: 1 }),
-			)
+			mockEmbedder.createEmbeddings
+				.mockRejectedValueOnce(Object.assign(new Error("limited"), { status: 429, retryAfterMs: 5000 }))
+				.mockResolvedValueOnce({ embeddings: [[0.5]] })
 
-			await pacedScanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal)
+			vi.useFakeTimers()
+			const pending = pacedScanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal)
+			await vi.advanceTimersByTimeAsync(4999)
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(1)
+			expect(mockVectorStore.upsertPoints).not.toHaveBeenCalled()
+			await vi.advanceTimersByTimeAsync(1)
+			const result = await pending
+			vi.useRealTimers()
 
 			expect(run).toHaveBeenCalledWith(undefined, controller.signal, expect.any(Function))
 			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(2)
-			expect(mockVectorStore.upsertPoints).toHaveBeenCalledTimes(1)
+			expect(result.totalBlockCount).toBe(1)
+			expect(mockVectorStore.upsertPoints).toHaveBeenCalledExactlyOnceWith([
+				{
+					id: expect.any(String),
+					vector: [0.5],
+					payload: expect.objectContaining({ codeChunk: "c", startLine: 1, endLine: 2, segmentHash: "s" }),
+				},
+			])
+		})
+
+		it("stops batch retries without reporting an error when the scan is stopped during a wait", async () => {
+			const controller = new AbortController()
+			const onError = vi.fn()
+			const pacedScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				1,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/file1.js"], false])
+			mockCodeParser.parseFile.mockResolvedValue([
+				{ file_path: "test/file1.js", content: "c", start_line: 1, end_line: 2, segmentHash: "s" },
+			])
+			mockEmbedder.createEmbeddings.mockRejectedValue(
+				Object.assign(new Error("limited"), { status: 429, retryAfterMs: 60_000 }),
+			)
+			vi.useFakeTimers()
+			const pending = pacedScanner.scanDirectory("/test", undefined, onError, undefined, controller.signal)
+			await vi.advanceTimersByTimeAsync(10)
+			controller.abort()
+			await vi.advanceTimersByTimeAsync(10_000)
+			await pending
+			vi.useRealTimers()
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(1)
+			expect(onError).not.toHaveBeenCalled()
 		})
 
 		it("should clean up a threshold-triggered batch", async () => {

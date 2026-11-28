@@ -143,6 +143,91 @@ describe("ProviderPacer (CI-PP-02)", () => {
 		await expect(first).resolves.toEqual({ value: undefined })
 	})
 
+	it("removes the same abort listener it registered when a wait ends normally", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const first = settle(pacer.run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(1000))))
+		await vi.advanceTimersByTimeAsync(0)
+		const controller = new AbortController()
+		const add = vi.spyOn(controller.signal, "addEventListener")
+		const remove = vi.spyOn(controller.signal, "removeEventListener")
+		const waiting = pacer.run("b.ts", controller.signal, vi.fn().mockResolvedValue("ok"))
+		const registered = add.mock.calls[0][1]
+		await vi.advanceTimersByTimeAsync(1000)
+		await expect(waiting).resolves.toBe("ok")
+		expect(remove).toHaveBeenCalledWith("abort", registered)
+		await first
+	})
+
+	it("records the pause from a 429 that arrives after its caller aborted", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const controller = new AbortController()
+		const aborted = settle(
+			pacer.run(undefined, controller.signal, async () => {
+				controller.abort(new Error("stopped"))
+				throw rateLimit(5000)
+			}),
+		)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(await aborted).toMatchObject({ error: { message: "stopped" } })
+		expect(pacer.resumeAt).toBe(5000)
+	})
+
+	it("does not let a success sent before a pause reset that pause's backoff", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		let resolveLate: (value: string) => void = () => {}
+		let rejectThird: (error: unknown) => void = () => {}
+		const late = pacer.run(undefined, undefined, () => new Promise<string>((resolve) => (resolveLate = resolve)))
+		const third = settle(
+			pacer.run(
+				undefined,
+				undefined,
+				vi
+					.fn()
+					.mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectThird = reject)))
+					.mockResolvedValue("third"),
+			),
+		)
+		const limited = settle(pacer.run(undefined, undefined, vi.fn().mockRejectedValueOnce(rateLimit(100))))
+		await vi.advanceTimersByTimeAsync(0)
+		resolveLate("late")
+		await late
+		rejectThird(rateLimit())
+		await vi.advanceTimersByTimeAsync(0)
+		// Without the guard, the late success would reset the count and this headerless 429 would wait 500 ms.
+		expect(pacer.resumeAt! - Date.now()).toBe(1000)
+		await vi.advanceTimersByTimeAsync(1000)
+		await Promise.all([limited, third])
+	})
+
+	it("honors Retry-After: 0 without a backoff pause", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const request = vi.fn().mockRejectedValueOnce(rateLimit(0)).mockResolvedValue("ok")
+		const run = pacer.run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(1)
+		await expect(run).resolves.toBe("ok")
+		expect(request).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps pacing and later listeners working when a change listener throws", async () => {
+		const registry = new ProviderPacerRegistry()
+		const error = vi.spyOn(console, "error").mockImplementation(() => {})
+		const later = vi.fn()
+		registry.get("openai:1").onDidChange(() => {
+			throw new Error("observer")
+		})
+		registry.onDidChange(() => {
+			throw new Error("observer")
+		})
+		registry.onDidChange(later)
+		const request = vi.fn().mockRejectedValueOnce(rateLimit(1000)).mockResolvedValue("ok")
+		const run = registry.get("openai:1").run(undefined, undefined, request)
+		await vi.advanceTimersByTimeAsync(1000)
+		await expect(run).resolves.toBe("ok")
+		expect(later).toHaveBeenCalled()
+		expect(error).toHaveBeenCalled()
+		error.mockRestore()
+	})
+
 	it("rethrows non-rate-limit errors unchanged", async () => {
 		const failure = Object.assign(new Error("server"), { status: 500 })
 		await expect(
