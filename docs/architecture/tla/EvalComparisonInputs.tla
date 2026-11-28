@@ -20,20 +20,40 @@
 \* Sabotage: omit one fixture from the shared plan. The independent code test fails.
 \* Restored plan passes. The plan builder is outside the input model.
 \* Cost: the simplification took about 3 agent minutes across these models.
+\* Source: side-results.json metrics. Sink: paired deltas, cost and outcome rows.
+\* Failure: a null duration reads as zero and shows as a speedup.
+\* Invariant: ValuesSafe accepts only well-formed values. It follows review.
+\* PR 2154 discussion_r4719753641. Review: 0 covered, 1 added, 0 gap.
+\* Expect: the old validator fails ValuesSafe. No new bug is expected.
+\* Result: fixed passes in 696 states. NoCheckValues accepts a null duration.
+\* Replay: the null duration test fails on the old validator and passes now.
+\* Findings: no new code bug was found by TLC. No false alarm was found.
+\* Property: coding-report.test.ts checks bad kinds for each report metric.
+\* Gate: 408 eval tests, eval type check, and shared ESLint pass.
+\* Lint: src ESLint excludes scripts. Suppression counts did not change.
+\* Cost: about 10 agent minutes for both fixes. Each TLC run took under 1 second.
 EXTENDS Naturals, Sequences, FiniteSets
-CONSTANTS Inputs, Minutes, ExpectedKeys, CheckKeys, CheckTimer
-VARIABLES keys, agrees, minutes, result
-vars == <<keys, agrees, minutes, result>>
+CONSTANTS Inputs, Minutes, ExpectedKeys, CheckKeys, CheckTimer, CheckValues
+VARIABLES keys, agrees, minutes, metric, result
+vars == <<keys, agrees, minutes, metric, result>>
+\* A metric is one field that the report reads, and the kind of its JSON value.
+Metrics == {"duration", "usd", "outcome"} \X {"valid", "absent", "null", "wrongType", "outOfRange"}
+ValueOk == metric[2] = "valid" \/ metric = <<"duration", "absent">>
 KeySet == {keys[i] : i \in DOMAIN keys}
 Complete == KeySet = ExpectedKeys /\ Len(keys) = Cardinality(ExpectedKeys) /\ agrees
+\* Values vary only with good keys and timer, because the checks are independent.
 Init == /\ keys \in Inputs /\ agrees \in BOOLEAN /\ minutes \in Minutes
+        /\ metric \in Metrics
+        /\ metric # <<"duration", "valid">> => (Complete /\ minutes = 1)
         /\ result = "pending"
 Validate == /\ result = "pending"
             /\ result' = IF (~CheckKeys \/ Complete) /\ (~CheckTimer \/ minutes <= 35791)
+                           /\ (~CheckValues \/ ValueOk)
                           THEN "accepted" ELSE "rejected"
-            /\ UNCHANGED <<keys, agrees, minutes>>
+            /\ UNCHANGED <<keys, agrees, minutes, metric>>
 Next == Validate
 Spec == Init /\ [][Next]_vars
 KeysComplete == result = "accepted" => Complete
+ValuesSafe == result = "accepted" => ValueOk
 TimerSafe == result = "accepted" => minutes <= 2147483647 \div 60000
 ====

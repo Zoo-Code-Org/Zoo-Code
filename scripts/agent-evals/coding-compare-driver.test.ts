@@ -1003,3 +1003,69 @@ it("drains preparation IPC after exit before finishing the side", async (t) => {
 	)
 	assert.ok(signals.includes("SIGTERM"))
 })
+
+// SafeOutcome in EvalComparisonRelease: no success follows an observed interrupt.
+it("never completes after an interrupt observed during any final directory removal", async (t) => {
+	const rmdir = fs.rmdir.bind(fs)
+	let target = 0
+	let calls = 0
+	let flag = createInterruptFlag()
+	t.mock.method(fs, "rmdir", async (...args: Parameters<typeof fs.rmdir>) => {
+		if (++calls === target) flag.signal("SIGINT")
+		return rmdir(...args)
+	})
+	for (target = 1; target <= 3; target++) {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-release-interrupt-"))
+		try {
+			calls = 0
+			flag = createInterruptFlag()
+			const out = path.join(dir, "out")
+			const outcome = await executeComparisonFlow(
+				flowWiring({
+					flag,
+					out,
+					scratchDir: path.join(dir, "scratch"),
+					runSide: async (side) => record(side, COMMIT),
+				}),
+			)
+			if (flag.isInterrupted()) {
+				assert.deepEqual(outcome, { status: "interrupted", signal: "SIGINT" }, `removal ${target}`)
+				assert.deepEqual(await fs.readdir(out), [], `removal ${target}`)
+			} else assert.equal(outcome.status, "completed")
+			assert.deepEqual((await fs.readdir(dir)).sort(), ["out"])
+		} finally {
+			await rmdir(path.join(dir, "scratch")).catch(() => {})
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	}
+})
+
+// SafeOutcome in EvalComparisonRelease: a failed release keeps no completion marker.
+for (const signal of [undefined, "SIGTERM"] as const) {
+	it(`removes the report when the lock release fails${signal ? ` after ${signal}` : ""}`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-release-failure-"))
+		try {
+			const flag = createInterruptFlag()
+			const out = path.join(dir, "out")
+			const wiring = flowWiring({
+				flag,
+				out,
+				scratchDir: path.join(dir, "scratch"),
+				runSide: async (side) => record(side, COMMIT),
+			})
+			wiring.interruptKill = async () => {
+				assert.ok(await publishedComparisonGeneration(out))
+				// A file inside the lock directory makes its removal fail.
+				const lock = (await fs.readdir(dir)).find((name) => name.startsWith(".coding-comparison-"))
+				assert.ok(lock)
+				await fs.writeFile(path.join(dir, lock, "occupied"), "x")
+				if (signal) flag.signal(signal)
+			}
+			if (signal) assert.deepEqual(await executeComparisonFlow(wiring), { status: "interrupted", signal })
+			else await assert.rejects(executeComparisonFlow(wiring), /ENOTEMPTY/)
+			assert.deepEqual(await fs.readdir(out), [])
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}

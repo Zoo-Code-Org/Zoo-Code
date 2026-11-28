@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto"
 import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
+import { rmdirSync } from "node:fs"
 import path from "node:path"
 import os from "node:os"
 import { promisify } from "node:util"
 import type { SidePins } from "./coding-pins.ts"
+import type { CodingRunOutcome } from "./coding-outcomes.ts"
 import { buildComparisonReport, renderMarkdownReport, type ComparisonReport, type SideResult } from "./coding-report.ts"
 import { codingRepetitionPlan } from "./coding-suite.ts"
 import { DEFAULT_REPETITIONS } from "./coding-stats.ts"
@@ -298,8 +300,13 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 		return await executeOwnedComparisonFlow(wiring)
 	} finally {
 		// Preparation or lock acquisition can fail before the locked flow owns
-		// cleanup. Only remove an empty scratch directory on this path.
-		await fs.rmdir(wiring.scratchDir).catch(() => {})
+		// cleanup. Only remove an empty scratch directory. The removal is
+		// synchronous, so no signal can follow the final check of a success.
+		try {
+			rmdirSync(wiring.scratchDir)
+		} catch {
+			// The directory is absent or not empty.
+		}
 	}
 }
 
@@ -318,11 +325,32 @@ const executeOwnedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise
 			{ cause: error },
 		)
 	}
+	let outcome: ComparisonFlowOutcome | undefined
+	const errors: unknown[] = []
 	try {
-		return await executeLockedComparisonFlow({ ...wiring, out: canonicalOut })
-	} finally {
-		await fs.rmdir(lock)
+		outcome = await executeLockedComparisonFlow({ ...wiring, out: canonicalOut })
+	} catch (error) {
+		errors.push(error)
 	}
+	const removeOwnedReport = () => removeComparisonReport(canonicalOut).catch((error) => errors.push(error))
+	// EvalComparisonRelease.tla: with no interrupt, there is no await from this
+	// check to the end. The release is synchronous for that reason.
+	if (wiring.interruptedSignal() && outcome?.status !== "interrupted") await removeOwnedReport()
+	try {
+		rmdirSync(lock)
+	} catch (error) {
+		errors.push(error)
+		// The lock remains, so this run still owns the report.
+		await removeOwnedReport()
+	}
+	const signal = wiring.interruptedSignal()
+	if (signal === "SIGINT" || signal === "SIGTERM") {
+		if (errors.length) console.error("comparison interrupted; terminal errors:", new AggregateError(errors))
+		return { status: "interrupted", signal }
+	}
+	if (errors.length === 1) throw errors[0]
+	if (errors.length || !outcome) throw new AggregateError(errors, "comparison failed and lock release failed")
+	return outcome
 }
 
 const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
@@ -451,7 +479,8 @@ export type SideResultFile = SideResult
 // Validates one side result file before the report builder consumes it. The
 // file is data, so its shape is checked, and it must record exactly the
 // expected side label and the approved commit of that side. The pins must be
-// complete, and run keys must match the full plan and their metrics.
+// complete, and run keys must match the full plan and their metrics. Each
+// metric that the report reads must have a well-formed value.
 // Anything else aborts the
 // comparison instead of producing a report from partial output.
 const PIN_STRING_FIELDS = [
@@ -464,6 +493,41 @@ const PIN_STRING_FIELDS = [
 	"graderVersion",
 	"graderImageDigest",
 ] as const
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+const isAmount = (value: unknown): boolean => typeof value === "number" && Number.isFinite(value) && value >= 0
+
+const OUTCOMES: Record<CodingRunOutcome, true> = {
+	correct: true,
+	incorrect: true,
+	"timed-out": true,
+	"grading-failure": true,
+	"infrastructure-failure": true,
+}
+
+// JSON writes NaN as null, and arithmetic reads null as zero. Only an absent
+// duration means "not measured". Complete cost accounting needs an estimate.
+function assertReportMetrics(metrics: Record<string, unknown>): void {
+	const { durationMs, cost, outcome } = metrics
+	if (durationMs !== undefined && !isAmount(durationMs)) throw new Error("side result run has invalid durationMs")
+	const estimated = isObject(cost) ? cost["estimated"] : undefined
+	if (
+		!isObject(cost) ||
+		typeof cost["accountingComplete"] !== "boolean" ||
+		!isObject(estimated) ||
+		typeof estimated["available"] !== "boolean" ||
+		(estimated["available"] ? !isAmount(estimated["usd"]) : cost["accountingComplete"])
+	)
+		throw new Error("side result run has invalid cost")
+	if (
+		!isObject(outcome) ||
+		typeof outcome["outcome"] !== "string" ||
+		!Object.hasOwn(OUTCOMES, outcome["outcome"]) ||
+		typeof outcome["reason"] !== "string"
+	)
+		throw new Error("side result run has invalid outcome")
+}
 
 export function validateSideResultFile(
 	parsed: unknown,
@@ -514,6 +578,7 @@ export function validateSideResultFile(
 		) {
 			throw new Error("side result run and metrics keys differ")
 		}
+		assertReportMetrics(metrics as Record<string, unknown>)
 	}
 	if (expected.size) throw new Error("side result is missing expected repetitions")
 	return parsed as SideResultFile

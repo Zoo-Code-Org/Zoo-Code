@@ -350,6 +350,44 @@ describe("side result validation", () => {
 		)
 	})
 
+	// ValuesSafe in EvalComparisonInputs: a JSON round trip turns NaN into null.
+	it("accepts only well-formed values in every metric that the report reads", () => {
+		const check = (change: Record<string, unknown>) => {
+			const file = validatedFile("baseline", "a".repeat(40))
+			Object.assign(file.runs[0].metrics, change)
+			return () => validateSideResultFile(file, "baseline", "a".repeat(40))
+		}
+		const cost = (usd: unknown) => ({ cost: { accountingComplete: true, estimated: { available: true, usd } } })
+		for (const valid of [{ durationMs: undefined }, { durationMs: 0 }, cost(0)])
+			assert.doesNotThrow(check(JSON.parse(JSON.stringify(valid))))
+		// JSON.parse reads 1e999 as Infinity.
+		const infinite: unknown = JSON.parse("1e999")
+		for (const value of [null, "5", -1, infinite, true, {}, []]) {
+			assert.throws(check({ durationMs: value }), /invalid durationMs/, `duration ${String(value)}`)
+			assert.throws(check(cost(value)), /invalid cost/, `usd ${String(value)}`)
+		}
+		for (const value of [
+			undefined,
+			null,
+			{},
+			{ accountingComplete: "false", estimated: { available: false } },
+			{ accountingComplete: false },
+			{ accountingComplete: false, estimated: { available: "true", usd: 1 } },
+			{ accountingComplete: true, estimated: { available: false } },
+			{ accountingComplete: true, estimated: { available: true } },
+		])
+			assert.throws(check({ cost: value }), /invalid cost/, JSON.stringify(value))
+		for (const value of [
+			undefined,
+			null,
+			"correct",
+			{ outcome: "Correct", reason: "x" },
+			{ outcome: "correct" },
+			{ outcome: null, reason: "x" },
+		])
+			assert.throws(check({ outcome: value }), /invalid outcome/, JSON.stringify(value))
+	})
+
 	it("rejects missing shape with the intended error", () => {
 		assert.throws(() => validateSideResultFile({ runs: [] }, "baseline", "a".repeat(40)), /has no pins/)
 		assert.throws(() => validateSideResultFile(null, "baseline", "a".repeat(40)), /not a JSON object/)
