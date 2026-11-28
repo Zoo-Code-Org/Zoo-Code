@@ -29,6 +29,7 @@ import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
 import { ModelSelector } from "./ModelSelector"
+import { ReasoningEffortSelector } from "./ReasoningEffortSelector"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -1371,10 +1372,16 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							value={mode}
 							title={t("chat:selectMode")}
 							onChange={handleModeChange}
-							triggerClassName="text-ellipsis overflow-hidden flex-shrink-0"
+							triggerClassName="min-w-[70px] max-w-[150px] flex-shrink min-[310px]:flex-shrink-0"
 							modeShortcutText={modeShortcutText}
 							customModes={customModes}
 							customModePrompts={customModePrompts}
+						/>
+						<ReasoningEffortSelector
+							apiConfiguration={apiConfiguration}
+							disabled={selectApiConfigDisabled}
+							title={t("chat:reasoningEffortSelector.title")}
+							triggerClassName="min-w-[28px] max-w-[110px] flex-shrink min-[310px]:flex-shrink-0"
 						/>
 						<ApiConfigSelector
 							value={currentConfigId}

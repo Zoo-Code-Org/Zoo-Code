@@ -22,4 +22,24 @@ for (const theme of visualThemes) {
 			focusedControl: editor,
 		})
 	})
+
+	test(`renders the reasoning-effort switcher in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("chat-text-area-reasoning-effort"))
+		await applyVisualTheme(page, theme)
+		await page.evaluate(() => Object.assign(globalThis, { z: undefined }))
+		const story = component.getByTestId("chat-text-area-story")
+		const editor = story.getByRole("textbox")
+		const trigger = story.getByTestId("reasoning-effort-selector-trigger")
+		await expect(editor).toBeVisible()
+		await expect(trigger).toBeVisible()
+		await expect(story).toHaveScreenshot(`chat-composer-reasoning-resting-${theme.name}.png`)
+
+		await trigger.click()
+		// The popover portals into #roo-portal on document.body, outside the story subtree.
+		const defaultItem = page.getByTestId("reasoning-effort-item-default")
+		const highItem = page.getByTestId("reasoning-effort-item-high")
+		await expect(defaultItem).toBeVisible()
+		await expect(highItem).toBeVisible()
+		await expect(story).toHaveScreenshot(`chat-composer-reasoning-menu-${theme.name}.png`)
+	})
 }

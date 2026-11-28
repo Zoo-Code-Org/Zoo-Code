@@ -485,7 +485,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			model: info,
 			// OpenAI Compatible edits effort in custom model info. The shared top-level
 			// setting may be left over from another provider and must not override it.
-			settings: { ...this.options, reasoningEffort: info.reasoningEffort },
+			// The chat quick-switch override beats both: it is an explicit per-request
+			// choice, while info.reasoningEffort is the profile's configured default.
+			settings: {
+				...this.options,
+				reasoningEffort: this.options.reasoningEffortOverride ?? info.reasoningEffort,
+			},
 			defaultTemperature: 0,
 		})
 		// Local OpenAI-compatible reasoning models (llama.cpp, LM Studio, Ollama)

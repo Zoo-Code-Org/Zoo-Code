@@ -12,6 +12,7 @@ import {
 
 import { getRouterRemovalMessage } from "../core/config/routerRemoval"
 import type { GetModelsOptions } from "../shared/api"
+import { withReasoningEffortOverride } from "../shared/api"
 import { ApiStream } from "./transform/stream"
 
 import {
@@ -206,7 +207,11 @@ export interface ApiHandler {
 export { disposeApiHandler } from "./dispose-api-handler"
 
 export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
-	const { apiProvider, ...options } = configuration
+	// The chat reasoning-effort override is applied here so every provider
+	// (streaming, non-streaming, and SSE fallback paths alike) sees the
+	// effective effort through its regular options. Without an override the
+	// configuration is passed through unchanged.
+	const { apiProvider, ...options } = withReasoningEffortOverride(configuration)
 
 	if (apiProvider === retiredProviderIdentifiers.roo) {
 		throw new Error(getRouterRemovalMessage())

@@ -515,5 +515,12 @@
 	"diffView": {
 		"hiddenLines_one": "{{count}} ausgeblendete Zeile",
 		"hiddenLines_other": "{{count}} ausgeblendete Zeilen"
+	},
+	"reasoningEffortSelector": {
+		"title": "Denkaufwand",
+		"description": "Denkaufwand für Anfragen dieser Konfiguration umschalten. „Standard“ stellt die Profileinstellung wieder her.",
+		"default": "Standard",
+		"off": "Aus",
+		"overrideActive": "Denkaufwand-Override ist aktiv"
 	}
 }

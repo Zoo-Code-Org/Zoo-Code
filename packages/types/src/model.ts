@@ -44,6 +44,8 @@ export const reasoningEffortSettingValues = [
 ] as const
 export const reasoningEffortSettingSchema = z.enum(reasoningEffortSettingValues)
 
+export type ReasoningEffortSetting = z.infer<typeof reasoningEffortSettingSchema>
+
 /**
  * Verbosity
  */

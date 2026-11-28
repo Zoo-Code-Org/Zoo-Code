@@ -1,6 +1,11 @@
 import { type ModelInfo, type ProviderSettings, ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
 
-import { getModelMaxOutputTokens, shouldUseReasoningBudget, shouldUseReasoningEffort } from "../api"
+import {
+	getModelMaxOutputTokens,
+	shouldUseReasoningBudget,
+	shouldUseReasoningEffort,
+	withReasoningEffortOverride,
+} from "../api"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("getModelMaxOutputTokens", () => {
@@ -805,5 +810,80 @@ describe("shouldUseReasoningEffort", () => {
 				settings: { enableReasoningEffort: true, reasoningEffort: "medium" },
 			}),
 		).toBe(false)
+	})
+})
+
+describe("withReasoningEffortOverride", () => {
+	test("returns the settings untouched when no override is set", () => {
+		const settings: ProviderSettings = { enableReasoningEffort: true, reasoningEffort: "medium" }
+
+		expect(withReasoningEffortOverride(settings)).toBe(settings)
+	})
+
+	test("folds a concrete override into the effort and enables reasoning", () => {
+		const settings: ProviderSettings = {
+			enableReasoningEffort: false,
+			reasoningEffort: "low",
+			reasoningEffortOverride: "high",
+		}
+
+		expect(withReasoningEffortOverride(settings)).toEqual({
+			enableReasoningEffort: true,
+			reasoningEffort: "high",
+			reasoningEffortOverride: "high",
+		})
+	})
+
+	test("folds the 'none' override with reasoning enabled", () => {
+		const settings: ProviderSettings = { enableReasoningEffort: false, reasoningEffortOverride: "none" }
+
+		expect(withReasoningEffortOverride(settings)).toEqual({
+			enableReasoningEffort: true,
+			reasoningEffort: "none",
+			reasoningEffortOverride: "none",
+		})
+	})
+
+	test("folds the 'disable' override into an explicit off state", () => {
+		const settings: ProviderSettings = {
+			enableReasoningEffort: true,
+			reasoningEffort: "high",
+			reasoningEffortOverride: "disable",
+		}
+
+		expect(withReasoningEffortOverride(settings)).toEqual({
+			enableReasoningEffort: false,
+			reasoningEffort: "disable",
+			reasoningEffortOverride: "disable",
+		})
+	})
+
+	test("does not mutate the original settings", () => {
+		const settings: ProviderSettings = {
+			enableReasoningEffort: false,
+			reasoningEffort: "low",
+			reasoningEffortOverride: "high",
+		}
+
+		withReasoningEffortOverride(settings)
+
+		expect(settings.enableReasoningEffort).toBe(false)
+		expect(settings.reasoningEffort).toBe("low")
+	})
+
+	test("override lets shouldUseReasoningEffort accept a concrete effort when folded", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "medium", "high"],
+		}
+
+		const settings = withReasoningEffortOverride({
+			enableReasoningEffort: false,
+			reasoningEffort: "low",
+			reasoningEffortOverride: "high",
+		})
+
+		expect(shouldUseReasoningEffort({ model, settings })).toBe(true)
 	})
 })

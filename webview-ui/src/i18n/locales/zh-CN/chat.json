@@ -508,5 +508,12 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "已隐藏 {{count}} 行"
+	},
+	"reasoningEffortSelector": {
+		"title": "推理强度",
+		"description": "切换此配置请求所使用的推理强度。选择“默认”将恢复配置文件中的设置。",
+		"default": "默认",
+		"off": "关闭",
+		"overrideActive": "推理强度覆盖已生效"
 	}
 }

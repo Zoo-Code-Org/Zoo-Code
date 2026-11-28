@@ -568,6 +568,7 @@ export interface WebviewMessage {
 		| "saveApiConfiguration"
 		| "upsertApiConfiguration"
 		| "updateProfileModel"
+		| "updateReasoningEffortOverride"
 		| "deleteApiConfiguration"
 		| "loadApiConfiguration"
 		| "loadApiConfigurationById"

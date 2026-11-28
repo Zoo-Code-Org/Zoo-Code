@@ -503,5 +503,12 @@
 	"diffView": {
 		"hiddenLines_one": "{{count}} hidden line",
 		"hiddenLines_other": "{{count}} hidden lines"
+	},
+	"reasoningEffortSelector": {
+		"title": "Reasoning effort",
+		"description": "Switch the reasoning effort used for requests with this configuration. Default restores the provider setting.",
+		"default": "Default",
+		"off": "Off",
+		"overrideActive": "Reasoning effort override is active"
 	}
 }

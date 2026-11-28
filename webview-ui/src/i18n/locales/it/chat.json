@@ -523,5 +523,12 @@
 		"hiddenLines_one": "{{count}} riga nascosta",
 		"hiddenLines_many": "{{count}} di righe nascoste",
 		"hiddenLines_other": "{{count}} righe nascoste"
+	},
+	"reasoningEffortSelector": {
+		"title": "Sforzo di ragionamento",
+		"description": "Modifica lo sforzo di ragionamento usato per le richieste di questa configurazione. «Predefinito» ripristina l'impostazione del profilo.",
+		"default": "Predefinito",
+		"off": "Disattivato",
+		"overrideActive": "La sostituzione dello sforzo di ragionamento è attiva"
 	}
 }

@@ -507,5 +507,12 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "{{count}} 行が非表示"
+	},
+	"reasoningEffortSelector": {
+		"title": "推論の強さ",
+		"description": "この構成のリクエストで使用する推論の強さを切り替えます。「デフォルト」に戻すとプロファイルの設定が使われます。",
+		"default": "デフォルト",
+		"off": "オフ",
+		"overrideActive": "推論の強さの上書きが有効です"
 	}
 }

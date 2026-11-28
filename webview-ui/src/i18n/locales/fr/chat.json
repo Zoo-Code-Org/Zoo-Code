@@ -523,5 +523,12 @@
 		"hiddenLines_one": "{{count}} ligne masquée",
 		"hiddenLines_many": "{{count}} de lignes masquées",
 		"hiddenLines_other": "{{count}} lignes masquées"
+	},
+	"reasoningEffortSelector": {
+		"title": "Effort de raisonnement",
+		"description": "Change l'effort de raisonnement utilisé pour les requêtes de cette configuration. « Par défaut » rétablit le réglage du profil.",
+		"default": "Par défaut",
+		"off": "Désactivé",
+		"overrideActive": "Le remplacement de l'effort de raisonnement est actif"
 	}
 }

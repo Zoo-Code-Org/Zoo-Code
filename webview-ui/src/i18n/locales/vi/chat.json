@@ -508,5 +508,12 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "{{count}} dòng bị ẩn"
+	},
+	"reasoningEffortSelector": {
+		"title": "Mức suy luận",
+		"description": "Chuyển đổi mức suy luận dùng cho các yêu cầu của cấu hình này. \"Mặc định\" khôi phục cài đặt của hồ sơ.",
+		"default": "Mặc định",
+		"off": "Tắt",
+		"overrideActive": "Ghi đè mức suy luận đang bật"
 	}
 }

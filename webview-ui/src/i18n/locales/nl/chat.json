@@ -515,5 +515,12 @@
 	"diffView": {
 		"hiddenLines_one": "{{count}} verborgen regel",
 		"hiddenLines_other": "{{count}} verborgen regels"
+	},
+	"reasoningEffortSelector": {
+		"title": "Redeneerinspanning",
+		"description": "Schakelt de redeneerinspanning om die voor verzoeken van deze configuratie wordt gebruikt. \"Standaard\" herstelt de profielinstelling.",
+		"default": "Standaard",
+		"off": "Uit",
+		"overrideActive": "Overschrijiding van de redeneerinspanning is actief"
 	}
 }

@@ -507,5 +507,12 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "숨겨진 줄 {{count}}개"
+	},
+	"reasoningEffortSelector": {
+		"title": "추론 강도",
+		"description": "이 구성의 요청에 사용할 추론 강도를 전환합니다. '기본값'을 선택하면 프로필 설정이 복원됩니다.",
+		"default": "기본값",
+		"off": "끄기",
+		"overrideActive": "추론 강도 재정의가 활성화되어 있습니다"
 	}
 }

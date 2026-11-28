@@ -523,5 +523,12 @@
 		"hiddenLines_one": "{{count}} linha oculta",
 		"hiddenLines_many": "{{count}} de linhas ocultas",
 		"hiddenLines_other": "{{count}} linhas ocultas"
+	},
+	"reasoningEffortSelector": {
+		"title": "Esforço de raciocínio",
+		"description": "Altera o esforço de raciocínio usado nas solicitações desta configuração. «Padrão» restaura a configuração do perfil.",
+		"default": "Padrão",
+		"off": "Desativado",
+		"overrideActive": "A substituição do esforço de raciocínio está ativa"
 	}
 }
