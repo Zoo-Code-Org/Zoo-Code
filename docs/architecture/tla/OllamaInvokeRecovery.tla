@@ -27,16 +27,26 @@
 \* Invariant NoLostText: every live token reaches the text sink once.
 \* Invariant NativeOrder: the ordered non-text events equal the truth
 \* table Events for the run.
+\* Invariant SinkOrder: the whole sink equals the truth table SinkSeq
+\* for the run, so the text and non-text events keep the sink order of
+\* the scanner (a rejected opener flushes before a native that arrives
+\* behind it).
 \* Invariant LiveStream: every live token is in the sink or in the hold, and
 \* the hold never covers a token before the marker start.
 \* Modes: Fixed is the scanner. HoldAll delays every token to the finish.
 \* Unfixed recovers nothing. NoGuard ignores the quote verdict. NoSuppress
 \* leaks recovered tokens to the text sink. NoFinishFlush drops the hold at
 \* the finish. EarlyEmit emits the call at the hold start, not at the close.
+\* LateFlush holds a rejected opener until the resolve, the pre-review
+\* machine whose quotedNat sink put the held opener text behind the
+\* native that arrived while the hold sat.
 \* The draft of the interrupted run had a NoLedger mode (natives wait in a
 \* ledger). The new machine never waits with natives, so that mode had no
 \* observable fault here; EarlyEmit replaces it as the NativeOrder saboteur.
-\* Oracles: Tokens, HasCall, Quoted and Events are truth-table data per run.
+\* Oracles: Tokens, HasCall, KnownOpener, Quoted, Events and SinkSeq are
+\* truth-table data per run. The opener verdict is EffOpenerReject, a mode
+\* rule over KnownOpener and Quoted: it is never read off HasCall, whose
+\* FALSE also covers the accepted-but-unfinished unfin run.
 \* The machine never re-derives a verdict; it reads the truth tables.
 \* Not modeled: marker bytes split across chunk pushes (the chunk-split
 \* property test covers it), the parameter schema typing, TagMatcher
@@ -46,7 +56,7 @@
 \* LiveStream. Unfixed fails NoLostCall and NoBlockTextLeak. NoGuard fails
 \* NoPhantomCall and LiveStream (TLC reports LiveStream first). NoSuppress
 \* fails NoBlockTextLeak. NoFinishFlush fails NoLostText. EarlyEmit fails
-\* NativeOrder.
+\* NativeOrder. LateFlush fails SinkOrder.
 \* Review: 1 covered, 3 added, 3 gap (PR 2695 round on c23dcd8c2). Covered:
 \* a fence inside a block quote is the same quoted-run oracle (unit test
 \* added). Added: the call resolves at the invoke close and natTail models
@@ -131,6 +141,22 @@
 \* line, so only an accepted closer recovers it. Covered: this
 \* header's closer-suffix note above; Added: no new invariant.
 \* Gap: none left for this rule - the scanner unit test now pins it.
+
+\* Review round on 41f8f398d: quotedNat held the rejected opener to
+\* the resolve, so the sink read txt1, nat3, txt2 where the scanner
+\* flushes the opener at its verdict (decideInvokeOpener + flushHead)
+\* and the handler forwards that text before the native arrives.
+\* Added: the opener-verdict oracle (KnownOpener + EffOpenerReject,
+\* never read off HasCall - unfin shares its FALSE), the Hold flush
+\* branch for a rejected opener, the SinkOrder invariant over the
+\* SinkSeq truth table, and the LateFlush saboteur. Gap: the fence
+\* state a recovered value must not update (the machine reads Quoted
+\* as per-run data and holds one block per run, so a phantom fence
+\* from swallowed bytes has no state to live in - pinned by scanner
+\* unit tests), the same-line fence-info rule (Tokens carry no line
+\* structure - pinned by scanner unit tests), and the parameter-key
+\* dictionary (__proto__ below the token abstraction - pinned by a
+\* scanner unit test).
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
@@ -185,6 +211,24 @@ TruthRecovered(r) == HasCall(r) /\ ~Quoted(r)
 
 \* The verdict the machine applies. NoGuard drops the quote guard.
 EffRecov(r) == IF Mode = "NoGuard" THEN HasCall(r) ELSE TruthRecovered(r)
+
+\* Oracle: the run's opener carries a name the scanner can accept. TRUE
+\* for the unfinished run too - its opener is accepted and the block
+\* holds to the finish - so HasCall = FALSE is not a rejection verdict.
+KnownOpener(r) ==
+    r \in {"wrap", "wrapTwice", "split", "fence", "carry", "natAfter",
+           "natMid", "natFirst", "natTail", "quotedNat", "unfin"}
+
+\* The verdict the machine applies at the opener. HoldAll and Unfixed
+\* never consult a mid-stream verdict. NoGuard drops the quote part.
+\* LateFlush is the old machine: it holds a rejected opener anyway.
+EffOpenerReject(r) ==
+    /\ Mode # "HoldAll"
+    /\ Mode # "Unfixed"
+    /\ \/ ~KnownOpener(r)
+       \/ /\ Quoted(r)
+          /\ Mode # "NoGuard"
+          /\ Mode # "LateFlush"
 
 \* First position the machine may hold: the marker start. The wrapper
 \* opener, or the invoke opener without a wrapper.
@@ -247,6 +291,28 @@ Events(r) ==
     []  r = "quotedNat" -> << <<"nat", 3>> >>
     []  OTHER -> <<>>
 
+\* Expected full sink, in sink order, under the fixed machine. The
+\* rejected-opener runs (quoted, unknown) flush every token in
+\* position order, so quotedNat reads txt1, txt2, nat3 - the native
+\* sits behind the opener text the verdict flushed. Pure data like
+\* Events.
+SinkSeq(r) ==
+    CASE r = "wrap"        -> << <<"call", 4>> >>
+    []  r = "wrapTwice"    -> << <<"call", 4>>, <<"txt", 6>> >>
+    []  r = "split"        -> << <<"call", 3>> >>
+    []  r = "fence"        -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>>, <<"txt", 4>>, <<"txt", 5>> >>
+    []  r = "carry"        -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>>, <<"txt", 4>>, <<"txt", 5>> >>
+    []  r = "natAfter"     -> << <<"call", 3>>, <<"nat", 4>> >>
+    []  r = "natMid"       -> << <<"nat", 2>>, <<"call", 4>> >>
+    []  r = "natFirst"     -> << <<"nat", 1>>, <<"call", 4>> >>
+    []  r = "natTail"      -> << <<"call", 4>>, <<"nat", 5>> >>
+    []  r = "quotedNat"    -> << <<"txt", 1>>, <<"txt", 2>>, <<"nat", 3>>, <<"txt", 4>>, <<"txt", 5>>, <<"txt", 6>> >>
+    []  r = "unfin"        -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>> >>
+    []  r = "unknown"      -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>> >>
+    []  r = "unknownWrap"  -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>>, <<"txt", 4>>, <<"txt", 5>> >>
+    []  r = "prose"        -> << <<"txt", 1>>, <<"txt", 2>> >>
+    []  OTHER -> <<>>
+
 
 
 \* ---- Machine state ----
@@ -299,18 +365,28 @@ Native ==
     /\ pos' = pos + 1
     /\ UNCHANGED <<held, phase, run>>
 
+\* The hold applies the opener verdict first: a rejected opener
+\* flushes its token at once and scanning stays in prose, the way
+\* decideInvokeOpener hands a rejected opener to flushHead. An
+\* accepted opener holds to the resolve, or to the finish when the
+\* block never closes (unfin).
 Hold ==
     /\ pos <= RunLen(run)
     /\ phase = "prose"
     /\ pos = MHoldStart(run)
     /\ Tokens(run)[pos] # T_NATIVE
-    /\ IF Mode = "EarlyEmit" /\ EffRecov(run)
-       THEN sink' = Append(sink, <<"call", pos>>)
-       ELSE UNCHANGED sink
-    /\ held' = Append(held, pos)
-    /\ pos' = pos + 1
-    /\ phase' = "hold"
-    /\ UNCHANGED run
+    /\ IF EffOpenerReject(run)
+       THEN /\ sink' = Append(sink, TxtEvent(pos))
+            /\ held' = held
+            /\ pos' = pos + 1
+            /\ UNCHANGED <<phase, run>>
+       ELSE /\ IF Mode = "EarlyEmit" /\ EffRecov(run)
+               THEN sink' = Append(sink, <<"call", pos>>)
+               ELSE UNCHANGED sink
+            /\ held' = Append(held, pos)
+            /\ pos' = pos + 1
+            /\ phase' = "hold"
+            /\ UNCHANGED run
 
 \* The wrapper close behind a recovered call emits nothing: the scanner
 \* drops it in its tail step. Native arrivals never enter the text hold,
@@ -400,6 +476,9 @@ NonTxt(e) == e[1] # "txt"
 NativeOrder ==
     phase = "done" =>
         SelectSeq(sink, NonTxt) = Events(run)
+
+SinkOrder ==
+    phase = "done" => sink = SinkSeq(run)
 
 LiveStream ==
     /\ \A i \in 1..pos - 1 :

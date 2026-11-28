@@ -94,6 +94,9 @@ ${bareWeatherCall("Rome")}`,
 > > ${bareWeatherCall("Rome")}
 > > ~~~`,
 		`- ~~~\n  ${bareWeatherCall("Rome")}\n  ~~~\nafter`,
+		`<invoke name="write_to_file"><parameter name="content">line1
+~~~
+line2</parameter></invoke><invoke name="read_file"><parameter name="path">a.ts</parameter></invoke>`,
 	]
 	const normalize = (events: RecoveryEvent[]) => ({
 		text: text(events),
@@ -137,6 +140,52 @@ ${bareWeatherCall("Rome")}`,
 		const events = scanChunked(`~~~\n${bareWeatherCall("Rome")}\n~~~`, [4, 30, 4])
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(`~~~\n${bareWeatherCall("Rome")}\n~~~`)
+	})
+	it("recovers a following bare call after a recovered value that embeds a fence", () => {
+		// A recovered parameter value is tool input, not surrounding
+		// Markdown: the fence marker inside the content value must not
+		// open a fence in the scanner's context, or the next bare block
+		// is wrongly quoted and stays text.
+		const fixture =
+			`<invoke name="write_to_file"><parameter name="content">line1\n~~~\nline2</parameter></invoke>` +
+			`<invoke name="read_file"><parameter name="path">a.ts</parameter></invoke>`
+		const events = scanChunked(fixture, [40, 40, 40])
+		expect(calls(events)).toStrictEqual([
+			{ kind: "call", name: "write_to_file", arguments: '{"content":"line1\\n~~~\\nline2"}' },
+			{ kind: "call", name: "read_file", arguments: '{"path":"a.ts"}' },
+		])
+		expect(text(events)).toBe("")
+	})
+
+	it("keeps an invoke in a tilde fence opener's info string as text", () => {
+		// CommonMark: text behind an opening tilde fence is the info
+		// string. feedContext records the fence only when the line
+		// completes, and no backtick run exists to trip the span check,
+		// so the opener verdict must read the current line's fence
+		// prefix or the info-string markup recovers as a call.
+		const fixture = `~~~ <invoke name="get_weather"></invoke>\n~~~\nafter`
+		const events = scanChunked(fixture, [30, 10, 6])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("recovers a call after the tilde fence that quoted markup in its info string closes", () => {
+		// The info-string check must not over-quote: once the fence
+		// closes, the call below is live again.
+		const fixture = `~~~ <invoke name="get_weather"></invoke>\n~~~\n${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [30, 10, 20])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe(`~~~ <invoke name="get_weather"></invoke>\n~~~\n`)
+	})
+
+	it("recovers a call on a line that mentions tildes mid-line", () => {
+		// CommonMark opens a fence only on a line whose content starts
+		// with the marker run: mid-line tildes are prose, and the call
+		// after them stays live.
+		const fixture = `see ~~~ below ${bareWeatherCall("Rome")}`
+		const events = scanChunked(fixture, [14, 20, 10])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("see ~~~ below ")
 	})
 
 	it("keeps an inline-code-span-quoted invoke block as text", () => {
@@ -237,6 +286,21 @@ ${bareWeatherCall("Rome")}`,
 			`<parameter name="location">Rome</parameter></invoke>`
 		const events = scanChunked(fixture, [12, 40, 30])
 		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("")
+	})
+
+	it("stores a __proto__ parameter name as an own property", () => {
+		// An ordinary object inherits the __proto__ setter: a plain
+		// assignment swallows the value and the arguments lose the key.
+		// The null-prototype dictionary keeps it as an own property in
+		// written order, and the duplicate-parameter rule is unchanged.
+		const fixture =
+			`<invoke name="get_weather"><parameter name="__proto__">Rome</parameter>` +
+			`<parameter name="unit">c</parameter></invoke>`
+		const events = scanChunked(fixture, [12, 30, 20])
+		expect(calls(events)).toStrictEqual([
+			{ kind: "call", name: "get_weather", arguments: '{"__proto__":"Rome","unit":"c"}' },
+		])
 		expect(text(events)).toBe("")
 	})
 

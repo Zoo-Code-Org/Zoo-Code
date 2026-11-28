@@ -445,15 +445,19 @@ export class InvokeRecoveryScanner {
 		this.cursor += n
 	}
 
-	/** Silently removes the consumed skeleton bytes before `n`. */
+	/**
+	 * Silently removes the consumed skeleton bytes before `n`. The
+	 * bytes never reach the text sink, so they never join the markdown
+	 * context: a fence marker inside a recovered parameter value is
+	 * tool input, not surrounding Markdown, and must not quote a
+	 * later block.
+	 */
 	private drop(n: number): void {
 		if (n <= 0) {
 			return
 		}
-		const taken = this.pending.slice(0, n)
 		this.pending = this.pending.slice(n)
 		this.cursor = Math.max(0, this.cursor - n)
-		this.feedContext(taken)
 	}
 
 	/** Moves the first `n` bytes of `pending` to the text sink. */
@@ -481,12 +485,18 @@ export class InvokeRecoveryScanner {
 
 	/**
 	 * True when markdown context quotes a block at its opener: an open
-	 * fenced code block, or an inline code span open at this point of the
-	 * current line. CommonMark: a span closes only on a run of the same
-	 * width, and fence lines are fence syntax, never span delimiters.
+	 * fenced code block, the fence opener of the current line (the
+	 * info string behind a fence marker is literal, and the fence
+	 * state updates only when the line completes), or an inline code
+	 * span open at this point of the current line. CommonMark: a span
+	 * closes only on a run of the same width, and fence lines are
+	 * fence syntax, never span delimiters.
 	 */
 	private isQuotedAtOpener(): boolean {
 		if (this.fence !== null) {
+			return true
+		}
+		if (this.fenceOpenerOf(this.linePrefix) !== null) {
 			return true
 		}
 		let activeWidth = 0
@@ -502,9 +512,11 @@ export class InvokeRecoveryScanner {
 	}
 
 	/**
-	 * Feeds consumed bytes into the markdown context: fence open/close on
-	 * complete lines, plus the partial-line carry for span checks. Runs on
-	 * every byte leaving `pending`, emitted or swallowed alike.
+	 * Feeds the bytes that reach the text sink into the markdown
+	 * context: fence open/close on complete lines, plus the
+	 * partial-line carry for span checks. Only `flush` calls this;
+	 * skeleton bytes leave `pending` through `drop` and stay invisible
+	 * to the quoting context.
 	 */
 	private feedContext(text: string): void {
 		let line = this.linePrefix + text
@@ -565,33 +577,41 @@ export class InvokeRecoveryScanner {
 	}
 
 	/**
-	 * Opens a fence on a complete line outside any fence. The line's
-	 * own container prefix is skipped, so a quoted or list-held fence
-	 * is still a fence and the block it wraps stays quoted. The fence
-	 * may sit at most three columns inside the container, measured at
-	 * tab stops like the closing-fence check: a tab partly consumed
-	 * by the strip leaves residual columns the allowance must count.
+	 * The fence a complete line opens outside any fence, or null. The
+	 * line's own container prefix is skipped, so a quoted or list-held
+	 * fence is still a fence and the block it wraps stays quoted. The
+	 * fence may sit at most three columns inside the container,
+	 * measured at tab stops like the closing-fence check: a tab partly
+	 * consumed by the strip leaves residual columns the allowance must
+	 * count. Pure: `detectFence` stores the result,
+	 * `isQuotedAtOpener` reads the current line's prefix without
+	 * touching the state.
 	 */
-	private detectFence(line: string): void {
+	private fenceOpenerOf(line: string): FenceState | null {
 		const { strip, container, column, base } = lineContainer(line)
 		const content = line.slice(strip)
 		const run = whitespaceRun(content, 0, column)
 		if (run.column - base > 3) {
 			// Past the fence allowance: an indented block, not a fence.
-			return
+			return null
 		}
 		const body = content.slice(run.at)
 		const tilde = /^(~{3,})/.exec(body)
 		if (tilde) {
 			// A tilde fence accepts any info string.
-			this.fence = { char: "~", width: tilde[1].length, container }
-			return
+			return { char: "~", width: tilde[1].length, container }
 		}
 		const backtick = /^(`{3,})/.exec(body)
 		if (backtick && !body.slice(backtick[0].length).includes("`")) {
 			// A backtick fence's info string must contain no backtick.
-			this.fence = { char: "`", width: backtick[1].length, container }
+			return { char: "`", width: backtick[1].length, container }
 		}
+		return null
+	}
+
+	/** Opens a fence on a complete line outside any fence. */
+	private detectFence(line: string): void {
+		this.fence = this.fenceOpenerOf(line)
 	}
 }
 
@@ -601,7 +621,11 @@ export class InvokeRecoveryScanner {
  * schema typing.
  */
 export function parseInvokeParameters(body: string): string {
-	const args: Record<string, string> = {}
+	// A null prototype keeps a "__proto__" parameter name an own
+	// property: an ordinary object's inherited setter would swallow
+	// the assignment and drop the value. Duplicate keys keep the
+	// last-value rule.
+	const args: Record<string, string> = Object.create(null)
 	for (const match of body.matchAll(PARAMETER)) {
 		const key = match[1] ?? match[2] ?? ""
 		if (key) {
