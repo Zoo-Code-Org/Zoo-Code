@@ -10,6 +10,12 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const workflow = parse(
 	fs.readFileSync(path.join(repositoryRoot, ".github/workflows/label-pr-review-state.yml"), "utf8"),
 )
+const forkReviewFollowupWorkflow = parse(
+	fs.readFileSync(
+		path.join(repositoryRoot, ".github/workflows/label-pr-review-state-fork-review-followup.yml"),
+		"utf8",
+	),
+)
 const codeRabbitConfig = parse(fs.readFileSync(path.join(repositoryRoot, ".coderabbit.yaml"), "utf8"))
 const workflowScript = workflow.jobs.reconcile.steps[0].with.script as string
 const resolveScript = workflow.jobs.resolve.steps[0].with.script as string
@@ -3581,9 +3587,19 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 				head?: { repo?: { full_name?: string } | null }
 				base?: { repo?: { full_name?: string } | null }
 			}
-			issue?: { number: number }
-			workflow_run?: { id?: number; pull_requests?: Array<{ number: number }> }
+			issue?: { number: number; pull_request?: unknown }
+			workflow_run?: {
+				id?: number
+				pull_requests?: Array<{ number: number }>
+				head_branch?: string | null
+				head_sha?: string | null
+				head_repository?: { owner?: { login?: string } | null } | null
+			}
 			inputs?: { pull_request_number: number }
+			action?: string
+			label?: { name?: string } | null
+			sender?: { login?: string } | null
+			comment?: { user?: { login?: string } | null } | null
 		}
 	}
 
@@ -3633,6 +3649,57 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		return left === right
 	}
 
+	/**
+	 * Splits a function call's argument source on top-level commas. Strings are
+	 * skipped so a JSON array literal inside fromJSON stays one argument.
+	 */
+	function splitArguments(source: string): string[] {
+		const args: string[] = []
+		let depth = 0
+		let inString = false
+		let start = 0
+		for (let index = 0; index < source.length; index++) {
+			const char = source[index]
+			if (char === "'") {
+				inString = !inString
+			} else if (!inString && char === "(") {
+				depth++
+			} else if (!inString && char === ")") {
+				depth--
+			} else if (!inString && depth === 0 && char === ",") {
+				args.push(source.slice(start, index))
+				start = index + 1
+			}
+		}
+		args.push(source.slice(start))
+		return args.map((argument) => argument.trim()).filter((argument) => argument.length > 0)
+	}
+
+	/** Evaluates the GitHub expression functions the job conditions use. */
+	function evaluateFunctionCall(name: string, source: string, roots: ExpressionRoots): unknown {
+		const args = splitArguments(source).map((argument) => evaluateExpression(argument, roots))
+		if (name === "contains") {
+			const [haystack, needle] = args
+			if (Array.isArray(haystack)) {
+				return haystack.some((item) => looseEquals(item, needle))
+			}
+			if (typeof haystack === "string" && typeof needle === "string") {
+				return haystack.includes(needle)
+			}
+			return false
+		}
+		if (name === "fromJSON") {
+			return JSON.parse(String(args[0]))
+		}
+		if (name === "format") {
+			const [template, ...values] = args
+			return String(template).replace(/\{(\d+)\}/g, (_match, index: string) =>
+				String(values[Number(index)] ?? ""),
+			)
+		}
+		throw new Error(`Unsupported expression function: ${name}`)
+	}
+
 	function resolvePath(path: string, roots: ExpressionRoots): unknown {
 		let value: unknown = roots
 		for (const segment of path.split(".")) {
@@ -3656,6 +3723,10 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 
 	function evaluatePrimary(expression: string, roots: ExpressionRoots): unknown {
 		const current = expression.trim()
+		// GitHub's unary ! negates loose truthiness, exactly like the && and || chains.
+		if (current.startsWith("!")) {
+			return !isTruthy(evaluatePrimary(current.slice(1), roots))
+		}
 		if (current.startsWith("(")) {
 			// Strip the parentheses only when the first one wraps the whole expression.
 			let depth = 0
@@ -3681,6 +3752,10 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		}
 		if (/^(github|matrix)\./.test(current)) {
 			return resolvePath(current, roots)
+		}
+		const functionCall = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/.exec(current)
+		if (functionCall) {
+			return evaluateFunctionCall(functionCall[1], functionCall[2], roots)
 		}
 		return evaluateExpression(current, roots)
 	}
@@ -4143,5 +4218,248 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		await expect(runWorkflow({ existingRepoLabels: [], createLabelStatus: 422 })).rejects.toThrow(
 			"Create label failed",
 		)
+	})
+
+	describe("resolve job loop guard on self-triggered label writes", () => {
+		// Mirrors the labels the reconciliation itself writes. The guard only refuses
+		// to wake on this workflow's own writes for these labels.
+		const MANAGED_LABELS = [
+			"awaiting-author",
+			"awaiting-coderabbit",
+			"awaiting-ready",
+			"awaiting-maintainer",
+			"awaiting-review",
+			"coderabbit-review-active",
+			"community-approved",
+			"has-conflicts",
+			"stale-inactive",
+			"stale-awaiting-author",
+		]
+
+		// GitHub evaluates a job-level if as an expression, without the
+		// dollar-brace wrapper, so the template evaluator is applied to the raw
+		// condition. This is the public entry point the harness previously never
+		// exercised: the embedded scripts were run, the job predicate was not.
+		function resolveIfFor(github: GithubExpressionContext): boolean {
+			return isTruthy(evaluateExpression(String(workflow.jobs.resolve.if), { github }))
+		}
+
+		function labelEvent(options: { action: string; sender: string; labelName?: string }): GithubExpressionContext {
+			return contextFor({
+				event_name: "pull_request_target",
+				event: {
+					pull_request: { number: 1664 },
+					action: options.action,
+					sender: { login: options.sender },
+					...(options.labelName === undefined ? {} : { label: { name: options.labelName } }),
+				},
+			})
+		}
+
+		it("keeps the guard's actions and label list in sync with the workflow", () => {
+			// Drift guard: the two fromJSON lists in the condition are the guard's
+			// whole input vocabulary, so pin them explicitly.
+			const lists = [...String(workflow.jobs.resolve.if).matchAll(/fromJSON\('(\[[^']*\])'\)/g)].map((match) =>
+				JSON.parse(match[1]),
+			)
+
+			expect(lists[0]).toEqual(["labeled", "unlabeled"])
+			expect(lists[1]).toEqual(MANAGED_LABELS)
+		})
+
+		it("rejects labeled and unlabeled events the reconciliation wrote itself", () => {
+			for (const action of ["labeled", "unlabeled"]) {
+				for (const labelName of MANAGED_LABELS) {
+					expect(resolveIfFor(labelEvent({ action, labelName, sender: "github-actions[bot]" }))).toBe(false)
+				}
+			}
+		})
+
+		it("accepts those label events when a human or another bot wrote them", () => {
+			for (const sender of ["edelauna", "MarkSwanson", "coderabbitai[bot]", "codecov[bot]"]) {
+				for (const action of ["labeled", "unlabeled"]) {
+					expect(resolveIfFor(labelEvent({ action, labelName: "awaiting-author", sender }))).toBe(true)
+				}
+			}
+		})
+
+		it("accepts a github-actions label event for a label this workflow does not manage", () => {
+			for (const labelName of ["dependencies", "bug", "pinned", "do-not-close"]) {
+				expect(resolveIfFor(labelEvent({ action: "labeled", labelName, sender: "github-actions[bot]" }))).toBe(
+					true,
+				)
+			}
+		})
+
+		it("accepts a labeled event whose payload carries no label name", () => {
+			// Boundary: an unclassifiable label event must not be rejected, or a
+			// payload change would silently stop reconciliation.
+			expect(resolveIfFor(labelEvent({ action: "labeled", sender: "github-actions[bot]" }))).toBe(true)
+			expect(resolveIfFor(labelEvent({ action: "unlabeled", sender: "github-actions[bot]" }))).toBe(true)
+		})
+
+		it("accepts pull_request_target events that carry no label at all", () => {
+			for (const action of [
+				"opened",
+				"reopened",
+				"ready_for_review",
+				"converted_to_draft",
+				"synchronize",
+				"review_requested",
+				"review_request_removed",
+			]) {
+				expect(resolveIfFor(labelEvent({ action, sender: "github-actions[bot]" }))).toBe(true)
+			}
+		})
+
+		it("still gates issue_comment on the CodeRabbit author", () => {
+			const issueComment = (login: string, onPullRequest = true): GithubExpressionContext =>
+				contextFor({
+					event_name: "issue_comment",
+					event: {
+						issue: { number: 1664, ...(onPullRequest ? { pull_request: {} } : {}) },
+						comment: { user: { login } },
+					},
+				})
+
+			// GitHub's == is case-insensitive for strings.
+			expect(resolveIfFor(issueComment("coderabbitai[bot]"))).toBe(true)
+			expect(resolveIfFor(issueComment("CodeRabbitAI[bot]"))).toBe(true)
+			expect(resolveIfFor(issueComment("edelauna"))).toBe(false)
+			expect(resolveIfFor(issueComment("github-actions[bot]"))).toBe(false)
+			expect(resolveIfFor(issueComment("coderabbitai[bot]", false))).toBe(false)
+		})
+
+		it("accepts every other trigger unchanged", () => {
+			expect(resolveIfFor(contextFor({ event_name: "pull_request_review" }))).toBe(true)
+			expect(
+				resolveIfFor(
+					contextFor({ event_name: "workflow_run", event: { workflow_run: { id: 7, pull_requests: [] } } }),
+				),
+			).toBe(true)
+			expect(resolveIfFor(contextFor({ event_name: "schedule" }))).toBe(true)
+			expect(resolveIfFor(contextFor({ event_name: "push" }))).toBe(true)
+			expect(
+				resolveIfFor(
+					contextFor({ event_name: "workflow_dispatch", event: { inputs: { pull_request_number: 1664 } } }),
+				),
+			).toBe(true)
+		})
+	})
+
+	describe("fork review follow-up concurrency key", () => {
+		// GitHub keeps one running plus one pending run per group, so the group key
+		// decides which completions coalesce and which may supersede each other.
+		function followupGroupFor(github: GithubExpressionContext): string {
+			return evaluateTemplate(String(forkReviewFollowupWorkflow.concurrency.group), { github })
+		}
+
+		function forkRun(options: {
+			branch?: string | null
+			sha?: string | null
+			owner?: string | null
+			associatedPrNumbers?: number[]
+			runId?: number
+		}): GithubExpressionContext {
+			return contextFor({
+				event_name: "workflow_run",
+				run_id: 99000,
+				event: {
+					workflow_run: {
+						id: options.runId ?? 777000111,
+						pull_requests: (options.associatedPrNumbers ?? []).map((number) => ({ number })),
+						head_branch: options.branch ?? null,
+						head_sha: options.sha ?? null,
+						// owner: null models a payload with no head repository at all.
+						head_repository:
+							options.owner === null ? null : { owner: { login: options.owner ?? "Zoo-Code-Org" } },
+					},
+				},
+			})
+		}
+
+		it("keeps cancel-in-progress disabled", () => {
+			expect(forkReviewFollowupWorkflow.concurrency["cancel-in-progress"]).toBe(false)
+		})
+
+		it("keys two branches carrying the same commit to different groups", () => {
+			// A cherry-picked stack puts one commit on two branches. A SHA-only key
+			// would put both fork PRs in one group, so a later completion for one
+			// branch would supersede the other branch's pending dispatch and that
+			// PR would never be reconciled.
+			const branchA = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA }))
+			const branchB = followupGroupFor(forkRun({ branch: "feature/b", sha: SHA }))
+
+			expect(branchA).toContain("feature/a")
+			expect(branchB).toContain("feature/b")
+			expect(branchA).not.toBe(branchB)
+		})
+
+		it("collapses branches that differ only by case, as GitHub compares group names", () => {
+			// GitHub's scheduler compares concurrency group names case-insensitively, so
+			// `feature/a` and `feature/A` are one group no matter how the key is spelled:
+			// the two strings below differ, and folded to one case they are equal. The
+			// group being shared is accepted, not fought, because the resolver the key
+			// points at compares head branches case-insensitively too, so the run that
+			// survives reconciles both targets rather than the one whose spelling won.
+			const lower = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA }))
+			const upper = followupGroupFor(forkRun({ branch: "feature/A", sha: SHA }))
+
+			expect(lower.toLowerCase()).toBe(upper.toLowerCase())
+			expect(lower).not.toBe(upper)
+		})
+
+		it("includes the head owner in the fallback group", () => {
+			const upstream = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "Zoo-Code-Org" }))
+			const contributor = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "contributor" }))
+
+			expect(upstream).toContain("Zoo-Code-Org:feature/a")
+			expect(contributor).toContain("contributor:feature/a")
+			expect(contributor).not.toBe(upstream)
+		})
+
+		it("uses the unknown owner fallback when the payload carries no head repository", () => {
+			// Review runs report the base repository as head_repository (issue #2133), so
+			// this covers the key expression's fallback rather than a production split.
+			const missingOwner = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: null }))
+			const knownOwner = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "Zoo-Code-Org" }))
+
+			expect(missingOwner).toContain("unknown:feature/a")
+			expect(missingOwner).not.toBe(knownOwner)
+		})
+
+		it("still coalesces repeated completions when the owner is unknown", () => {
+			const first = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: null, runId: 11 }))
+			const second = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: null, runId: 12 }))
+
+			expect(second).toBe(first)
+		})
+
+		it("coalesces repeated completions for the same target onto one group", () => {
+			const first = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, runId: 1 }))
+			const second = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, runId: 2 }))
+
+			expect(second).toBe(first)
+			// A push to the same branch is a new target: its pending dispatch must
+			// not be cancelled by an older head's queued run.
+			expect(followupGroupFor(forkRun({ branch: "feature/a", sha: OLD_SHA, runId: 3 }))).not.toBe(first)
+		})
+
+		it("prefers the associated PR number over the branch fallback", () => {
+			const withPr = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, associatedPrNumbers: [1662] }))
+			expect(withPr).toMatch(/-1662$/)
+			expect(withPr).not.toContain("feature/a")
+			expect(
+				followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, associatedPrNumbers: [1662], runId: 5 })),
+			).toBe(withPr)
+		})
+
+		it("keeps a unique group when the payload has neither an associated PR nor a branch and SHA", () => {
+			const missing = followupGroupFor(forkRun({}))
+			expect(missing).toMatch(/-777000111$/)
+			expect(followupGroupFor(forkRun({ runId: 777000222 }))).not.toBe(missing)
+			// Half a pair is not enough: the fallback must not fabricate a target.
+			expect(followupGroupFor(forkRun({ branch: "feature/a", sha: null }))).toMatch(/-777000111$/)
+		})
 	})
 })

@@ -24,7 +24,7 @@ const OLD_SHA = "b".repeat(40)
 interface HarnessOptions {
 	workflowRunEvent?: string
 	associatedPrNumbers?: number[]
-	fallback?: "match" | "sha-mismatch" | "ref-mismatch" | "base-mismatch" | "none"
+	fallback?: "match" | "sha-mismatch" | "ref-mismatch" | "case-variant" | "base-mismatch" | "none"
 	headBranch?: string | null
 	headSha?: string | null
 	failDispatchFor?: number
@@ -49,6 +49,12 @@ async function runFollowup(options: HarnessOptions = {}) {
 		if (head !== undefined && head !== `fork-owner:${HEAD_BRANCH}`) return []
 		if (options.fallback === "match") return [pr]
 		if (options.fallback === "sha-mismatch") return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
+		if (options.fallback === "case-variant") {
+			// Two forks can carry one commit on branches whose names differ only by
+			// letter case, and GitHub's case-insensitive group comparison puts both
+			// targets in a single concurrency group for this workflow.
+			return [pr, { ...pr, number: 1663, head: { ...pr.head, ref: HEAD_BRANCH.toUpperCase() } }]
+		}
 		if (options.fallback === "ref-mismatch") {
 			return [{ ...pr, head: { ...pr.head, ref: "some-other-branch" } }]
 		}
@@ -133,7 +139,7 @@ describe("fork review follow-up workflow (#2046, #2086, #2133)", () => {
 	it("dispatches a privileged reconciliation for the fork PR a read-only review run targeted", async () => {
 		// Fork runs backfill pull_requests empty, and head_repository is the
 		// base repository (issue #2133), so the follow-up resolves the PR by
-		// exact head branch, SHA, and base repository.
+		// case-insensitive head branch, the head SHA, and the base repository.
 		const result = await runFollowup({ associatedPrNumbers: [], fallback: "match" })
 
 		expect(result.listPullRequests).toHaveBeenCalledWith({
@@ -205,6 +211,22 @@ describe("fork review follow-up workflow (#2046, #2086, #2133)", () => {
 			expect(result.listPullRequests).toHaveBeenCalledTimes(1)
 			expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
 		}
+	})
+
+	it("dispatches both PRs when one commit sits on branches differing only by case", async () => {
+		// GitHub compares this workflow's concurrency group names case-insensitively, so
+		// `feature/a` and `feature/A` are one group and only one completion survives.
+		// A case-sensitive resolver would reconcile only the PR whose spelling matched
+		// the payload and silently drop the other target, which is the very loss the
+		// branch-keyed group was added to prevent.
+		const result = await runFollowup({ fallback: "case-variant", headBranch: HEAD_BRANCH })
+
+		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(result.createWorkflowDispatch).toHaveBeenCalledTimes(2)
+		expect(
+			result.createWorkflowDispatch.mock.calls.map(([args]) => args.inputs.pull_request_number).sort(),
+		).toEqual(["1662", "1663"])
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	it("dispatches nothing when the matching PR targets another base repository", async () => {
