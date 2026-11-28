@@ -5,12 +5,19 @@ import { getErrorCode } from "./errorCode"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 
 import { withFileLock } from "./fileLock"
+import { resolveLockKey } from "../services/file-safety/safeWriteText"
 
 function getTempFilePrefix(absoluteFilePath: string, kind: "new" | "bak"): string {
 	return `.${path.basename(absoluteFilePath)}.${kind}_`
 }
+/**
+ * Whether a directory entry is one of the replacement-protocol temp files a writer
+ * leaves behind only when it died mid-commit. Exported so a caller that already holds
+ * the per-file lock can sweep the same set in the same order deleteJsonFile does,
+ * without taking the lock a second time.
+ */
 
-function isReplacementLeftover(absoluteFilePath: string, entry: string): boolean {
+export function isReplacementLeftover(absoluteFilePath: string, entry: string): boolean {
 	return (
 		entry.endsWith(".tmp") &&
 		(entry.startsWith(getTempFilePrefix(absoluteFilePath, "new")) ||
@@ -42,17 +49,25 @@ export async function recoverMissingJsonFile(
 	}
 	if (!entries.some((entry) => isReplacementLeftover(absoluteFilePath, entry))) return false
 	try {
+		// Lock the key the writer locks, not the spelling this caller was given. safeWriteJson
+		// and TaskHistoryStore acquire on resolveLockKey(...), which is the canonical directory
+		// of the publish target - the symlink referent when the named path is a link. Locking the
+		// lexical spelling instead means a reader-recovery and a writer can hold two locks for
+		// one file. Recovery and the access check still act on the named path: the key is what
+		// serializes, never what is read. (A resolution failure here surfaces as a recovery
+		// failure through the same catch, which is the honest report: no healing ran.)
+		const lockKey = await resolveLockKey(absoluteFilePath)
 		return await withFileLock(
-			absoluteFilePath,
-			async (lockedPath) => {
-				const recovery = await recoverInterruptedReplacement(lockedPath)
+			lockKey,
+			async () => {
+				const recovery = await recoverInterruptedReplacement(absoluteFilePath)
 				if (recovery.restoredFrom) {
 					tracePersistenceEvent("json-recovery", { filePath: absoluteFilePath, result: "restored" })
 					return true
 				}
 				// A peer may have committed while this reader waited for the lock.
 				try {
-					await fs.access(lockedPath)
+					await fs.access(absoluteFilePath)
 					return true
 				} catch (error) {
 					if (getErrorCode(error) === "ENOENT") return false
@@ -77,7 +92,14 @@ export async function recoverMissingJsonFile(
  * of a stale backup after a successful deletion. Missing files are harmless.
  */
 export async function deleteJsonFile(filePath: string): Promise<void> {
-	await withFileLock(filePath, async (absoluteFilePath) => {
+	// The writer locks the canonical publish-target key. A delete that locks the lexical
+	// spelling instead can run while the writer holds the referent's lock, remove the alias,
+	// and let the writer resolve the now-missing alias as a brand-new path and recreate it
+	// after the delete reported success. Same key here; the unlink below still targets the
+	// named path and its leftovers.
+	const absoluteFilePath = path.resolve(filePath)
+	const lockKey = await resolveLockKey(absoluteFilePath)
+	await withFileLock(lockKey, async () => {
 		let entries: string[]
 		try {
 			entries = await fs.readdir(path.dirname(absoluteFilePath))
