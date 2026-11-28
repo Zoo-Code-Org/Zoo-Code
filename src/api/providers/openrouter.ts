@@ -22,7 +22,7 @@ import {
 	consolidateReasoningDetails,
 } from "../transform/openai-format"
 import { normalizeMistralToolCallId } from "../transform/mistral-format"
-import { ApiStreamChunk } from "../transform/stream"
+import { ApiStreamChunk, type ApiStreamUsageChunk } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
 import { addCacheBreakpoints as addAnthropicCacheBreakpoints } from "../transform/caching/anthropic"
 import { addCacheBreakpoints as addGeminiCacheBreakpoints } from "../transform/caching/gemini"
@@ -43,6 +43,7 @@ import type {
 	SingleCompletionHandler,
 } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
+import { matchChatCompletionsStreamStop, type StreamStopError } from "./utils/stream-stop-error"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -403,11 +404,26 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			}
 		>()
 
+		const toUsageChunk = (usage: CompletionUsage): ApiStreamUsageChunk => ({
+			type: "usage",
+			inputTokens: usage.prompt_tokens || 0,
+			outputTokens: usage.completion_tokens || 0,
+			cacheReadTokens: usage.prompt_tokens_details?.cached_tokens,
+			reasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
+			// BYOK inference is billed separately. Other routes include it in cost.
+			totalCost:
+				(usage.cost ?? 0) + (usage.is_byok === true ? (usage.cost_details?.upstream_inference_cost ?? 0) : 0),
+		})
+
 		// Track whether we've yielded displayable text from reasoning_details.
 		// When reasoning_details has displayable content (reasoning.text or reasoning.summary),
 		// we skip yielding the top-level reasoning field to avoid duplicate display.
 		let hasYieldedReasoningFromDetails = false
 		const activeToolCallIds = new Set<string>()
+		// Set when a content filter or refusal stop is seen. The loop keeps
+		// draining so the final usage chunk is still captured, and the stop error
+		// carries that usage to the task loop (#2769).
+		let streamStop: StreamStopError | undefined
 
 		for await (const chunk of stream) {
 			// OpenRouter returns an error object instead of the OpenAI SDK throwing an error.
@@ -417,6 +433,8 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 			const delta = chunk.choices[0]?.delta
 			const finishReason = chunk.choices[0]?.finish_reason
+
+			streamStop ??= matchChatCompletionsStreamStop(finishReason)
 
 			if (delta) {
 				// Handle reasoning_details array format (used by Gemini 3, Claude, OpenAI o-series, etc.)
@@ -537,18 +555,18 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			this.currentReasoningDetails = consolidateReasoningDetails(rawDetails)
 		}
 
-		if (lastUsage) {
-			yield {
-				type: "usage",
-				inputTokens: lastUsage.prompt_tokens || 0,
-				outputTokens: lastUsage.completion_tokens || 0,
-				cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens,
-				reasoningTokens: lastUsage.completion_tokens_details?.reasoning_tokens,
-				// BYOK inference is billed separately. Other routes include it in cost.
-				totalCost:
-					(lastUsage.cost ?? 0) +
-					(lastUsage.is_byok === true ? (lastUsage.cost_details?.upstream_inference_cost ?? 0) : 0),
+		// A stopped response is never a complete one: report the stop instead of
+		// the usage chunk. The usage rides on the error so the task loop can
+		// still record it (#2769).
+		if (streamStop) {
+			if (lastUsage) {
+				streamStop.usage = toUsageChunk(lastUsage)
 			}
+			throw streamStop
+		}
+
+		if (lastUsage) {
+			yield toUsageChunk(lastUsage)
 		}
 	}
 

@@ -686,10 +686,14 @@ describe("Cline", () => {
 		it("retries from a fresh attempt count when the user confirms", async () => {
 			const task = await createAutoApprovedTask()
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			let retryUserTurnCount: number | undefined
 			const attemptApiRequestSpy = vi
 				.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() => truncatedStream())
-				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementationOnce(() => {
+					retryUserTurnCount = task.apiConversationHistory.filter((message) => message.role === "user").length
+					return asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }])
+				})
 				.mockImplementation(() => {
 					throw new Error("stop after retry response")
 				})
@@ -697,6 +701,10 @@ describe("Cline", () => {
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
 
 			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+			// Known defect (#2769): the output-limit retry pushes retryAttempt 0, so
+			// the saved user turn is added a second time. The stream-stop retry must
+			// not repeat this; the stream-stop-retry suite asserts one user turn.
+			expect(retryUserTurnCount).toBe(2)
 		})
 	})
 

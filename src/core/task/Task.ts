@@ -66,6 +66,7 @@ import { disposeApiHandler } from "../../api/dispose-api-handler"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
+import { StreamStopError } from "../../api/providers/utils/stream-stop-error"
 
 // shared
 import { findLast, findLastIndex } from "../../shared/array"
@@ -4776,6 +4777,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// so this settles as soon as the aborted stream does.
 					Promise.resolve(stream.return?.(undefined)).catch(() => {})
 
+					// A stream stop carries the stopped response's usage: the loop
+					// above reads the next chunk before it processes the current one,
+					// so the usage chunk is still unprocessed here. Record it before
+					// abortStream writes the request row (#2769).
+					if (error instanceof StreamStopError && error.usage) {
+						inputTokens += error.usage.inputTokens
+						outputTokens += error.usage.outputTokens
+						cacheWriteTokens += error.usage.cacheWriteTokens ?? 0
+						cacheWrite1hTokens += error.usage.cacheWrite1hTokens ?? 0
+						cacheWrite12hTokens += error.usage.cacheWrite12hTokens ?? 0
+						cacheReadTokens += error.usage.cacheReadTokens ?? 0
+						totalCost = error.usage.totalCost
+					}
+
 					// Abandoned happens when extension is no longer waiting for the
 					// Cline instance to finish aborting (error is thrown here when
 					// any function in the for loop throws due to this.abort).
@@ -4874,6 +4889,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: 0,
+							})
+							continue
+						} else if (error instanceof StreamStopError) {
+							// A content filter or refusal stop repeats on the same request,
+							// so it must never ride the generic retry path: ask first, even
+							// when auto-approval is on (#2769).
+							const { response } = await this.ask("api_req_failed", error.message)
+
+							if (response !== "yesButtonClicked") {
+								throw new Error("API request failed")
+							}
+
+							await this.say("api_req_retried")
+							// A retryAttempt above 0 reuses the saved user turn; a retryAttempt
+							// of 0 would add a second copy of it to the history (#2769).
+							stack.push({
+								userContent: currentUserContent,
+								includeFileDetails: false,
+								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
 							})
 							continue
 						} else {
@@ -6176,6 +6210,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			// note that this api_req_failed ask is unique in that we only present this option if the api hasn't streamed any content yet (ie it fails on the first chunk due), as it would allow them to hit a retry button. However if the api failed mid-stream, it could be in any arbitrary state where some tools may have executed, so that error is handled differently and requires cancelling the task entirely.
+			// A stream stop before the first chunk is also a first-chunk failure, but
+			// it must not auto-retry under auto-approval: the same request can stop
+			// again, so ask first (#2769). The stopped response's usage, if any, is
+			// surfaced before the ask so it is still recorded.
+			if (error instanceof StreamStopError) {
+				if (error.usage) {
+					yield error.usage
+				}
+
+				const { response } = await this.ask("api_req_failed", error.message)
+
+				if (response !== "yesButtonClicked") {
+					throw new Error("API request failed")
+				}
+
+				await this.say("api_req_retried")
+
+				yield* this.attemptApiRequest(0, retryOptions)
+
+				return
+			}
+
 			if (autoApprovalEnabled) {
 				// Apply shared exponential backoff and countdown UX
 				await this.backoffAndAnnounce(retryAttempt, error)

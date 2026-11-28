@@ -34,6 +34,7 @@ import {
 	type ScopedResponsesReasoningItem,
 } from "../transform/responses-api-reasoning"
 import { OutputTokenLimitError } from "./utils/output-token-limit-error"
+import { StreamStopError } from "./utils/stream-stop-error"
 import { getModelParams } from "../transform/model-params"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
@@ -443,6 +444,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			this.responsesReasoning = [...reasoningItems.values()]
 		} catch (error) {
 			if (error instanceof OutputTokenLimitError) throw error
+			// A stop error must keep its identity: the task loop gates it with a
+			// consent ask instead of the generic retry path (#2769).
+			if (error instanceof StreamStopError) throw error
 			if (isRequestAborted(error, abortSignal)) throw createAbortError(this.providerName)
 			throw handleOpenAIError(error, this.providerName)
 		} finally {
@@ -583,6 +587,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof OutputTokenLimitError) throw error
+			// A stop error must keep its identity: the task loop gates it with a
+			// consent ask instead of the generic retry path (#2769).
+			if (error instanceof StreamStopError) throw error
 			if (isRequestAborted(error, options?.abortSignal)) throw createAbortError(this.providerName)
 			if (error instanceof Error) {
 				const wrapped = new Error(`${this.providerName} completion error: ${error.message}`, { cause: error })

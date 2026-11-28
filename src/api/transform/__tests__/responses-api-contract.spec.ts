@@ -2,6 +2,7 @@ import { providerIdentifiers } from "@roo-code/types"
 import { convertToOpenAiMessages } from "../openai-format"
 import { readResponsesReasoningItem, responsesReasoningScope } from "../responses-api-reasoning"
 import { assertResponsesApiSuccess } from "../responses-api-error"
+import { StreamStopError } from "../../providers/utils/stream-stop-error"
 import { convertToResponsesApiInput } from "../responses-api-input"
 
 const reasoning = {
@@ -48,10 +49,16 @@ it.each([undefined, null, {}, { status: "completed" }])("accepts successful or l
 	expect(() => assertResponsesApiSuccess(response)).not.toThrow()
 })
 
-it.each(["failed", "incomplete", "cancelled"])("rejects terminal status %s", (status) => {
+it.each(["failed", "cancelled"])("rejects terminal status %s", (status) => {
 	expect(() => assertResponsesApiSuccess({ status, error: { message: "failure", code: "backend_error" } })).toThrow(
 		"failure",
 	)
+})
+
+it("rejects an incomplete status as a stream stop before the error details (#2769)", () => {
+	expect(() =>
+		assertResponsesApiSuccess({ status: "incomplete", error: { message: "failure", code: "backend_error" } }),
+	).toThrow(StreamStopError)
 })
 
 it("preserves terminal failure details", () => {
