@@ -443,6 +443,10 @@
 			}
 		},
 		"useCustomBaseUrl": "कस्टम बेस URL का उपयोग करें",
+		"useCustomDeploymentName": "कस्टम डिप्लॉयमेंट नाम का उपयोग करें",
+		"openAiNativeDeploymentName": "डिप्लॉयमेंट नाम",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "चयनित मॉडल के बजाय API अनुरोधों में मॉडल के रूप में भेजा जाता है। इसका उपयोग तब करें जब आपका एंडपॉइंट मॉडल को डिप्लॉयमेंट नाम से संबोधित करता है, जैसे Azure AI Foundry। क्षमताएं और मूल्य निर्धारण अभी भी चयनित मॉडल से आते हैं।",
 		"useReasoning": "तर्क सक्षम करें",
 		"customHeaders": "कस्टम हेडर्स",
 		"headerName": "हेडर नाम",

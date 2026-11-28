@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useState } from "react"
 
 import { OpenAiServiceTier, providerIdentifiers, type ModelInfo, type ProviderSettings } from "@roo-code/types"
 
@@ -11,7 +11,20 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 }))
 
 vi.mock("vscrui", () => ({
-	Checkbox: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+	Checkbox: ({
+		children,
+		checked,
+		onChange,
+	}: {
+		children: React.ReactNode
+		checked?: boolean
+		onChange?: (checked: boolean) => void
+	}) => (
+		<label>
+			<input type="checkbox" checked={checked} onChange={(event) => onChange?.(event.target.checked)} />
+			{children}
+		</label>
+	),
 }))
 
 vi.mock("@src/components/ui", () => ({
@@ -89,5 +102,127 @@ describe("OpenAI service tier selector", () => {
 		)
 
 		expect(screen.queryByTestId("openai-service-tier")).not.toBeInTheDocument()
+	})
+})
+
+describe("OpenAI custom deployment name", () => {
+	const baseConfiguration: ProviderSettings = {
+		apiProvider: providerIdentifiers.openaiNative,
+		openAiNativeApiKey: "sk-test-key",
+	}
+
+	it("keeps the input hidden until the checkbox is checked", () => {
+		render(
+			<OpenAI
+				apiConfiguration={baseConfiguration}
+				setApiConfigurationField={vi.fn()}
+				selectedModelInfo={baseModelInfo}
+			/>,
+		)
+
+		expect(screen.queryByTestId("openai-native-deployment-name-input")).not.toBeInTheDocument()
+
+		fireEvent.click(screen.getByRole("checkbox", { name: "settings:providers.useCustomDeploymentName" }))
+
+		expect(screen.getByTestId("openai-native-deployment-name-input")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.openAiNativeDeploymentNameDescription")).toBeInTheDocument()
+	})
+
+	it("persists typed deployment names and clears the saved value when the checkbox is unchecked", () => {
+		const setApiConfigurationField = vi.fn()
+		render(
+			<OpenAI
+				apiConfiguration={{ ...baseConfiguration, openAiNativeDeploymentName: "existing-deployment" }}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={baseModelInfo}
+			/>,
+		)
+
+		// A saved deployment name selects the checkbox and fills the input.
+		const input = screen.getByTestId("openai-native-deployment-name-input")
+		expect(input).toHaveValue("existing-deployment")
+
+		fireEvent.input(input, { target: { value: "my-azure-deployment" } })
+		expect(setApiConfigurationField).toHaveBeenLastCalledWith("openAiNativeDeploymentName", "my-azure-deployment")
+
+		fireEvent.click(screen.getByRole("checkbox", { name: "settings:providers.useCustomDeploymentName" }))
+		expect(setApiConfigurationField).toHaveBeenLastCalledWith("openAiNativeDeploymentName", "")
+	})
+})
+
+// Spec: docs/architecture/tla/OpenAiDeploymentNameUi.tla (SavedNameVisible, NoStaleChecked).
+describe.each([
+	{
+		field: "openAiNativeDeploymentName",
+		label: "settings:providers.useCustomDeploymentName",
+		input: () => screen.getByTestId("openai-native-deployment-name-input"),
+	},
+	{
+		field: "openAiNativeBaseUrl",
+		label: "settings:providers.useCustomBaseUrl",
+		input: () => screen.getByPlaceholderText("https://api.openai.com/v1"),
+	},
+] as const)("OpenAI $field checkbox follows the saved value", ({ field, label, input }) => {
+	const empty: ProviderSettings = { apiProvider: providerIdentifiers.openaiNative, openAiNativeApiKey: "sk-test-key" }
+	const saved: ProviderSettings = { ...empty, [field]: "saved-value" }
+	const checkbox = () => screen.getByRole("checkbox", { name: label })
+
+	const ui = (apiConfiguration: ProviderSettings) => (
+		<OpenAI
+			apiConfiguration={apiConfiguration}
+			setApiConfigurationField={vi.fn()}
+			selectedModelInfo={baseModelInfo}
+		/>
+	)
+
+	it("checks the box when a profile switch brings a saved value", () => {
+		const view = render(ui(empty))
+		expect(checkbox()).not.toBeChecked()
+
+		view.rerender(ui(saved))
+
+		expect(checkbox()).toBeChecked()
+		expect(input()).toHaveValue("saved-value")
+	})
+
+	it("unchecks the box when a profile switch removes the saved value", () => {
+		const view = render(ui(saved))
+		expect(checkbox()).toBeChecked()
+
+		view.rerender(ui(empty))
+
+		expect(checkbox()).not.toBeChecked()
+	})
+
+	it("keeps a box the user checked when the same empty value renders again", () => {
+		const view = render(ui(empty))
+		fireEvent.click(checkbox())
+
+		view.rerender(ui({ ...empty }))
+
+		expect(checkbox()).toBeChecked()
+	})
+
+	it("keeps the box checked when the user types a value and then clears it", () => {
+		const Host = () => {
+			const [apiConfiguration, setApiConfiguration] = useState<ProviderSettings>(empty)
+			return (
+				<OpenAI
+					apiConfiguration={apiConfiguration}
+					setApiConfigurationField={(name, value) =>
+						setApiConfiguration((current) => ({ ...current, [name]: value }))
+					}
+					selectedModelInfo={baseModelInfo}
+				/>
+			)
+		}
+		render(<Host />)
+		fireEvent.click(checkbox())
+
+		fireEvent.input(input(), { target: { value: "typed" } })
+		fireEvent.input(input(), { target: { value: "" } })
+
+		expect(checkbox()).toBeChecked()
+		expect(input()).toBeInTheDocument()
 	})
 })

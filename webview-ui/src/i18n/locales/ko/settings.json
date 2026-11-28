@@ -442,6 +442,10 @@
 			}
 		},
 		"useCustomBaseUrl": "사용자 정의 기본 URL 사용",
+		"useCustomDeploymentName": "사용자 지정 배포 이름 사용",
+		"openAiNativeDeploymentName": "배포 이름",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "선택한 모델 대신 API 요청에서 모델로 전송됩니다. Azure AI Foundry처럼 엔드포인트가 배포 이름으로 모델을 지정할 때 사용하세요. 기능과 가격은 계속 선택한 모델에서 가져옵니다.",
 		"useReasoning": "추론 활성화",
 		"customHeaders": "사용자 정의 헤더",
 		"headerName": "헤더 이름",

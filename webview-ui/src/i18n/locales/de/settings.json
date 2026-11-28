@@ -443,6 +443,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Benutzerdefinierte Basis-URL verwenden",
+		"useCustomDeploymentName": "Benutzerdefinierten Bereitstellungsnamen verwenden",
+		"openAiNativeDeploymentName": "Bereitstellungsname",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Wird in API-Anfragen anstelle des ausgewählten Modells als Modell gesendet. Verwenden Sie diese Option, wenn Ihr Endpunkt Modelle über einen Bereitstellungsnamen adressiert, etwa Azure AI Foundry. Funktionen und Preise stammen weiterhin vom ausgewählten Modell.",
 		"useReasoning": "Reasoning aktivieren",
 		"customHeaders": "Benutzerdefinierte Headers",
 		"headerName": "Header-Name",

@@ -442,6 +442,10 @@
 			}
 		},
 		"useCustomBaseUrl": "使用自定义基础 URL",
+		"useCustomDeploymentName": "使用自定义部署名称",
+		"openAiNativeDeploymentName": "部署名称",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "在 API 请求中作为模型发送，而不是所选模型。当您的端点按部署名称（如 Azure AI Foundry）寻址模型时使用。功能和定价仍来自所选模型。",
 		"useReasoning": "启用推理",
 		"customHeaders": "自定义标头",
 		"headerName": "标头名称",

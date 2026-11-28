@@ -443,6 +443,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Aangepaste basis-URL gebruiken",
+		"useCustomDeploymentName": "Aangepaste implementatienaam gebruiken",
+		"openAiNativeDeploymentName": "Implementatienaam",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Wordt als model in API-aanvragen verzonden in plaats van het geselecteerde model. Gebruik dit wanneer uw endpoint modellen adresseert op implementatienaam, zoals Azure AI Foundry. Mogelijkheden en prijzen komen nog steeds van het geselecteerde model.",
 		"useReasoning": "Redenering inschakelen",
 		"customHeaders": "Aangepaste headers",
 		"headerName": "Headernaam",
