@@ -84,6 +84,14 @@ export function handleProviderError(
 	if (error instanceof Error) {
 		const anyErr = error as any
 		const msg = anyErr?.error?.metadata?.raw || error.message || ""
+		const cause = error.cause
+		const causeCode = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined
+		const causeDetail =
+			msg === "terminated"
+				? cause instanceof Error
+					? ` (response stream ended unexpectedly; cause: ${cause.message}${typeof causeCode === "string" ? `; code: ${causeCode}` : ""})`
+					: " (response stream ended unexpectedly; check provider/server logs)"
+				: ""
 
 		// Log the original error details for debugging
 		console.error(`[${providerName}] API error:`, {
@@ -91,6 +99,7 @@ export function handleProviderError(
 			name: error.name,
 			stack: error.stack,
 			status: anyErr.status,
+			cause,
 			statusCode: anyErr.statusCode,
 		})
 
@@ -104,8 +113,8 @@ export function handleProviderError(
 			// Apply custom transformer if provided, otherwise use default format
 			const finalMessage = options?.messageTransformer
 				? options.messageTransformer(msg)
-				: `${providerName} ${messagePrefix} error: ${msg}`
-			wrapped = new Error(finalMessage)
+				: `${providerName} ${messagePrefix} error: ${msg}${causeDetail}`
+			wrapped = new Error(finalMessage, { cause: error })
 		}
 
 		// Preserve HTTP status and structured details for retry/backoff + UI
