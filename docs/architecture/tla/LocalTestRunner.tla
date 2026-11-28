@@ -1,26 +1,24 @@
 -------------------------- MODULE LocalTestRunner --------------------------
-(* Sources: scripts/test-local.mjs runTurbo and turbo.json. Sinks: the actual Vitest config and worker process.
-Failures: tests run before bundling, Turbo drops the worker cap, spawn errors stay silent, or caller arguments are lost. *)
-(* Review ratchet, PR #2757 supplied review without thread URLs: findings 1, 2, 3, 5, and 6 add boundaries or inputs.
-Findings 4, 7, 8, 9, 10, and 11 are gaps checked through scope notes, command tests, or prose. Added 5, covered 0, gap 6. *)
-(* Expectation: strict Turbo drops the cap without passthrough. Vitest applies its own environment override after config resolution.
-A CI config limit applies when the override is absent. Number parsing and process results remain input oracles. *)
-(* Tests must execute installed Turbo and Vitest in a scratch workspace. Spawn doubles alone miss the forwarding failure.
-Windows launcher tests check the argument array and error output. They do not establish native Windows execution. *)
-(* Simplification: derive the received cap from the runner value and Turbo policy. Do not add a second mutable cap.
-The model does not estimate memory use. The previous 16-state model stopped before Turbo's environment filter. *)
-(* Results: the corrected runner model passes seven invariants over 36 states. All eight sabotage configs fail as expected.
-The old strict-mode integration fails both inputs. Passthrough lets installed Vitest resolve worker limits 1 and 3. *)
-(* Replay: all 13 runtime and configuration mutations fail tests. They include the Turbo boundary, Windows launcher,
-spawn diagnostics, one worker, caller separators, numeric validation, CI wiring, and both default log flags. *)
-(* Validation: 33 workflow and runner tests plus 24 extension activation tests pass. Type checking, lint, formatting, and Knip pass.
-All ten Vitest configs now match the pre-PR files. The installed SDK applies the worker environment override itself. *)
-(* Limits: Windows startup uses a platform double. Native Windows and new full-suite memory benchmarks were not run.
-Scope remains in PR #2757 at the author's request. Old full-run figures do not validate an effective worker cap. *)
-(* Cost: one agent, about fifteen minutes including model updates, boundary tests, and mutation replays. No delegates.
-No further runtime defect was found beyond the supplied review. The model checks an abstraction, not the installed SDK. *)
+(* Sources: scripts/test-local.mjs runTurbo and turbo.json. Sinks: actual Turbo parsing and the installed Vitest worker.
+Failures: tests start before bundling, worker limits are lost, duplicate default flags reject the test step, or logs misreport it. *)
+(* Current review: 16 summary findings and inline CodeQL thread PRRT_kwDOSK-bwM68n0NV on PR #2757.
+Cumulative ratchet totals: added 6, covered 1, gap 21 across 28 findings. This round adds 1, covers 1, and records 15 gaps. *)
+(* Finding 1 adds option-count and concurrency-log invariants. Finding 16 is covered by the existing no-CI reader input.
+Other findings concern process launch APIs, parser oracles, test construction, CI wiring, model structure, prose, or PR scope. *)
+(* Expectation: injecting a default when a caller already supplied the option makes actual Turbo reject the test step.
+A caller option after -- belongs to the package. Default injection and logging inspect only the preceding Turbo arguments. *)
+(* Remove WindowsUsesExecutable: it repeated a constant without representing an executable choice. Process-launch tests cover it.
+Remove unused Turbo cache state from LintCache: extension lint invokes ESLint directly. These are model corrections, not runtime fixes. *)
+(* The integration tests must start the real runner before real Turbo and Vitest. Fixture code is static and inputs are JSON data.
+Inline alert: https://github.com/Zoo-Code-Org/Zoo-Code/security/code-scanning/49. No source-code interpolation is needed. *)
+(* Parsed limits, caller option classification, and process outcomes are oracles. Do not copy the CLI parser into this model.
+The model does not prove dependency code, native Windows execution, elapsed time, or a memory budget. *)
+(* Results: eight invariants hold over 36 states. All ten sabotage configs fail. No new runtime defect was found by TLC.
+Replay: the old runner fails three real integration cases. All 16 runtime and configuration mutations fail their tests. *)
+(* Validation: all 52 workflow, runner, and integration tests pass. The fixture starts real pnpm, Turbo, and Vitest.
+Cost: one agent, no delegates; two focused model runs, one pre-fix integration replay, and 16 mutation replays. *)
 EXTENDS Naturals
-CONSTANTS WorkerValues, TaskValues, ReaderCases, RequireBundle, PassWorkers, PassConcurrency, RespectCI, ForwardThroughTurbo, ReportSpawnError, PreserveArgs, UseNodeLauncher, Args
+CONSTANTS WorkerValues, TaskValues, ReaderCases, RequireBundle, PassWorkers, PassConcurrency, RespectCI, ForwardThroughTurbo, ReportSpawnError, PreserveArgs, AvoidDuplicateFlags, ReportEffectiveConcurrency, RespectBoundary, FlagCases, Args
 VARIABLES bundle, tests, workers, tasks, emittedWorkers, emittedTasks, emittedArgs, spawnError, reported
 vars == <<bundle, tests, workers, tasks, emittedWorkers, emittedTasks, emittedArgs, spawnError, reported>>
 Init == /\ bundle = "idle" /\ tests = "idle"
@@ -46,5 +44,14 @@ ReaderBound(c) == IF c.envBound > 0 THEN c.envBound ELSE IF RespectCI /\ c.fixed
 ReaderLimitsArePreserved == tests = "started" => \A c \in ReaderCases : ReaderBound(c) = c.expected
 SpawnErrorsAreVisible == bundle = "failed" /\ spawnError => reported
 CallerArgumentsSurvive == tests = "started" => emittedArgs = Args
-WindowsUsesExecutable == tests = "started" => UseNodeLauncher
+OptionCount(c) == IF c.supplied THEN
+    IF c.beforeBoundary THEN IF AvoidDuplicateFlags THEN 1 ELSE 2
+    ELSE IF RespectBoundary THEN 1 ELSE 0
+    ELSE 1
+TurboOptionsAreUnique == tests = "started" => \A c \in FlagCases : OptionCount(c) = 1
+SelectedLimit(c) == IF c.beforeBoundary /\ c.supplied THEN c.requested ELSE c.fallback
+LoggedLimit(c) == IF ~ReportEffectiveConcurrency THEN c.fallback
+    ELSE IF ~RespectBoundary /\ ~c.beforeBoundary /\ c.supplied THEN c.requested
+    ELSE SelectedLimit(c)
+ConcurrencyLogMatchesCommand == tests = "started" => \A c \in FlagCases : LoggedLimit(c) = SelectedLimit(c)
 =============================================================================

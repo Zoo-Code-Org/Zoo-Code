@@ -25,11 +25,14 @@ function runRunner(args = [], statuses = [0, 0], options = {}) {
 			Object.defineProperty(process, "platform", { value: process.env.LOCAL_RUNNER_PLATFORM });
 			let index = 0;
 			const statuses = JSON.parse(process.env.LOCAL_RUNNER_STATUSES);
+			const errors = JSON.parse(process.env.LOCAL_RUNNER_ERRORS);
+			const signals = JSON.parse(process.env.LOCAL_RUNNER_SIGNALS);
 			childProcess.spawnSync = (command, args, options) => {
 				appendFileSync(process.env.LOCAL_RUNNER_LOG, JSON.stringify({
 					command, args, workers: options.env.VITEST_MAX_WORKERS, shell: Boolean(options.shell)
 				}) + "\\n");
-				return { status: statuses[index++], error: process.env.LOCAL_RUNNER_SPAWN_ERROR ? new Error(process.env.LOCAL_RUNNER_SPAWN_ERROR) : undefined };
+				const current = index++;
+				return { status: statuses[current], signal: signals[current], error: errors[current] ? new Error(errors[current]) : undefined };
 			};
 			syncBuiltinESMExports();`,
 		)
@@ -38,18 +41,20 @@ function runRunner(args = [], statuses = [0, 0], options = {}) {
 			LOCAL_RUNNER_LOG: log,
 			LOCAL_RUNNER_STATUSES: JSON.stringify(statuses),
 			LOCAL_RUNNER_PLATFORM: options.platform ?? "linux",
-			LOCAL_RUNNER_SPAWN_ERROR: options.error ?? "",
+			LOCAL_RUNNER_ERRORS: JSON.stringify(options.errors ?? [options.error ?? null]),
+			LOCAL_RUNNER_SIGNALS: JSON.stringify(options.signals ?? []),
 		}
 		if (options.launcher === null) delete env.npm_execpath
 		else if (options.launcher) env.npm_execpath = options.launcher
 		delete env.VITEST_MAX_WORKERS
+		if (options.inheritedWorkers !== undefined) env.VITEST_MAX_WORKERS = options.inheritedWorkers
 		const result = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, runner, ...args], {
 			env,
 			encoding: "utf8",
 		})
 		assert.ifError(result.error)
 		const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").map(JSON.parse) : []
-		return { status: result.status, calls, stderr: result.stderr }
+		return { status: result.status, calls, stderr: result.stderr, stdout: result.stdout }
 	} finally {
 		fs.rmSync(directory, { recursive: true, force: true })
 	}
@@ -112,12 +117,68 @@ describe("local test runner contract", () => {
 		})
 	}
 
-	it("keeps forwarded logging options after the runner defaults", () => {
-		const result = runRunner(["--log-order", "stream", "--output-logs", "full"])
+	for (const { args, concurrency } of [
+		{ args: ["--log-order", "stream", "--output-logs", "full", "--concurrency", "1"], concurrency: "1" },
+		{ args: ["--log-order=stream", "--output-logs=full", "--concurrency=1"], concurrency: "1" },
+		{ args: ["--log-order=stream"], concurrency: "2" },
+		{ args: ["--output-logs=full"], concurrency: "2" },
+		{ args: ["--concurrency=1"], concurrency: "1" },
+	]) {
+		it(`does not repeat caller Turbo options: ${args.join(" ")}`, () => {
+			const result = runRunner(args)
+			assert.equal(result.status, 0, result.stderr)
+			const actual = result.calls[1].args
+			for (const flag of ["--log-order", "--output-logs", "--concurrency"]) {
+				assert.equal(actual.filter((arg) => arg === flag || arg.startsWith(`${flag}=`)).length, 1)
+			}
+			assert.deepEqual(actual.slice(-args.length), args)
+			assert.match(result.stdout, new RegExp(String.raw`turbo concurrency ${concurrency}(?:\r?\n|$)`))
+		})
+	}
+
+	it("ignores package options after the separator when selecting Turbo defaults", () => {
+		const packageArgs = ["--", "--log-order=package", "--output-logs=package", "--concurrency=package"]
+		// The first separator normally comes from pnpm. Supply it explicitly before the package separator.
+		const separated = runRunner(["--", ...packageArgs])
+		assert.equal(separated.status, 0, separated.stderr)
+		assert.deepEqual(separated.calls[1].args.slice(4, 8), ["--log-order", "grouped", "--output-logs", "new-only"])
+		assert.deepEqual(separated.calls[1].args.slice(-packageArgs.length), packageArgs)
+		assert.match(separated.stdout, /turbo concurrency 2(?:\r?\n|$)/)
+	})
+
+	it("keeps a short Turbo flag after a missing wrapper value", () => {
+		const result = runRunner(["--vitest-workers", "-F", "worker-probe"])
 		assert.equal(result.status, 0, result.stderr)
-		const args = result.calls[1].args
-		assert.equal(args[args.lastIndexOf("--log-order") + 1], "stream")
-		assert.equal(args[args.lastIndexOf("--output-logs") + 1], "full")
+		assert.equal(result.calls[1].workers, "4")
+		assert.deepEqual(result.calls[1].args.slice(-2), ["-F", "worker-probe"])
+		assert.match(result.stderr, /Invalid --vitest-workers/)
+	})
+
+	it("keeps the next long option after a missing wrapper value", () => {
+		const result = runRunner(["--vitest-workers", "--turbo-concurrency=1"])
+		assert.equal(result.status, 0, result.stderr)
+		assert.equal(result.calls[1].workers, "4")
+		assert.match(result.stdout, /turbo concurrency 1(?:\r?\n|$)/)
+	})
+
+	it("resets a repeated invalid wrapper flag to its default", () => {
+		const result = runRunner([
+			"--vitest-workers=1",
+			"--vitest-workers=invalid",
+			"--turbo-concurrency=1",
+			"--turbo-concurrency=invalid",
+		])
+		assert.equal(result.status, 0, result.stderr)
+		assert.equal(result.calls[1].workers, "4")
+		assert.match(result.stdout, /turbo concurrency 2(?:\r?\n|$)/)
+		assert.match(result.stderr, /Invalid --vitest-workers/)
+	})
+
+	it("replaces an inherited worker limit only for tests", () => {
+		const result = runRunner(["--vitest-workers=1"], [0, 0], { inheritedWorkers: "9" })
+		assert.equal(result.status, 0, result.stderr)
+		assert.equal(result.calls[0].workers, "9")
+		assert.equal(result.calls[1].workers, "1")
 	})
 
 	it("preserves a later separator and package arguments", () => {
@@ -144,23 +205,48 @@ describe("local test runner contract", () => {
 		assert.match(result.stderr, /Cannot start bundle: spawn pnpm ENOENT/)
 	})
 
-	it("uses Node for the Windows pnpm launcher without a shell", () => {
-		const launcher = "C:\\Program Files\\pnpm\\pnpm.cjs"
-		const result = runRunner(["--filter=package with spaces&literal"], [0, 0], { platform: "win32", launcher })
-		assert.equal(result.status, 0, result.stderr)
-		for (const call of result.calls) {
-			assert.equal(call.command, process.execPath)
-			assert.equal(call.args[0], launcher)
-			assert.equal(call.shell, false)
-		}
-		assert.equal(result.calls[1].args.at(-1), "--filter=package with spaces&literal")
+	for (const [launcher, executable] of [
+		[String.raw`C:\Program Files\pnpm\pnpm.cjs`, false],
+		[String.raw`C:\Program Files\pnpm\pnpm.js`, false],
+		[String.raw`C:\Program Files\pnpm\pnpm.exe`, true],
+	]) {
+		it(`accepts Windows launcher ${launcher} without a shell`, () => {
+			const result = runRunner(["--filter=package with spaces&literal"], [0, 0], { platform: "win32", launcher })
+			assert.equal(result.status, 0, result.stderr)
+			for (const call of result.calls) {
+				assert.equal(call.command, executable ? launcher : process.execPath)
+				assert.equal(call.shell, false)
+				assert.deepEqual(call.args.slice(executable ? 0 : 1, executable ? 3 : 4), ["exec", "turbo", "run"])
+			}
+			assert.equal(result.calls[1].args.at(-1), "--filter=package with spaces&literal")
+		})
+	}
+
+	for (const launcher of [
+		null,
+		String.raw`C:\pnpm\pnpm.cmd`,
+		String.raw`C:\node\npm-cli.js`,
+		String.raw`C:\pnpm\other.exe`,
+	]) {
+		it(`rejects unsupported Windows launcher ${launcher}`, () => {
+			const result = runRunner([], [], { platform: "win32", launcher })
+			assert.equal(result.status, 1)
+			assert.equal(result.calls.length, 0)
+			assert.match(result.stderr, /supported pnpm launcher/)
+		})
+	}
+
+	it("reports a test-step process-start error", () => {
+		const result = runRunner([], [0, null], { errors: [null, "spawn test ENOENT"] })
+		assert.equal(result.status, 1)
+		assert.equal(result.calls.length, 2)
+		assert.match(result.stderr, /Cannot start test: spawn test ENOENT/)
 	})
 
-	it("explains how to start on Windows without the pnpm launcher", () => {
-		const result = runRunner([], [], { platform: "win32", launcher: null })
+	it("fails when the test process exits by signal", () => {
+		const result = runRunner([], [0, null], { signals: [null, "SIGTERM"] })
 		assert.equal(result.status, 1)
-		assert.equal(result.calls.length, 0)
-		assert.match(result.stderr, /Run pnpm test:local/)
+		assert.equal(result.calls.length, 2)
 	})
 
 	it("returns the test process failure", () => {
@@ -179,17 +265,13 @@ describe("CI worker config defaults", () => {
 	for (const [relative, kind] of readers) {
 		it(`keeps existing CI defaults in ${relative}`, () => {
 			const filename = path.join(root, relative)
-			const compiled = ts.transpileModule(
-				fs
-					.readFileSync(filename, "utf8")
-					.replaceAll("import.meta.url", JSON.stringify(pathToFileURL(filename).href)),
-				{
-					compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
-				},
-			).outputText
+			const compiled = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
+				compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
+			}).outputText
 			const script = new vm.Script(compiled, { filename })
 			for (const [ci, platform] of [
 				["false", "linux"],
+				["false", "win32"],
 				["true", "linux"],
 				["true", "win32"],
 			]) {
@@ -197,12 +279,10 @@ describe("CI worker config defaults", () => {
 				// Stub config imports only. Execute the actual worker-reading expressions in a fresh context.
 				script.runInNewContext({
 					exports,
-					URL,
 					__dirname: path.dirname(filename),
 					process: { env: { CI: ci }, platform },
 					require: (name) => {
-						if (name === "vitest/config")
-							return { defineConfig: (value) => value, configDefaults: { exclude: [] } }
+						if (name === "vitest/config") return { defineConfig: (value) => value }
 						if (name === "path") return path
 						if (name.endsWith("vitest-verbosity")) return { resolveVerbosity: () => ({}) }
 						if (name === "@vitejs/plugin-react") return () => ({})

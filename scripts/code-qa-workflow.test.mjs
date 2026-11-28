@@ -143,7 +143,7 @@ describe("Code QA dependency install", () => {
 	})
 })
 
-// ExtensionCiChecksCurrent: neither cache layer can reuse a result after imported types change.
+// ExtensionCiChecksCurrent: extension CI runs ESLint directly without its file cache.
 describe("lint cache policy", () => {
 	const manifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"))
 
