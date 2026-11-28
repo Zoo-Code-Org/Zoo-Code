@@ -1106,7 +1106,7 @@
 	},
 	"services/code-index/processors/__tests__/parser.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 22
+			"count": 21
 		}
 	},
 	"services/code-index/processors/__tests__/scanner.spec.ts": {

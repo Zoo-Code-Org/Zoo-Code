@@ -1,12 +1,48 @@
 // npx vitest services/tree-sitter/__tests__/languageParser.spec.ts
 
 import * as path from "path"
+import { mkdtemp, copyFile, rm } from "fs/promises"
+import { tmpdir } from "os"
 import { loadRequiredLanguageParsers } from "../languageParser"
 
 // Path to the directory containing the WASM files.
 const WASM_DIR = path.join(__dirname, "../../../node_modules/tree-sitter-wasms/out")
 
 describe("loadRequiredLanguageParsers", () => {
+	it("shares concurrent Python grammar loads", async () => {
+		const directory = await mkdtemp(path.join(tmpdir(), "zoo-python-grammar-"))
+		try {
+			await copyFile(
+				path.join(WASM_DIR, "tree-sitter-python.wasm"),
+				path.join(directory, "tree-sitter-python.wasm"),
+			)
+			const parsers = await Promise.all([
+				loadRequiredLanguageParsers(["first.py"], directory),
+				loadRequiredLanguageParsers(["second.py"], directory),
+			])
+			expect(parsers[0].py.parser.language).toBe(parsers[1].py.parser.language)
+			for (const result of parsers) {
+				result.py.query.delete()
+				result.py.parser.delete()
+			}
+		} finally {
+			await rm(directory, { recursive: true, force: true })
+		}
+	})
+
+	it("does not reload or relog a failed grammar for each file", async () => {
+		const directory = await mkdtemp(path.join(tmpdir(), "zoo-missing-grammar-"))
+		const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			await expect(loadRequiredLanguageParsers(["first.py"], directory)).rejects.toThrow()
+			await expect(loadRequiredLanguageParsers(["second.py"], directory)).rejects.toThrow()
+			expect(errorLog).toHaveBeenCalledOnce()
+		} finally {
+			errorLog.mockRestore()
+			await rm(directory, { recursive: true, force: true })
+		}
+	})
+
 	it("should load Python parser for .py files", async () => {
 		const files = ["test.py"]
 		const parsers = await loadRequiredLanguageParsers(files, WASM_DIR)

@@ -151,13 +151,19 @@ export async function parseSourceCodeDefinitionsForFile(
 	// For other file types, load parser and use tree-sitter
 	const languageParsers = await loadRequiredLanguageParsers([filePath])
 
-	// Parse the file if we have a parser for it
-	const definitions = await parseFile(filePath, languageParsers, rooIgnoreController)
-	if (definitions) {
-		return `# ${path.basename(filePath)}\n${definitions}`
+	try {
+		// Parse the file if we have a parser for it
+		const definitions = await parseFile(filePath, languageParsers, rooIgnoreController)
+		if (definitions) {
+			return `# ${path.basename(filePath)}\n${definitions}`
+		}
+		return undefined
+	} finally {
+		for (const { parser, query } of Object.values(languageParsers)) {
+			query.delete()
+			parser.delete()
+		}
 	}
-
-	return undefined
 }
 
 /*
@@ -330,9 +336,10 @@ async function parseFile(
 		return `Unsupported file type: ${filePath}`
 	}
 
+	let tree: ReturnType<typeof parser.parse> = null
 	try {
 		// Parse the file content into an Abstract Syntax Tree (AST)
-		const tree = parser.parse(fileContent)
+		tree = parser.parse(fileContent)
 
 		// Apply the query to the AST and get the captures
 		const captures = tree ? query.captures(tree.rootNode) : []
@@ -346,5 +353,7 @@ async function parseFile(
 		console.log(`Error parsing file: ${error}\n`)
 		// Return null on parsing error to avoid showing error messages in the output
 		return null
+	} finally {
+		tree?.delete()
 	}
 }

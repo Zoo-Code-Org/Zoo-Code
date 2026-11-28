@@ -17,6 +17,7 @@ import { sanitizeErrorMessage } from "../shared/validation-helpers"
 export class CodeParser implements ICodeParser {
 	private loadedParsers: LanguageParser = {}
 	private pendingLoads: Map<string, Promise<LanguageParser>> = new Map()
+	private failedParserExtensions = new Set<string>()
 	// Markdown files are now supported using the custom markdown parser
 	// which extracts headers and sections for semantic indexing
 
@@ -107,19 +108,17 @@ export class CodeParser implements ICodeParser {
 		}
 
 		// Check if we already have the parser loaded
+		if (this.failedParserExtensions.has(ext)) {
+			return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+		}
 		if (!this.loadedParsers[ext]) {
 			const pendingLoad = this.pendingLoads.get(ext)
 			if (pendingLoad) {
 				try {
 					await pendingLoad
 				} catch (error) {
-					console.error(`Error in pending parser load for ${filePath}:`, error)
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
-						location: "parseContent:loadParser",
-					})
-					return []
+					this.recordParserLoadFailure(ext, filePath, error)
+					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 				}
 			} else {
 				const loadPromise = loadRequiredLanguageParsers([filePath])
@@ -130,13 +129,8 @@ export class CodeParser implements ICodeParser {
 						this.loadedParsers = { ...this.loadedParsers, ...newParsers }
 					}
 				} catch (error) {
-					console.error(`Error loading language parser for ${filePath}:`, error)
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
-						location: "parseContent:loadParser",
-					})
-					return []
+					this.recordParserLoadFailure(ext, filePath, error)
+					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 				} finally {
 					this.pendingLoads.delete(ext)
 				}
@@ -150,83 +144,97 @@ export class CodeParser implements ICodeParser {
 		}
 
 		const tree = language.parser.parse(content)
+		try {
+			// We don't need to get the query string from languageQueries since it's already loaded
+			// in the language object
+			const captures = tree ? language.query.captures(tree.rootNode) : []
 
-		// We don't need to get the query string from languageQueries since it's already loaded
-		// in the language object
-		const captures = tree ? language.query.captures(tree.rootNode) : []
-
-		// Check if captures are empty
-		if (captures.length === 0) {
-			if (content.length >= MIN_BLOCK_CHARS) {
-				// Perform fallback chunking if content is large enough
-				const blocks = this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
-				return blocks
-			} else {
-				// Return empty if content is too small for fallback
-				return []
-			}
-		}
-
-		const results: CodeBlock[] = []
-
-		// Process captures if not empty
-		const queue: Node[] = Array.from(captures).map((capture) => capture.node)
-
-		while (queue.length > 0) {
-			const currentNode = queue.shift()!
-			// const lineSpan = currentNode.endPosition.row - currentNode.startPosition.row + 1 // Removed as per lint error
-
-			// Check if the node meets the minimum character requirement
-			if (currentNode.text.length >= MIN_BLOCK_CHARS) {
-				// If it also exceeds the maximum character limit, try to break it down
-				if (currentNode.text.length > MAX_BLOCK_CHARS * MAX_CHARS_TOLERANCE_FACTOR) {
-					if (currentNode.children.filter((child) => child !== null).length > 0) {
-						// If it has children, process them instead
-						queue.push(...currentNode.children.filter((child) => child !== null))
-					} else {
-						// If it's a leaf node, chunk it
-						const chunkedBlocks = this._chunkLeafNodeByLines(
-							currentNode,
-							filePath,
-							fileHash,
-							seenSegmentHashes,
-						)
-						results.push(...chunkedBlocks)
-					}
+			// Check if captures are empty
+			if (captures.length === 0) {
+				if (content.length >= MIN_BLOCK_CHARS) {
+					// Perform fallback chunking if content is large enough
+					const blocks = this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+					return blocks
 				} else {
-					// Node meets min chars and is within max chars, create a block
-					const identifier =
-						currentNode.childForFieldName("name")?.text ||
-						currentNode.children.find((c) => c?.type === "identifier")?.text ||
-						null
-					const type = currentNode.type
-					const start_line = currentNode.startPosition.row + 1
-					const end_line = currentNode.endPosition.row + 1
-					const content = currentNode.text
-					const contentPreview = content.slice(0, 100)
-					const segmentHash = createHash("sha256")
-						.update(`${filePath}-${start_line}-${end_line}-${content.length}-${contentPreview}`)
-						.digest("hex")
-
-					if (!seenSegmentHashes.has(segmentHash)) {
-						seenSegmentHashes.add(segmentHash)
-						results.push({
-							file_path: filePath,
-							identifier,
-							type,
-							start_line,
-							end_line,
-							content,
-							segmentHash,
-							fileHash,
-						})
-					}
+					// Return empty if content is too small for fallback
+					return []
 				}
 			}
-			// Nodes smaller than minBlockChars are ignored
-		}
 
-		return results
+			const results: CodeBlock[] = []
+
+			// Process captures if not empty
+			const queue: Node[] = Array.from(captures).map((capture) => capture.node)
+
+			while (queue.length > 0) {
+				const currentNode = queue.shift()!
+				// const lineSpan = currentNode.endPosition.row - currentNode.startPosition.row + 1 // Removed as per lint error
+
+				// Check if the node meets the minimum character requirement
+				if (currentNode.text.length >= MIN_BLOCK_CHARS) {
+					// If it also exceeds the maximum character limit, try to break it down
+					if (currentNode.text.length > MAX_BLOCK_CHARS * MAX_CHARS_TOLERANCE_FACTOR) {
+						if (currentNode.children.filter((child) => child !== null).length > 0) {
+							// If it has children, process them instead
+							queue.push(...currentNode.children.filter((child) => child !== null))
+						} else {
+							// If it's a leaf node, chunk it
+							const chunkedBlocks = this._chunkLeafNodeByLines(
+								currentNode,
+								filePath,
+								fileHash,
+								seenSegmentHashes,
+							)
+							results.push(...chunkedBlocks)
+						}
+					} else {
+						// Node meets min chars and is within max chars, create a block
+						const identifier =
+							currentNode.childForFieldName("name")?.text ||
+							currentNode.children.find((c) => c?.type === "identifier")?.text ||
+							null
+						const type = currentNode.type
+						const start_line = currentNode.startPosition.row + 1
+						const end_line = currentNode.endPosition.row + 1
+						const content = currentNode.text
+						const contentPreview = content.slice(0, 100)
+						const segmentHash = createHash("sha256")
+							.update(`${filePath}-${start_line}-${end_line}-${content.length}-${contentPreview}`)
+							.digest("hex")
+
+						if (!seenSegmentHashes.has(segmentHash)) {
+							seenSegmentHashes.add(segmentHash)
+							results.push({
+								file_path: filePath,
+								identifier,
+								type,
+								start_line,
+								end_line,
+								content,
+								segmentHash,
+								fileHash,
+							})
+						}
+					}
+				}
+				// Nodes smaller than minBlockChars are ignored
+			}
+
+			return results
+		} finally {
+			tree?.delete()
+		}
+	}
+
+	private recordParserLoadFailure(ext: string, filePath: string, error: unknown): void {
+		if (this.failedParserExtensions.has(ext)) return
+		this.failedParserExtensions.add(ext)
+		console.error(`Error loading language parser for ${filePath}:`, error)
+		TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+			error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
+			stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
+			location: "parseContent:loadParser",
+		})
 	}
 
 	/**

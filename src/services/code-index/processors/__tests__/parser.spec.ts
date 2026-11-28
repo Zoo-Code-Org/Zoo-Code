@@ -41,6 +41,7 @@ const mockLanguageParser = {
 	js: {
 		parser: {
 			parse: vi.fn((content: string) => ({
+				delete: vi.fn(),
 				rootNode: {
 					text: content,
 					startPosition: { row: 0 },
@@ -68,6 +69,12 @@ describe("CodeParser", () => {
 	})
 
 	describe("parseFile", () => {
+		it("releases parsed trees after extracting code blocks", async () => {
+			await parser.parseFile("test.js", { content: "function example() { return 1 }" })
+			const tree = vi.mocked(mockLanguageParser.js.parser.parse).mock.results.at(-1)?.value
+			expect(tree?.delete).toHaveBeenCalledOnce()
+		})
+
 		it("should return empty array for unsupported extensions", async () => {
 			const result = await parser.parseFile("test.unsupported")
 			expect(result).toEqual([])
@@ -157,18 +164,53 @@ describe("CodeParser", () => {
 	})
 
 	describe("parseContent", () => {
-		it("should wait for pending parser loads", async () => {
-			const pendingLoad = new Promise((resolve) => setTimeout(() => resolve(mockLanguageParser), 100))
-			parser["pendingLoads"].set(".js", pendingLoad as Promise<any>)
+		it.each([false, true])("shares a pending grammar load when failure=%s", async (fails) => {
+			const load = vi.mocked(loadRequiredLanguageParsers)
+			// Reuse the configured parser fixture while delaying its resolution until both parses start.
+			const pending = load(["fixture.js"])
+			load.mockClear()
+			load.mockImplementationOnce(async () => {
+				await Promise.resolve()
+				if (fails) throw new Error("WASM load failed")
+				return pending
+			})
+			const content = "const value = 123;\n".repeat(30)
 
-			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
-			expect(result).toBeDefined()
+			const results = await Promise.all([
+				parser.parseFile("first.js", { content }),
+				parser.parseFile("second.js", { content }),
+			])
+
+			expect(load).toHaveBeenCalledExactlyOnceWith(["first.js"])
+			expect(results[0][0]?.type).toBe("fallback_chunk")
+			expect(results[1][0]?.type).toBe("fallback_chunk")
+			expect(mockLanguageParser.js.parser.parse).toHaveBeenCalledTimes(fails ? 0 : 2)
+		})
+
+		it("releases the tree if query evaluation throws", async () => {
+			const failure = new Error("Invalid query")
+			mockLanguageParser.js.query.captures.mockImplementationOnce(() => {
+				throw failure
+			})
+
+			await expect(parser.parseFile("test.js", { content: "const value = 123" })).rejects.toThrow(failure)
+			expect(mockLanguageParser.js.parser.parse.mock.results.at(-1)?.value?.delete).toHaveBeenCalledOnce()
 		})
 
 		it("should handle parser load errors", async () => {
 			;(loadRequiredLanguageParsers as any).mockRejectedValue(new Error("Load failed"))
 			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
 			expect(result).toEqual([])
+		})
+
+		it("does not retry a failed grammar for every file and uses fallback chunks", async () => {
+			vi.mocked(loadRequiredLanguageParsers).mockRejectedValue(new Error("WASM load failed"))
+			const content = "const value = 123;\n".repeat(30)
+			const first = await parser.parseFile("first.js", { content })
+			const second = await parser.parseFile("second.js", { content })
+			expect(loadRequiredLanguageParsers).toHaveBeenCalledOnce()
+			expect(first.length).toBeGreaterThan(0)
+			expect(second.length).toBeGreaterThan(0)
 		})
 
 		it("should return empty array when no parser is available", async () => {
