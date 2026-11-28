@@ -124,6 +124,13 @@ export function isMcpToolEchoAmbiguous(name: string): boolean {
 
 /**
  * Drop every record.
+ *
+ * An explicit internal test seam: the ledger is process-wide, so specs
+ * reset it between tests to isolate their own records. No production
+ * path clears the ledger; it lives for the whole process run
+ * (McpToolNameLedger.tla models no clear action).
+ *
+ * @internal
  */
 export function clearMcpToolAliases(): void {
 	ledger.clear()
