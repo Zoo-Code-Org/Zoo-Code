@@ -68,6 +68,30 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 }
 
 /**
+ * Optional hooks for {@link bridgeExternalAbortSignal}: the cancellation side effects a
+ * provider needs that a plain signal relay cannot express.
+ */
+export type AbortBridgeHooks = {
+	/**
+	 * Run this when the external signal aborts - a client-level `abort()` on a transport
+	 * that owns its own connection, a host cancellation token, or a flag recording that the
+	 * caller rather than a timeout ended the request.
+	 *
+	 * It also runs when the external signal was already aborted at call time, so a
+	 * pre-aborted caller reaches the same side effect as a live abort. The per-request
+	 * controller aborts before the hook runs, so a hook that throws cannot leave a
+	 * request signal that never settles.
+	 */
+	onAbort?: (reason?: unknown) => void
+	/**
+	 * Bridge onto this controller instead of creating one. Providers that keep a
+	 * class-level controller as the stop-button handle pass it here so the bridge and
+	 * that path share one controller.
+	 */
+	controller?: AbortController
+}
+
+/**
  * Bridge an optional caller-owned (external) abort signal to a per-request
  * signal, with an explicit detach handle.
  *
@@ -78,30 +102,73 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
  * left attached would outlive the request and retain the per-request
  * controller for every completed request.
  *
- * With no external signal, returns `{ signal: undefined, dispose: noop }` so
- * the client-level timeout remains the only cancellation mechanism.
+ * With no external signal, `signal` is `undefined` and `dispose` is a noop, so the
+ * client-level timeout remains the only cancellation mechanism; the returned
+ * `controller` is still a usable request-local signal for a provider that needs
+ * one without relaying anything.
+ *
+ * An `onAbort` hook that throws is reported through `console.warn` and changes
+ * nothing else: the request controller is aborted before the hook runs, the hook
+ * still runs at most once per cancellation, and `dispose` is handed back on every
+ * path, so a caller can always detach the listener. A throwing hook is a provider
+ * bug, not a cancellation mechanism - the bridge never lets it decide whether the
+ * abort lands or whether the caller can clean up.
  */
-export function bridgeExternalAbortSignal(externalSignal?: AbortSignal): {
+export function bridgeExternalAbortSignal(
+	externalSignal?: AbortSignal,
+	hooks?: AbortBridgeHooks,
+): {
 	signal?: AbortSignal
+	controller: AbortController
 	dispose: () => void
 } {
-	if (!externalSignal) {
-		return { signal: undefined, dispose: () => {} }
+	const controller = hooks?.controller ?? new AbortController()
+	// The hook is invoked from one place per abort path so a provider side effect
+	// cannot be run twice for the same cancellation.
+	const notify = (reason?: unknown): void => {
+		if (!hooks?.onAbort) {
+			return
+		}
+		try {
+			hooks.onAbort(reason)
+		} catch (error) {
+			// A provider side effect must not be able to take the bridge's contract with
+			// it. The controller is already aborted before notify runs, so swallowing
+			// the hook's error cannot leave a request signal that never settles; what
+			// the guard buys is that `dispose` still reaches the caller on the
+			// already-aborted path (where a throw used to escape the call) and that both
+			// paths report the same way instead of one surfacing as an uncaught error
+			// inside the listener. Reported rather than dropped, matching the console.warn
+			// convention already used by provider-side cleanup in this folder.
+			console.warn("[abort-signal] bridge: onAbort hook threw", error)
+		}
 	}
 
-	const controller = new AbortController()
+	if (!externalSignal) {
+		// No caller signal: the request-local controller is still handed back, so a
+		// provider that needs a signal for its own races or timer keeps one without
+		// relaying anything.
+		return { signal: undefined, controller, dispose: () => {} }
+	}
+
 	if (externalSignal.aborted) {
 		controller.abort()
-		return { signal: controller.signal, dispose: () => {} }
+		notify(externalSignal.reason)
+		return { signal: controller.signal, controller, dispose: () => {} }
 	}
 
 	// Retain the callback so the listener can be detached once this request
 	// ends: an anonymous listener on a long-lived external signal would
 	// outlive the request and retain the per-request controller.
-	const onExternalAbort = () => controller.abort()
+	const onExternalAbort = (): void => {
+		const reason = externalSignal.reason
+		controller.abort()
+		notify(reason)
+	}
 	externalSignal.addEventListener("abort", onExternalAbort, { once: true })
 	return {
 		signal: controller.signal,
+		controller,
 		dispose: () => externalSignal.removeEventListener("abort", onExternalAbort),
 	}
 }
