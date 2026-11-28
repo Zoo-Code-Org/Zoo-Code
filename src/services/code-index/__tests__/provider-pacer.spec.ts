@@ -31,6 +31,10 @@ describe("makeRateLimitScope (CI-PP-01)", () => {
 		)
 	})
 
+	it("rejects an invalid base URL", () => {
+		expect(() => makeRateLimitScope("openai", "not a URL", "key")).toThrow(TypeError)
+	})
+
 	it("distinguishes extra inputs and never embeds the key", () => {
 		const scope = makeRateLimitScope("bedrock", undefined, undefined, "us-east-1|default")
 		expect(scope).not.toBe(makeRateLimitScope("bedrock", undefined, undefined, "us-west-2|default"))

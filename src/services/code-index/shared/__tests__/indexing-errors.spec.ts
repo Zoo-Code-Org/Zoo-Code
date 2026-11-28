@@ -136,6 +136,25 @@ describe("indexing error classification", () => {
 		expect(classifyIndexingError(new Error("outer", { cause: error }))).toBe("server")
 	})
 
+	it("preserves an existing embedding error unchanged", () => {
+		const cause = { status: 429, headers: { "retry-after": "2" } }
+		const original = Object.freeze(new EmbeddingError("already formatted", cause))
+		expect(toEmbeddingError(original)).toBe(original)
+		expect(original.cause).toBe(cause)
+		expect(original.retryAfterMs).toBe(2000)
+	})
+
+	it("formats quota exhaustion as a permanent embedding error with the raw cause", () => {
+		const cause = { status: 429, code: "insufficient_quota" }
+		const error = toEmbeddingError(cause)
+		expect(error).toBeInstanceOf(EmbeddingError)
+		expect(error.message).toBe("embeddings:quotaExceeded")
+		expect(error.cause).toBe(cause)
+		expect(error.statusCode).toBe(429)
+		expect(error.classification).toBe("permanent")
+		expect(classifyIndexingError(error)).toBe("permanent")
+	})
+
 	it("classifies raw errors before translated formatting", () => {
 		const cause = new APIConnectionTimeoutError()
 		const error = toEmbeddingError(cause)
