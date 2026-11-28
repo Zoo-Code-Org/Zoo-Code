@@ -63,18 +63,35 @@ const withinReadBackDeadline = <T>(read: PromiseLike<T>, key: string): Promise<T
 
 export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.includes(key)
 
+// A parsed payload can carry these as own keys. Writing one through a computed assignment
+// re-points the target object's prototype instead of storing a setting, so they are never
+// accepted as state keys.
+const UNSAFE_STATE_KEYS = ["__proto__", "constructor", "prototype"]
+
+export const isUnsafeStateKey = (key: string) => UNSAFE_STATE_KEYS.includes(key)
+
 const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Per-view selection state is machine-local: it keeps flowing through the
+	// normal runtime and pruning paths but must not transfer between settings.
+	viewStates: true,
 })
 
 export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
 	private stateCache: GlobalState
+	private stateWriteGenerations = new Map<GlobalStateKey, number>()
 	private secretCache: SecretState
 	private _isInitialized = false
+	// Raised for the whole duration of a reset and cleared in a finally, so a reset that fails
+	// mid-way cannot leave the store refusing every later secret write; see resetAllState.
+	private resetting = false
+	// A reset that is already running. Overlapping callers join it instead of starting a second
+	// delete pass whose end could lower the guard while the first one is still writing.
+	private resetInFlight: Promise<void> | null = null
 
 	constructor(context: vscode.ExtensionContext) {
 		this.originalContext = context
@@ -401,6 +418,10 @@ export class ContextProxy {
 	private readonly secretWriteCount = new Map<string, number>()
 
 	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
+		if (isUnsafeStateKey(key)) {
+			return Promise.resolve()
+		}
+
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
@@ -413,6 +434,8 @@ export class ContextProxy {
 		// writes that are in flight. An update that throws at once is turned into a rejection, so it is handled the same.
 		const owner = {}
 		this.stateWriteOwner.set(key, owner)
+		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
+		this.stateWriteGenerations.set(key, generation)
 		this.stateCache[key] = value
 		const release = () => {
 			if (this.stateWriteOwner.get(key) === owner) this.stateWriteOwner.delete(key)
@@ -429,6 +452,32 @@ export class ContextProxy {
 		})
 	}
 
+	/**
+	 * The write generation the next `setValue`/`setValues` of this key will produce, or
+	 * `undefined` when the key's write path records no generation at all - a secret, or a
+	 * pass-through key that bypasses the state cache. Capture it before awaiting the write.
+	 */
+	public beginStateWriteGeneration<K extends RooCodeSettingsKey>(key: K): number | undefined {
+		if (!this.recordsWriteGeneration(key)) {
+			return undefined
+		}
+
+		return (this.stateWriteGenerations.get(key as GlobalStateKey) ?? 0) + 1
+	}
+
+	/**
+	 * Current write generation for a key, or `undefined` when its write path records none. A
+	 * caller that may have to undo its own write compares it against the value captured from
+	 * `beginStateWriteGeneration`: a newer write for the same key has already advanced it.
+	 */
+	public getStateWriteGeneration<K extends RooCodeSettingsKey>(key: K): number | undefined {
+		return this.recordsWriteGeneration(key) ? this.stateWriteGenerations.get(key as GlobalStateKey) : undefined
+	}
+
+	private recordsWriteGeneration<K extends RooCodeSettingsKey>(key: K): boolean {
+		return !isSecretStateKey(key) && !isPassThroughStateKey(key)
+	}
+
 	private getAllGlobalState(): GlobalState {
 		return Object.fromEntries(GLOBAL_STATE_KEYS.map((key) => [key, this.getGlobalState(key)]))
 	}
@@ -443,6 +492,13 @@ export class ContextProxy {
 	}
 
 	storeSecret(key: SecretStateKey, value?: string) {
+		// Refused rather than deferred: a deferred secret write would re-store exactly the value the
+		// user asked to erase, and a silently dropped one would lose the save.
+		if (this.resetting) {
+			return Promise.reject(
+				new SettingsWriteError([], [key], new Error("secret writes are refused while state is being reset")),
+			)
+		}
 		// Update cache.
 		const owner = {}
 		this.secretWriteOwner.set(key, owner)
@@ -715,18 +771,46 @@ export class ContextProxy {
 	 * This clears all data from both the in-memory caches and the VSCode storage.
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
-	public async resetAllState() {
-		// Clear in-memory caches
-		this.stateCache = {}
-		this.secretCache = {}
+	public resetAllState(): Promise<void> {
+		// Two resets can overlap (a second webview, or the same command twice). A boolean guard lets the
+		// first pass to finish lower it while the second is still deleting, and a secret stored in that
+		// gap is erased by the pass that is still running - so overlapping callers join the running pass.
+		if (this.resetInFlight) {
+			return this.resetInFlight
+		}
 
-		await Promise.all([
-			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
-			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-		])
+		this.resetting = true
+		const pass = (async () => {
+			try {
+				this.stateCache = {}
+				this.secretCache = {}
+				// A write that started before this reset must not restore its pre-reset value when it
+				// rejects afterwards, so advance every generation the pending writes still hold.
+				for (const key of this.stateWriteGenerations.keys()) {
+					this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+				}
 
-		await this.initialize()
+				// Promise.all rejects on the first failure while the other updates and deletes are still
+				// pending, and the finally below would then admit a storeSecret that a still-running
+				// delete erases. Settle every delete first, then surface the first failure.
+				const deletions = await Promise.allSettled([
+					...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
+					...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+					...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+				])
+				const deletionFailure = deletions.find((result) => result.status === "rejected")
+				if (deletionFailure) {
+					throw deletionFailure.reason
+				}
+
+				await this.initialize()
+			} finally {
+				this.resetting = false
+				this.resetInFlight = null
+			}
+		})()
+		this.resetInFlight = pass
+		return pass
 	}
 
 	private static _instance: ContextProxy | null = null
