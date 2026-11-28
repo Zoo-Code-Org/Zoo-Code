@@ -2735,6 +2735,134 @@ describe("DeepSeekHandler", () => {
 			expect(arr.prefixItems).toStrictEqual([{ type: "string" }])
 			expect(String(arr.description)).toContain("contains")
 		})
+
+		it("relaxes unevaluatedProperties when a dropped then branch evaluated the required key (review 4726104161)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							required: ["x"],
+							if: { properties: { y: { pattern: "^a" } } },
+							then: { properties: { x: { type: "string" } } },
+							unevaluatedProperties: false,
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The pattern leaves the if predicate, the conditional relaxes,
+			// and the then branch - the rule that evaluated x - travels into
+			// the hint. A retained unevaluatedProperties: false would forbid
+			// the required key, and the compiled schema would accept no
+			// object. The rule relaxes instead; the closed object with no
+			// changed conditional keeps it (control below).
+			expect(params.unevaluatedProperties).toBe(true)
+			expect(params.required).toStrictEqual(["x"])
+			expect(String(params.description)).toContain("then")
+		})
+
+		it("keeps unevaluatedProperties on a closed object whose conditional strips unchanged (review 4726104161 control)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							required: ["x"],
+							properties: { x: { type: "string" } },
+							if: { properties: { y: { type: "string" } } },
+							then: { properties: { x: { type: "string" } } },
+							unevaluatedProperties: false,
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// No rejected keyword anywhere: the predicate strips unchanged,
+			// the branch stays, and the closed rule is an ordinary one.
+			expect(params.unevaluatedProperties).toBe(false)
+			expect(params.then).toBeDefined()
+		})
+
+		it("relaxes unevaluatedItems when a child applicator branch loses contains (review 4726104165)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							properties: {
+								items: {
+									type: "array",
+									const: ["a"],
+									allOf: [{ contains: { type: "string" } }],
+									unevaluatedItems: false,
+								},
+							},
+							required: ["items"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as {
+				properties?: Record<string, Record<string, unknown>>
+			}
+			const arr = (params.properties ?? {}).items as Record<string, unknown>
+			// The contains rule inside the allOf branch evaluated index 0;
+			// compilation removes it, the outer removed record never saw it,
+			// and a retained unevaluatedItems: false would forbid every item
+			// the original accepted - with the const there is no valid value
+			// left. The restriction relaxes to true, and with no removed
+			// contains at this level the empty-schema alternative covers the
+			// items the branch evaluated.
+			expect(arr.unevaluatedItems).toBe(true)
+			expect(arr.const).toStrictEqual(["a"])
+		})
+
+		it("relaxes unevaluatedItems through the removed contains when the branch also lost it (review 4726104165 polarity)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							properties: {
+								items: {
+									type: "array",
+									contains: { type: "string" },
+									allOf: [{ contains: { type: "string" } }],
+									unevaluatedItems: false,
+								},
+							},
+							required: ["items"],
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as {
+				properties?: Record<string, Record<string, unknown>>
+			}
+			const arr = (params.properties ?? {}).items as Record<string, unknown>
+			// Both the level's own contains and the child branch's contains
+			// leave: the relaxation fires through the removed record, and
+			// the compiled contains rule re-enters as the alternative.
+			expect(arr.unevaluatedItems).toBe(true)
+			expect(String(arr.description)).toContain("contains")
+		})
 	})
 })
 

@@ -3,8 +3,7 @@
 \* Source: a tool schema declared by the repo or an MCP server. Properties are
 \* required or optional, a property can hold a forbidden keyword, a type can
 \* already hold "null", and a property can hold an enum. The model uses one
-\* property q. The forced rule "required = every key" is true by construction,
-\* so it is not an invariant.
+\* property q; the forced rule "required = every key" is true by construction.
 \* Sink: the emitted strict schema. A strict endpoint (DeepSeek, OpenRouter,
 \* Cerebras) accepts it only when optional keys are nullable and no forbidden
 \* keyword survives. The invariants state that contract.
@@ -29,91 +28,36 @@
 \* Expected: Fixed holds. LegacyNull fails OptionalNullable. LegacyPattern fails
 \* NoForbiddenKeyword. LegacyEnum fails OptionalNullable only when the enum
 \* case is in the input. Each sabotage config fails on one invariant only.
-\* Replay: the unit tests in base-provider.spec.ts and strict-tool-schema.spec.ts
-\* run the real conversion. They use mocked schemas only, no live API.
-\* Not modeled: message serialization (reasoning_content is already kept by
-\* convertToR1Format), XML output (the fork removed XML tool calls by design),
-\* and tool result order (execution is serial, so results keep call order).
-\* Cost: TLC checks each config in under 1 second. Agent time is not measured.
-\* Review round 1 (PR #2653): 4 findings. This spec added the enum input and
-\* the acceptance oracle for 1 finding (thread 4658277638). 0 covered, 1
-\* added, 0 gap. The other 3 findings were code fixes replayed by the unit
-\* tests.
-\* Review round N+1 (PR #2653, findings 4674816413/4674816421 relayed from the
-\* stacked 2664 review): a bare nested combinator wrapper must be looked
-\* through before acceptance is reported (4674816413), and an optional oneOf
-\* whose alternatives ALL accept null must be wrapped in an outer anyOf,
-\* because strict exactly-one would otherwise reject null (4674816421). This
-\* round added the nestedWrapper/nestedMatches/oneOfMultiNull inputs, the
-\* CombinatorAcceptsNull decision, and the still-nullable invariant. 0
-\* covered, 2 added, 0 gap; both replay as red-verified unit tests in
-\* base-provider.spec.ts. Third finding 4674816417 (null sentinels reaching
-\* execution) is an execution-layer contract, replayed by
-\* BaseTool.null-sentinels.spec.ts and outside this schema spec.
-\* Review round N+2 (4675120035, from the 2664 review): a NESTED oneOf is
-\* evaluated under its own exactly-one rule — two null-accepting nested
-\* alternatives make the nested oneOf reject null, and reporting acceptance
-\* there leaves the emitted schema rejecting null. The spec's evaluator hook
-\* RecursesIntoNested now reports the nested COMBINATOR truth, not just
-\* inner-alternative acceptance. 0 covered, 1 added, 0 gap; replays as a
-\* red-verified unit test in base-provider.spec.ts.
-\* Review round 6 (PR #2653, thread 4675584064): a wrapped ARRAY-typed
-\* original must normalize its items object before the wrap, exactly as the
-\* object shape does. This round also closes the pending round-5 object
-\* ratchet (thread 4675158952): both shapes are one invariant,
-\* WrappedInnerStrict, on the new wrappedInner input (none/object/array).
-\* 0 covered, 1 added, 0 gap; replays as a red-verified unit test in
-\* base-provider.spec.ts. Fixed gate: 480 states.
-\* Review round 7 (PR #2653, thread 4680624688 and the mutation-report
-\* comment 7079812310): the test oracle must classify a non-null array as
-\* "array" (4680624688), and 43 blocking mutants were reported on the
-\* converter and the null-sentinel guard. 0 covered, 0 added, 2 gap: both
-\* findings live in the unit-test harness, which this spec does not model.
-\* The converter contract behind the array finding is already
-\* WrappedInnerStrict (round 6); the mutation round killed 35 mutants with
-\* focused tests, documented 5 equivalent ones as narrow Stryker disables,
-\* and removed 3 dead-code lines (a duplicated type check, a dead break
-\* guard) with no behavior change, so no invariant changed.
-\* Review round 8 (PR #2653, threads 4716476955 and 6084531532): a stripped
-\* oneOf keeps exactly-one semantics and accepts nothing - the spec adds the
-\* patOneOf input, the RelaxesChangedOneOf hook, and OneOfValuesKept
-\* (1 added, 0 covered, 0 gap; replays as a red-verified acceptance-oracle
-\* test in strict-tool-schema.spec.ts). The property-less object wrap guard
-\* (6084531532) is already demanded by WrappedInnerStrict ("object" shape
-\* without declared properties): covered, closed by the code fix.
-\* Review round 9 (PR #2653, thread 4719419437): a oneOf reached through a
-\* `not` keeps its position - moved under anyOf, the negated predicate would
-\* match every value and the negation would reject values the original
-\* accepted. This round adds the notOneOf input, the KeepsOneOfPosition
-\* hook, and NotOneOfValueKept. 1 added, 0 covered, 0 gap; replays as a
-\* red-verified unit test in strict-tool-schema.spec.ts. The findings
-\* 4719419445 and 4719419450 are unit-test harness coverage and live
-\* outside this spec.
-\* Review round 13 (PR #2653, threads 4725679664 and 4725679729): the
-\* negation invariant compared a POSITION hook, not acceptance - both hooks
-\* returned TRUE, so a stripped oneOf under a `not` could reject a value the
-\* original accepted and the invariant still passed. The invariant now
-\* derives the acceptance of a zero-branch value from the drop decision and
-\* the strip facts (review 4725679664), and a second invariant covers the
-\* conditional branch flip (review 4725679729). Code fix: a `not` whose
-\* subtree lost a keyword drops outside a negation context, and a changed
-\* conditional keeps the bare predicate without its branches. 1 added
-\* (CondValuesKept) and 1 rewritten (NotOneOfValueKept), 0 covered, 0 gap.
-\* Review round 10 (PR #2653, round-7 outside-diff comment on the schema-map
-\* callback): the negation context must survive the schema-map keywords -
-\* a callback that resets it to false lets a oneOf under properties inside
-\* a `not` still move under anyOf, and the negation then rejects values the
-\* original accepted. This round adds the notOneOfViaMap input, the
-\* KeepsOneOfPositionViaMap hook, and the via-map conjunct of
-\* NotOneOfValueKept. 1 added, 0 covered, 0 gap; replays as a red-verified
-\* unit test in strict-tool-schema.spec.ts.
+\* Replay: the unit tests in base-provider.spec.ts and
+\* strict-tool-schema.spec.ts run the real conversion on mocked schemas.
+\* Not modeled: message serialization, XML output (removed by design), tool
+\* result order (serial execution). Cost: each config checks in seconds.
+\* Review ratchet: R1 1 added (4658277638; the other 3 round-1 findings
+\* were code fixes replayed by unit tests). RN+1 2 added (4674816413,
+\* 4674816421); 4674816417 is an execution-layer contract outside this
+\* spec (BaseTool.null-sentinels.spec.ts). RN+2 1 added (4675120035).
+\* R6 1 added (4675584064; closes the round-5 object ratchet 4675158952).
+\* R7 0 added, 2 gap (4680624688, mutation report 7079812310: test
+\* harness and mutants, pinned by unit tests). R8 1 added (4716476955);
+\* 6084531532 covered by WrappedInnerStrict. R9 1 added (4719419437);
+\* 4719419445 and 4719419450 outside this spec. R13 1 added and 1
+\* rewritten (4725679664 NotOneOfValueKept, 4725679729 CondValuesKept).
+\* R10 1 added (round-7 outside-diff comment, via-map conjunct).
+\* R14 (4726104174) 1 added: change detected through a reference widens
+\* the not/conditional/oneOf changed facts (notRefPat, condRefPat,
+\* oneOfRefPat). 4726104157 (nested wrap path rooting), 4726104178
+\* (dangling-reference inlining), 4726104168 (map-position reference
+\* traversal) and 4726104169 (pointer escaping) are pointer-map
+\* contracts the one-property model cannot represent - gap, pinned by
+\* base-provider.spec.ts and strict-tool-schema.spec.ts; 4726104159 is
+\* the unit-test oracle itself. 0 covered, 1 added, 4 gap.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat
 
 Props == {q}
 Types == {"str", "null"}
@@ -128,13 +72,13 @@ OptionalAsNullable(optional) == optional
 EnumAsNullable(optional) == optional
 \* Fixed code: the strip pass removes the pattern keyword.
 EmittedKeepsPattern(declared) == FALSE
-\* Fixed code: a nested combinator wrapper is looked through — the wrapper
-\* accepts null exactly when one of its own alternatives does. The naive
+\* Fixed code: a nested combinator wrapper is looked through - the wrapper
+\* accepts null exactly when one of its own alternatives does; the naive
 \* evaluator reports TRUE for any wrapper without type/enum (the sabotage).
-\* Fixed code: a nested anyOf accepts null when AT LEAST one nested
-\* alternative accepts it; a nested oneOf requires EXACTLY ONE — two
-\* accepting alternatives reject null under exactly-one semantics
-\* (review 4675120035). The hook reports the nested combinator truth.
+\* A nested anyOf accepts null when AT LEAST one nested alternative accepts
+\* it; a nested oneOf requires EXACTLY ONE - two accepting alternatives
+\* reject null under exactly-one semantics (review 4675120035). The hook
+\* reports the nested combinator truth.
 RecursesIntoNested(nm) ==
     IF nm = 1 THEN TRUE
     ELSE IF nm >= 2 THEN NestedIsOneOf = 0
@@ -146,11 +90,10 @@ WrapsMultiMatch(multi) == multi => TRUE
 NaiveWrapperAccepts(inner) == TRUE
 NeverWrapped(multi) == FALSE
 \* Fixed code: when a multi-match wrap hides the original's effective type,
-\* the original's own inner schema is normalized BEFORE the wrap — an
-\* object-typed original carries required/all-keys and additionalProperties:
-\* false (round 4675158952), and an array-typed original's items object
-\* carries them (round 4675584064). The wrap fires with or without declared
-\* properties (review 6084531532).
+\* the original's own inner schema is normalized BEFORE the wrap: required/
+\* all-keys and additionalProperties: false on the object original
+\* (4675158952), on the array original's items object (4675584064), with or
+\* without declared properties (6084531532).
 NormalizesWrappedInner(shape) == shape # "none"
 \* Sabotage: the wrap keeps the original's inner schema untouched.
 SkipsWrappedInner(shape) == FALSE
@@ -162,12 +105,11 @@ RelaxesChangedOneOf(oneOf) == oneOf
 \* nothing.
 NeverRelaxesOneOf(oneOf) == FALSE
 \* Fixed code (round 13): a `not` whose subtree lost a keyword is dropped
-\* outside a negation context - the stripped branches match values the
-\* original branches did not, and a retained negation would reject a value
-\* the original accepted (review 4725679664). An unchanged negation stays.
-\* The oneOf-reached-through-a-not shape therefore never keeps a stripped
-\* negation: the keep-position decision of rounds 9 and 10 governs only an
-\* unchanged subtree, whose acceptance is trivially preserved.
+\* outside a negation context - a retained negation over stripped branches
+\* would reject a value the original accepted (review 4725679664); an
+\* unchanged negation stays, which is why the round-9/10 keep-position
+\* decision still governs it (4726104174 widens the changed fact to a
+\* $ref-reached target change).
 DropsChangedNot(changed) == changed
 \* Sabotage: the changed negation is kept in place; the stripped branch
 \* then matches a value the original branch did not, and the negation
@@ -217,10 +159,6 @@ EmittedPattern == EmittedKeepsPattern(declaredPat)
 \* validator does. A type-only oracle misses the enum half. The
 \* LegacyEnum sabotage fails only under this oracle.
 \* The TRUE acceptance of the emitted schema, not the evaluator's report:
-\* a nested wrapper accepts null when an inner alternative does OR when the
-\* evaluator's report made it append an outer null alternative; a multi-match
-\* oneOf accepts null exactly when it was wrapped.
-\* The TRUE acceptance of the emitted schema, not the evaluator's report:
 \* a nested wrapper accepts null when its nested combinator truly does
 \* (anyOf: at least one accepting alternative; oneOf: exactly one) OR when
 \* the evaluator's report made it append an outer null alternative; a
@@ -259,8 +197,14 @@ TypeOK ==
     /\ notBranchPat \in BOOLEAN
     /\ notBranchPatViaMap \in BOOLEAN
     /\ condPat \in BOOLEAN
+    /\ notRefPat \in BOOLEAN
+    /\ condRefPat \in BOOLEAN
+    /\ oneOfRefPat \in BOOLEAN
     /\ (notBranchPat => notOneOf)
     /\ (notBranchPatViaMap => notOneOfViaMap)
+    /\ (notRefPat => notOneOf)
+    /\ (condRefPat => condPat)
+    /\ (oneOfRefPat => patOneOf)
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
@@ -280,14 +224,20 @@ Init ==
     /\ notBranchPat \in BOOLEAN
     /\ notBranchPatViaMap \in BOOLEAN
     /\ condPat \in BOOLEAN
+    /\ notRefPat \in BOOLEAN
+    /\ condRefPat \in BOOLEAN
+    /\ oneOfRefPat \in BOOLEAN
     /\ (notBranchPat => notOneOf)
     /\ (notBranchPatViaMap => notOneOfViaMap)
+    /\ (notRefPat => notOneOf)
+    /\ (condRefPat => condPat)
+    /\ (oneOfRefPat => patOneOf)
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf, notOneOf, notOneOfViaMap, notBranchPat, notBranchPatViaMap, condPat, notRefPat, condRefPat, oneOfRefPat>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -300,34 +250,32 @@ RequiredNotNull == (q \in declaredReq) => "null" \notin EmittedType
 NoForbiddenKeyword == EmittedPattern = FALSE
 
 \* Review round N+1: a nested wrapper is looked through (4674816413) and a
-\* multi-null-match oneOf is wrapped (4674816421) — the optional property
-\* still accepts null in both shapes.
+\* multi-null-match oneOf is wrapped (4674816421); null stays accepted.
 NestedOrMultiStillNullable == ((q \notin declaredReq) /\ (nestedWrapper \/ oneOfMultiNull)) => AcceptsNull
 
-\* Review round 6: a wrapped original's inner object schema keeps the strict
-\* constraints — required/all-keys and additionalProperties: false — either
-\* on the original (object shape, 4675158952) or on its items object (array
-\* shape, 4675584064). The merge-base converter normalized these; the
-\* stripping pass must not lose them.
+\* Review round 6: a wrapped original's inner schema keeps the strict
+\* constraints (4675158952 object shape, 4675584064 array items shape);
+\* the stripping pass must not lose them.
 WrappedInnerStrict == (oneOfMultiNull /\ wrappedInner # "none") => EmittedInnerStrict
 
 \* Review round 8 (4716476955): a oneOf whose distinguishing alternatives
 \* were stripped must relax under anyOf - a value the declared oneOf
 \* accepted ("a", matching exactly one ^a$/^b$ alternative) stays accepted
-\* after stripping. Under the sabotage the stripped exactly-one rule accepts
-\* nothing.
-OneOfValuesKept == patOneOf => RelaxesChangedOneOf(patOneOf)
+\* whether the change sits in the branch or in a $ref target
+\* (4726104174). Under the sabotage the stripped rule accepts nothing.
+OneOfValuesKept == (patOneOf \/ oneOfRefPat) => RelaxesChangedOneOf(patOneOf \/ oneOfRefPat)
 
 \* Review round 13 (4725679664): the negation acceptance check REPLACES the
 \* round-9/10 position hooks, which returned TRUE regardless of the strip
-\* facts. The value b matches ZERO declared branches - the pattern keeps it
-\* out of the string branch and the other branch's type excludes it. After
-\* stripping, the branch whose pattern is gone matches b by type alone, the
-\* retained exactly-one rule sees one match, and the negation rejects b.
-\* b stays accepted exactly when the negation dropped or no branch lost a
-\* pattern; an unchanged negation is the passing control. The via-map
-\* conjunct models the same shape under a schema-map keyword (round 10).
-\* Null stays a passing control through OptionalNullable in every config.
+\* facts. The value b matches ZERO declared branches. After stripping, the
+\* branch whose pattern is gone matches b by type alone, the retained
+\* exactly-one rule sees one match, and the negation rejects b - and the
+\* pattern change counts whether it sits in the branch or in a target the
+\* negation's $ref reaches (notRefPat, review 4726104174). b stays accepted
+\* exactly when the negation dropped or no branch lost a pattern; an
+\* unchanged negation is the passing control. The via-map conjunct models
+\* the same shape under a schema-map keyword (round 10). Null stays a
+\* passing control through OptionalNullable in every config.
 NotOneOfAcceptsB(changed) ==
     IF DropsChangedNot(changed) THEN TRUE
     ELSE ~changed
@@ -335,18 +283,18 @@ NotOneOfAcceptsBViaMap(changed) ==
     IF DropsChangedNotViaMap(changed) THEN TRUE
     ELSE ~changed
 NotOneOfValueKept ==
-    /\ (notOneOf => NotOneOfAcceptsB(notBranchPat))
+    /\ (notOneOf => NotOneOfAcceptsB(notBranchPat \/ notRefPat))
     /\ (notOneOfViaMap => NotOneOfAcceptsBViaMap(notBranchPatViaMap))
 
 \* Review round 13 (4725679729): the ELSE-branch value. The stripped
 \* predicate selects then for values the original routed to else, and the
 \* retained then rejects the enum - the else value stays accepted only when
-\* the branches dropped or the predicate never lost a keyword. The then
-\* value stays accepted through the same derivation: it selected then
-\* originally, and the dropped branches accept everything.
+\* the branches dropped or the predicate never lost a keyword, directly or
+\* through a changed $ref target (condRefPat, 4726104174). The then value
+\* stays accepted through the same derivation.
 CondAcceptsElseValue(changed) ==
     IF DropsChangedConditional(changed) THEN TRUE
     ELSE ~changed
-CondValuesKept == condPat => CondAcceptsElseValue(condPat)
+CondValuesKept == (condPat \/ condRefPat) => CondAcceptsElseValue(condPat \/ condRefPat)
 
 ====

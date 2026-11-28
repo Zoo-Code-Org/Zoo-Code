@@ -1616,6 +1616,52 @@ describe("BaseProvider", () => {
 			expect(value.anyOf[0].properties.limit.type).toStrictEqual(["number", "null"])
 			expect(value.anyOf[1]).toStrictEqual({ type: "null" })
 		})
+
+		it("keeps a reference to an unwrapped root property beside a nested wrap (review 4726104157)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "nested_wrap_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								value: { type: "string" },
+								settings: {
+									type: "object",
+									properties: {
+										value: {
+											type: ["string", "null"],
+											allOf: [{ type: "string" }],
+										},
+										alias: { $ref: "#/properties/value" },
+										inner: { $ref: "#/properties/settings/properties/value" },
+									},
+									required: ["alias", "inner"],
+								},
+							},
+							required: ["value", "settings"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			const settings = parameters.properties.settings
+			// The optional nested settings.value carries an allOf conjunct,
+			// so the conversion wraps it under anyOf/0. The recorded wrap
+			// path is document-root-relative: a sibling reference to the
+			// nested property follows the wrap...
+			expect(settings.properties.inner.$ref).toBe("#/properties/settings/properties/value/anyOf/0")
+			// ...while a reference to the unwrapped ROOT value stays
+			// verbatim - the pre-fix recording wrote "#/properties/value",
+			// and the rewrite bent the root reference to a nonexistent
+			// "#/properties/value/anyOf/0".
+			expect(settings.properties.alias.$ref).toBe("#/properties/value")
+			expect(parameters.properties.value).toStrictEqual({ type: "string" })
+		})
 	})
 
 	describe("ensureCatalogLoaded", () => {

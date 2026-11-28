@@ -13,22 +13,49 @@ import { getApiRequestTimeout } from "./utils/timeout-config"
 
 // Literal-valued keywords carry instance data: a "$ref"-shaped string inside
 // them is a value a caller asserts against, never a document location, so
-// the wrapped-property reference rewrite leaves them verbatim.
+// the wrapped-property reference rewrite leaves them verbatim. The rule
+// applies at schema positions only: inside properties, $defs and the other
+// name-to-schema maps the keys are names, so an entry named "const" is a
+// schema and its references follow the wrap like any other.
 const WRAP_LITERAL_KEYWORDS = new Set(["const", "enum", "default", "examples"])
+const WRAP_SCHEMA_MAP_KEYWORDS = new Set([
+	"properties",
+	"patternProperties",
+	"$defs",
+	"definitions",
+	"dependentSchemas",
+])
+
+function wrapEntersSchemaMap(key: string, value: unknown): boolean {
+	return WRAP_SCHEMA_MAP_KEYWORDS.has(key) && typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+// JSON Pointer (RFC 6901) escapes "~" as "~0" and "/" as "~1", so a
+// recorded prefix matches the way a reference names the property.
+function escapeWrapPointerToken(token: string): string {
+	return token.replace(/~/g, "~0").replace(/\//g, "~1")
+}
+
+// One recorded wrap: the document-root-relative pre-wrap pointer and the
+// pointer the wrapped subtree occupies after the wrap.
+type WrappedKeyRecord = { oldPrefix: string; newPrefix: string }
 
 /**
  * Rewrites local pointers that name a wrapped property's pre-wrap location.
  * When an optional property moves under `anyOf/0`, every sibling reference
  * like "#/properties/value/properties/limit" must follow the subtree to
  * "#/properties/value/anyOf/0/properties/limit", or the pointer would name
- * a location the emitted schema does not have (review 4725679688). Matching
- * is segment-boundary exact, so a property named "value" does not rewrite a
- * pointer into "valueMeta", and pointers to unrelocated properties stay
- * verbatim.
+ * a location the emitted schema does not have (review 4725679688). The
+ * recorded prefixes are document-root-relative - a wrap inside a nested
+ * object records "#/properties/settings/value", so a reference to the root
+ * "#/properties/value" never matches a nested wrap (review 4726104157).
+ * Matching is segment-boundary exact, so a property named "value" does not
+ * rewrite a pointer into "valueMeta", and pointers to unrelocated
+ * properties stay verbatim.
  */
-function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: Map<string, string>): unknown {
+function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: WrappedKeyRecord[], insideSchemaMap = false): unknown {
 	if (Array.isArray(node)) {
-		return node.map((entry) => rewriteWrappedPropertyRefs(entry, wrappedKeys))
+		return node.map((entry) => rewriteWrappedPropertyRefs(entry, wrappedKeys, insideSchemaMap))
 	}
 	if (!node || typeof node !== "object") {
 		return node
@@ -36,22 +63,26 @@ function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: Map<string, stri
 	const record = node as Record<string, unknown>
 	const result: Record<string, unknown> = {}
 	for (const [key, value] of Object.entries(record)) {
-		if (WRAP_LITERAL_KEYWORDS.has(key)) {
+		if (!insideSchemaMap && WRAP_LITERAL_KEYWORDS.has(key)) {
 			result[key] = value
 			continue
 		}
-		if (key === "$ref" && typeof value === "string") {
+		if (!insideSchemaMap && key === "$ref" && typeof value === "string") {
 			let ref = value
-			const sorted = [...wrappedKeys.entries()].sort((a, b) => b[1].length - a[1].length)
-			for (const [wrappedKey, oldPrefix] of sorted) {
-				if (ref === oldPrefix || ref.startsWith(`${oldPrefix}/`)) {
-					ref = `#/properties/${wrappedKey}/anyOf/0${ref.slice(oldPrefix.length)}`
+			const sorted = [...wrappedKeys].sort((a, b) => b.oldPrefix.length - a.oldPrefix.length)
+			for (const wrapped of sorted) {
+				if (ref === wrapped.oldPrefix || ref.startsWith(`${wrapped.oldPrefix}/`)) {
+					ref = `${wrapped.newPrefix}${ref.slice(wrapped.oldPrefix.length)}`
 				}
 			}
 			result[key] = ref
 			continue
 		}
-		result[key] = rewriteWrappedPropertyRefs(value, wrappedKeys)
+		result[key] = rewriteWrappedPropertyRefs(
+			value,
+			wrappedKeys,
+			insideSchemaMap ? false : wrapEntersSchemaMap(key, value),
+		)
 	}
 	return result
 }
@@ -186,9 +217,14 @@ export abstract class BaseProvider implements ApiHandler {
 	 * - Adding additionalProperties: false to all object schemas (required by OpenAI Responses API)
 	 * - Recursively processing nested objects and arrays
 	 *
-	 * This matches the behavior of ensureAllRequired in openai-native.ts
+	 * This matches the behavior of ensureAllRequired in openai-native.ts.
+	 *
+	 * pointerPath is the document-root-relative pointer of THIS schema node
+	 * (the root call passes "#"); a nested conversion records its wraps
+	 * under it, so wrap references stay rooted at the document (review
+	 * 4726104157).
 	 */
-	protected convertToolSchemaForOpenAI(schema: any): any {
+	protected convertToolSchemaForOpenAI(schema: any, pointerPath = "#"): any {
 		if (!schema || typeof schema !== "object" || schema.type !== "object") {
 			return schema
 		}
@@ -215,9 +251,16 @@ export abstract class BaseProvider implements ApiHandler {
 			// multi-match oneOf or an allOf conjunct beside a nullable type):
 			// their subtree moved under anyOf/0, and sibling references that
 			// name the pre-wrap location must follow (review 4725679688).
-			const wrappedKeys = new Map<string, string>()
+			// Each record is document-root-relative: nested conversions
+			// prefix it with their own pointer path (review 4726104157).
+			const wrappedKeys: WrappedKeyRecord[] = []
 			for (const key of allKeys) {
 				const prop = newProps[key]
+
+				// This property's document-root-relative pointer: the
+				// recorded wrap prefixes hang off it, so nested conversions
+				// stay rooted at the document (review 4726104157).
+				const propPointer = `${pointerPath}/properties/${escapeWrapPointerToken(key)}`
 
 				// Clone each property before normalizing so strict conversion never
 				// mutates caller-owned tool metadata: a later request with strict
@@ -289,12 +332,15 @@ export abstract class BaseProvider implements ApiHandler {
 									: // Stryker disable next-line ArrayDeclaration: equivalence - the wrap branch is reachable only for optional properties, whose string type was already widened to a type array above, so the fallback never holds "object"/"array" and only feeds those includes checks
 										[original.type]
 								if (originalTypes.includes("object")) {
-									const converted = this.convertToolSchemaForOpenAI({ ...original, type: "object" })
+									const converted = this.convertToolSchemaForOpenAI(
+										{ ...original, type: "object" },
+										`${propPointer}/anyOf/0`,
+									)
 									// Keep the original's declared (possibly
 									// nullable) type.
 									converted.type = original.type
 									normalizedProp = { anyOf: [converted, { type: "null" }] }
-									wrappedKeys.set(key, `#/properties/${key}`)
+									wrappedKeys.push({ oldPrefix: propPointer, newPrefix: `${propPointer}/anyOf/0` })
 								} else if (
 									originalTypes.includes("array") &&
 									(original as { items?: { type?: unknown } }).items?.type === "object"
@@ -312,12 +358,13 @@ export abstract class BaseProvider implements ApiHandler {
 												...original,
 												items: this.convertToolSchemaForOpenAI(
 													(original as { items: unknown }).items,
+													`${propPointer}/anyOf/0/items`,
 												),
 											},
 											{ type: "null" },
 										],
 									}
-									wrappedKeys.set(key, `#/properties/${key}`)
+									wrappedKeys.push({ oldPrefix: propPointer, newPrefix: `${propPointer}/anyOf/0` })
 								} else {
 									normalizedProp = { anyOf: [original, { type: "null" }] }
 								}
@@ -350,7 +397,10 @@ export abstract class BaseProvider implements ApiHandler {
 								? normalizedProp.type
 								: [normalizedProp.type]
 							if (declaredType.includes("object")) {
-								const converted = this.convertToolSchemaForOpenAI({ ...normalizedProp, type: "object" })
+								const converted = this.convertToolSchemaForOpenAI(
+									{ ...normalizedProp, type: "object" },
+									`${propPointer}/anyOf/0`,
+								)
 								converted.type = normalizedProp.type
 								normalizedProp = { anyOf: [converted, { type: "null" }] }
 							} else if (
@@ -363,6 +413,7 @@ export abstract class BaseProvider implements ApiHandler {
 											...normalizedProp,
 											items: this.convertToolSchemaForOpenAI(
 												(normalizedProp as { items: unknown }).items,
+												`${propPointer}/anyOf/0/items`,
 											),
 										},
 										{ type: "null" },
@@ -372,7 +423,7 @@ export abstract class BaseProvider implements ApiHandler {
 								normalizedProp = { anyOf: [normalizedProp, { type: "null" }] }
 							}
 							wrappedForOneOf = true
-							wrappedKeys.set(key, `#/properties/${key}`)
+							wrappedKeys.push({ oldPrefix: propPointer, newPrefix: `${propPointer}/anyOf/0` })
 						}
 						// An enum rejects every value outside its list, so a
 						// "null" type alone still rejects null. Include null in
@@ -409,8 +460,13 @@ export abstract class BaseProvider implements ApiHandler {
 					if (effectiveTypes.includes("object")) {
 						// Recurse through an object view of the property so the
 						// nested schema is normalized while the property keeps
-						// its (possibly nullable) declared type.
-						const converted = this.convertToolSchemaForOpenAI({ ...normalizedProp, type: "object" })
+						// its (possibly nullable) declared type. The subtree
+						// stays at its own position, so a nested conversion
+						// records its wraps under it (review 4726104157).
+						const converted = this.convertToolSchemaForOpenAI(
+							{ ...normalizedProp, type: "object" },
+							propPointer,
+						)
 						converted.type = normalizedProp.type
 						newProps[key] = converted
 					} else if (
@@ -419,7 +475,10 @@ export abstract class BaseProvider implements ApiHandler {
 					) {
 						newProps[key] = {
 							...normalizedProp,
-							items: this.convertToolSchemaForOpenAI((normalizedProp as { items?: unknown }).items),
+							items: this.convertToolSchemaForOpenAI(
+								(normalizedProp as { items?: unknown }).items,
+								`${propPointer}/items`,
+							),
 						}
 					} else {
 						newProps[key] = normalizedProp
@@ -431,7 +490,7 @@ export abstract class BaseProvider implements ApiHandler {
 			// would dangle (review 4725679688). The pointers follow the
 			// subtree to its new location; every pointer that does not
 			// name a wrapped property stays verbatim.
-			if (wrappedKeys.size > 0) {
+			if (wrappedKeys.length > 0) {
 				for (const [propKey, propSchema] of Object.entries(newProps)) {
 					newProps[propKey] = rewriteWrappedPropertyRefs(propSchema, wrappedKeys)
 				}

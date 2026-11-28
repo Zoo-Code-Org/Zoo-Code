@@ -565,6 +565,27 @@ function containsPatternProperties(value: unknown, seen: Set<unknown>): boolean 
 }
 
 /**
+ * Whether a contains rule sits anywhere inside a subtree. A child
+ * applicator branch that carried one loses the item evaluations the rule
+ * performed when compilation removes it, and a retained unevaluatedItems
+ * rule at the ENCLOSING level then forbids the items the branch evaluated
+ * (issue #547 review 4726104165).
+ */
+function containsContainsRule(value: unknown, seen: Set<unknown>): boolean {
+	if (Array.isArray(value)) {
+		return value.some((entry) => containsContainsRule(entry, seen))
+	}
+	if (!isRecord(value) || seen.has(value)) {
+		return false
+	}
+	seen.add(value)
+	if ("contains" in value) {
+		return true
+	}
+	return Object.values(value).some((entry) => containsContainsRule(entry, seen))
+}
+
+/**
  * Explicit own-property creation: a schema key like "__proto__" (legal in
  * JSON and produced by JSON.parse as an own property) must become an own data
  * property of the compiled copy, never a prototype change (issue #547 review
@@ -614,6 +635,10 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 	// property evaluations the enclosing unevaluatedProperties rule relies
 	// on (issue #547 review 4725679723).
 	let childEvaluationLost = false
+	// A changed child applicator branch that carried contains loses the item
+	// evaluations that rule performed; the stranded unevaluatedItems rule
+	// relaxes below (review 4726104165).
+	let childItemEvaluationLost = false
 
 	// A conditional whose `if` predicate compilation changes cannot keep its
 	// branches: the compiled predicate selects then/else for values the
@@ -670,7 +695,10 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 					// A changed branch that carried patternProperties lost the
 					// property evaluations that rule performed; the enclosing
 					// unevaluatedProperties rule relaxes below (review
-					// 4725679723).
+					// 4725679723). A changed branch that carried contains
+					// loses the item evaluations the same way, and the
+					// unevaluatedItems rule relaxes below (review
+					// 4726104165).
 					childEvaluationLost =
 						childEvaluationLost ||
 						compiledBranches.some((branch, index) => {
@@ -678,6 +706,14 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 								return false
 							}
 							return containsPatternProperties(value[index], new Set())
+						})
+					childItemEvaluationLost =
+						childItemEvaluationLost ||
+						compiledBranches.some((branch, index) => {
+							if (deepEqualJson(branch, value[index])) {
+								return false
+							}
+							return containsContainsRule(value[index], new Set())
 						})
 				}
 				let relaxed = key === "oneOf" && branchesChanged
@@ -743,8 +779,13 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 				// into the hint with it.
 				defineOwnKey(result, key, compiledIf)
 				if (conditionalRelaxed) {
-					// value is schema.if and compiled above; the original
-					// predicate travels into the hint beside its branches.
+					// The stripped predicate lost the evaluations its
+					// patternProperties performed; the stranded
+					// unevaluatedProperties rule relaxes below (review
+					// 4726104161). value is schema.if and compiled above; the
+					// original predicate travels into the hint beside its
+					// branches.
+					childEvaluationLost = childEvaluationLost || containsPatternProperties(value, new Set())
 					defineOwnKey(removed, key, value)
 				}
 				continue
@@ -752,12 +793,25 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 		} else if (key === "then" || key === "else") {
 			if (conditionalRelaxed) {
 				// The branches belong to a relaxed conditional; they travel
-				// into the hint with their if predicate.
+				// into the hint with their if predicate. A dropped branch
+				// evaluated the keys its own rules matched, and those
+				// evaluations leave with it - the stranded
+				// unevaluatedProperties rule relaxes below (review
+				// 4726104161).
+				childEvaluationLost = childEvaluationLost || isRecord(value)
 				defineOwnKey(removed, key, value)
 				continue
 			}
 			if (isRecord(value)) {
-				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root, memo))
+				const compiledBranch = compileSchemaNode(value, depth + 1, root, memo)
+				// A kept branch whose compilation lost a patternProperties
+				// rule lost the key evaluations that rule performed; the
+				// stranded unevaluatedProperties rule relaxes below (review
+				// 4726104161).
+				childEvaluationLost =
+					childEvaluationLost ||
+					(!deepEqualJson(compiledBranch, value) && containsPatternProperties(value, new Set()))
+				defineOwnKey(result, key, compiledBranch)
 				continue
 			}
 		} else if (key === "additionalProperties" || key === "propertyNames") {
@@ -869,7 +923,9 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 	// evaluated, and a retained unevaluatedProperties restriction at this
 	// level then forbids a required property the original accepted (issue
 	// #547 review 4725679723). The rule relaxes exactly like the
-	// removed-rule case above.
+	// removed-rule case above. The same loss arrives through the
+	// conditional: a dropped then/else branch or a stripped predicate
+	// carried the evaluations (review 4726104161).
 	if (childEvaluationLost) {
 		if (result.unevaluatedProperties === false) {
 			defineOwnKey(result, "unevaluatedProperties", true)
@@ -878,7 +934,11 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 		}
 	}
 
-	if ("contains" in removed && !("items" in result)) {
+	// A changed child applicator branch that carried contains loses the
+	// item evaluations that rule performed, exactly like a removed
+	// contains at this level: the stranded unevaluatedItems restriction
+	// relaxes through the same guard (review 4726104165).
+	if (("contains" in removed || childItemEvaluationLost) && !("items" in result)) {
 		if (result.unevaluatedItems === false) {
 			defineOwnKey(result, "unevaluatedItems", true)
 		} else if (isRecord(result.unevaluatedItems)) {

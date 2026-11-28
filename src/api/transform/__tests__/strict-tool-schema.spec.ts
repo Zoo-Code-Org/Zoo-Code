@@ -14,11 +14,33 @@ function constraintNote(removed: Schema): string {
 
 /**
  * Minimal Draft 2020-12 acceptance oracle for the keyword subset these
- * fixtures use (type, pattern, required/properties, oneOf/anyOf/allOf). It
- * encodes JSON Schema semantics - not the stripper's rules - so a test can
- * assert that values the declared schema accepted still validate after
- * stripping.
+ * fixtures use (type, pattern, enum, required/properties, oneOf/anyOf/allOf,
+ * not, $ref, if/then/else). It encodes JSON Schema semantics - not the
+ * stripper's rules - so a test can assert that values the declared schema
+ * accepted still validate after stripping. A local $ref resolves against the
+ * root document (the outermost call's schema unless a test passes the
+ * document explicitly), because a reference applies its target at
+ * validation time.
  */
+function resolveLocalPointer(root: unknown, ref: string): unknown {
+	let node: unknown = root
+	for (const rawSegment of ref.slice(2).split("/")) {
+		const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~")
+		if (Array.isArray(node)) {
+			const index = Number(segment)
+			if (!Number.isInteger(index) || index < 0 || index >= node.length) {
+				return undefined
+			}
+			node = node[index]
+			continue
+		}
+		if (typeof node !== "object" || node === null || !(segment in (node as Schema))) {
+			return undefined
+		}
+		node = (node as Schema)[segment]
+	}
+	return node
+}
 function matchesType(type: string, value: unknown): boolean {
 	switch (type) {
 		case "string":
@@ -40,11 +62,12 @@ function matchesType(type: string, value: unknown): boolean {
 	}
 }
 
-function accepts(schema: unknown, value: unknown): boolean {
+function accepts(schema: unknown, value: unknown, root?: unknown): boolean {
 	if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
 		return true
 	}
 	const s = schema as Schema
+	const scope = root ?? schema
 	// Combinators and siblings apply TOGETHER (Draft 2020-12): each result
 	// combines with the remaining keyword checks instead of returning early,
 	// so a schema like {type:"string", anyOf:[{}]} still rejects a number.
@@ -68,6 +91,17 @@ function accepts(schema: unknown, value: unknown): boolean {
 		if (typeof value !== "string" || !new RegExp(s.pattern).test(value)) {
 			accepted = false
 		}
+	}
+	if (Array.isArray(s.enum)) {
+		accepted = accepted && s.enum.some((entry) => JSON.stringify(entry) === JSON.stringify(value))
+	}
+	if (typeof s.$ref === "string" && s.$ref.startsWith("#/")) {
+		const target = resolveLocalPointer(scope, s.$ref)
+		accepted = accepted && target !== undefined && accepts(target, value, scope)
+	}
+	if (s.if !== undefined) {
+		const selected = accepts(s.if, value, scope) ? s.then : s.else
+		accepted = accepted && (selected === undefined || accepts(selected, value, scope))
 	}
 	if (!accepted) {
 		return false
@@ -325,9 +359,11 @@ describe("stripUnsupportedStrictKeywords", () => {
 			else: { enum: ["b"] },
 		}
 		// Ground truth on the declared schema: "a" selects then and passes,
-		// "b" selects else and passes.
+		// "b" selects else and passes, and "c" selects else too - the enum
+		// rejects it, so the assertions below verify branch selection.
 		expect(accepts(schema, "a")).toBe(true)
 		expect(accepts(schema, "b")).toBe(true)
+		expect(accepts(schema, "c")).toBe(false)
 		const stripped = strip(schema)
 		// The stripped predicate matches every string, so "b" would select
 		// then and fail its enum. The branches travel into the hint beside
@@ -557,6 +593,189 @@ describe("stripUnsupportedStrictKeywords", () => {
 		expect(other.$ref).toBe("#/$defs/Plain")
 	})
 
+	it("relocates a reference inside a property named const (review 4726104168)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: {
+				const: { $ref: "#/$defs/Choice/oneOf/0" },
+				ordinary: { $ref: "#/$defs/Choice/oneOf/0" },
+			},
+			required: ["const", "ordinary"],
+			$defs: { Choice: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "integer" }] } },
+		}
+		const stripped = strip(schema)
+		const props = stripped.properties as Schema
+		// Entries under properties are schemas, whatever their names: the
+		// property named "const" carries a reference that must relocate
+		// exactly like the sibling's.
+		expect((props.const as Schema).$ref).toBe("#/$defs/Choice/anyOf/0")
+		expect((props.ordinary as Schema).$ref).toBe("#/$defs/Choice/anyOf/0")
+	})
+
+	it("keeps a $ref-shaped literal inside a const keyword verbatim (review 4726104168)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { pick: { const: "#/$defs/Choice/oneOf/0" } },
+			required: ["pick"],
+			$defs: { Choice: { oneOf: [{ type: "string", pattern: "^a$" }, { type: "integer" }] } },
+		}
+		const stripped = strip(schema)
+		const pick = (stripped.properties as Schema).pick as Schema
+		// A const value is asserted data, not a document location: the
+		// string survives byte for byte even though the location moved.
+		expect(pick.const).toBe("#/$defs/Choice/oneOf/0")
+	})
+
+	it("escapes a map name when recording the relocation prefix (review 4726104169)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { choice: { $ref: "#/$defs/A~1B~0Slash/oneOf/0" } },
+			required: ["choice"],
+			$defs: {
+				"A/B~Slash": { oneOf: [{ type: "string", pattern: "^a$" }, { type: "integer" }] },
+			},
+		}
+		const stripped = strip(schema)
+		const choice = (stripped.properties as Schema).choice as Schema
+		// The recorded relocation prefix must carry the RFC 6901 escapes the
+		// reference uses, or the pointer would keep naming the removed oneOf.
+		expect(choice.$ref).toBe("#/$defs/A~1B~0Slash/anyOf/0")
+	})
+
+	it("drops a negation whose predicate is a reference to a changed target (review 4726104174)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { v: { not: { $ref: "#/$defs/P" } } },
+			required: ["v"],
+			$defs: { P: { type: "string", pattern: "^a$" } },
+		}
+		// Ground truth on the declared schema: P rejects "b", so the
+		// negation accepts it.
+		expect(accepts((schema.properties as Schema).v, "b", schema)).toBe(true)
+		const stripped = strip(schema)
+		const v = (stripped.properties as Schema).v as Schema
+		// The pattern leaves P where it is declared; the retained negation
+		// would apply the widened P and reject "b", which the original
+		// accepted. The negation drops into the hint.
+		expect(v).not.toHaveProperty("not")
+		expect(v.description).toBe(constraintNote({ not: { $ref: "#/$defs/P" } }))
+		expect(accepts(v, "b", stripped)).toBe(true)
+	})
+
+	it("keeps a negation whose referenced target strips unchanged (review 4726104174 control)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { v: { not: { $ref: "#/$defs/P" } } },
+			required: ["v"],
+			$defs: { P: { type: "string" } },
+		}
+		const stripped = strip(schema)
+		const v = (stripped.properties as Schema).v as Schema
+		// The target compiles unchanged, so the negation stays exactly as
+		// declared - the passing control.
+		expect(v).toStrictEqual({ not: { $ref: "#/$defs/P" } })
+	})
+
+	it("drops the branches of a conditional whose predicate references a changed target (review 4726104174)", () => {
+		const schema: Schema = {
+			type: "string",
+			if: { $ref: "#/$defs/P" },
+			then: { enum: ["a"] },
+			else: { enum: ["b"] },
+			$defs: { P: { pattern: "^a$" } },
+		}
+		// Ground truth: "a" selects then and passes, "b" selects else and
+		// passes, "c" selects else and fails the enum.
+		expect(accepts(schema, "a")).toBe(true)
+		expect(accepts(schema, "b")).toBe(true)
+		expect(accepts(schema, "c")).toBe(false)
+		const stripped = strip(schema)
+		// The predicate object itself is only a $ref, so it strips
+		// unchanged - the change is visible only through the target. The
+		// branch selection flips anyway, so the branches travel into the
+		// hint and both values stay accepted.
+		expect(stripped).not.toHaveProperty("then")
+		expect(stripped).not.toHaveProperty("else")
+		expect(stripped.description).toBe(
+			constraintNote({ if: { $ref: "#/$defs/P" }, then: { enum: ["a"] }, else: { enum: ["b"] } }),
+		)
+		expect(accepts(stripped, "a")).toBe(true)
+		expect(accepts(stripped, "b")).toBe(true)
+	})
+
+	it("relaxes a oneOf whose branch references a changed target (review 4726104174)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { v: { oneOf: [{ $ref: "#/$defs/P" }, { type: "string" }] } },
+			required: ["v"],
+			$defs: { P: { type: "string", pattern: "^a$" } },
+		}
+		// Ground truth: "bb" matches exactly one declared branch (the plain
+		// string; the pattern keeps it out of P).
+		expect(accepts((schema.properties as Schema).v, "bb", schema)).toBe(true)
+		const stripped = strip(schema)
+		const v = (stripped.properties as Schema).v as Schema
+		// P's pattern leaves: every string now matches both branches and the
+		// retained exactly-one rule would accept nothing, so the branches
+		// relax under anyOf.
+		expect(v).not.toHaveProperty("oneOf")
+		expect(v.anyOf).toBeDefined()
+		expect(accepts(v, "bb", stripped)).toBe(true)
+	})
+
+	it("repairs a reference into a removed negation (review 4726104178)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: {
+				v: { not: { type: "string", minLength: 1 } },
+				w: { $ref: "#/properties/v/not" },
+			},
+			required: ["v", "w"],
+		}
+		const stripped = strip(schema)
+		const props = stripped.properties as Schema
+		// The negation drops into the hint (its subtree changed), so the
+		// pointer into it would dangle. The repair drops the pointer and
+		// records the fix; the property stays maximally permissive.
+		expect(props.v).not.toHaveProperty("not")
+		const w = props.w as Schema
+		expect(w).not.toHaveProperty("$ref")
+		expect(w.description).toBe("Unresolvable reference #/properties/v/not removed (its target was stripped)")
+		expect(accepts(w, "anything")).toBe(true)
+	})
+
+	it("repairs a reference into a removed conditional branch (review 4726104178)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: {
+				gate: { if: { pattern: "^a$" }, then: { enum: ["a"] } },
+				w: { $ref: "#/properties/gate/then" },
+			},
+			required: ["gate", "w"],
+		}
+		const stripped = strip(schema)
+		const props = stripped.properties as Schema
+		// The stripped predicate flips branch selection, the branch travels
+		// into the hint, and the reference into the removed location is
+		// repaired the same way.
+		const w = props.w as Schema
+		expect(w).not.toHaveProperty("$ref")
+		expect(w.description).toBe("Unresolvable reference #/properties/gate/then removed (its target was stripped)")
+	})
+
+	it("leaves a pointer that never resolved in the declared schema untouched (review 4726104178)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { w: { $ref: "#/nowhere" } },
+			required: ["w"],
+		}
+		const stripped = strip(schema)
+		const w = (stripped.properties as Schema).w as Schema
+		// The pointer was already broken before the strip; repairing it is
+		// out of scope and the verbatim pointer stays.
+		expect(w.$ref).toBe("#/nowhere")
+	})
+
 	it.each([
 		["anyOf with a failing sibling type", { type: "string", anyOf: [{}] }, 1, false],
 		["anyOf with a passing sibling type", { type: "string", anyOf: [{}] }, "ok", true],
@@ -566,6 +785,17 @@ describe("stripUnsupportedStrictKeywords", () => {
 		["allOf with a passing sibling type", { allOf: [{}], type: "number" }, 3, true],
 		["an empty negation rejects every value", { not: {}, type: "number" }, 5, false],
 		["not combines with a passing sibling type", { not: { type: "string" }, type: "number" }, 5, true],
+		["enum accepts a listed value", { enum: ["a", "b"] }, "a", true],
+		["enum rejects an unlisted value", { enum: ["a", "b"] }, "c", false],
+		["if selects then", { if: { pattern: "^a$" }, then: { enum: ["a"] } }, "a", true],
+		["if selects else", { if: { pattern: "^a$" }, else: { enum: ["b"] } }, "b", true],
+		[
+			"the selected branch rejects",
+			{ if: { pattern: "^a$" }, then: { enum: ["a"] }, else: { enum: ["b"] } },
+			"c",
+			false,
+		],
+		["a bare if asserts nothing", { if: { pattern: "^a$" } }, "zz", true],
 	])("accepts: %s", (_name, schema, value, expected) => {
 		// Sibling constraints apply together with the combinator result
 		// (Draft 2020-12): the acceptance oracle must never let a

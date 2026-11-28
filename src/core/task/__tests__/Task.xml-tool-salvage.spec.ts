@@ -523,6 +523,117 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			},
 		)
 
+		it("promotes an integer-declared limit as the number 5 (review 4726104161 round, Regression Evidence)", async () => {
+			const task = await createStreamingTask()
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{ type: "text", text: "<read_file><path>a.ts</path><limit>5</limit></read_file>" },
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const salvagedBlocks = content.filter((block) => block.type === "tool_use")
+			expect(salvagedBlocks).toHaveLength(1)
+			expect(salvagedBlocks[0].name).toBe("read_file")
+			// The schema declares limit integer: the XML text "5" must arrive
+			// as the number 5 - under the removed Number.isInteger branch the
+			// parsed shape stays "number", the declared-type check rejects
+			// it, and nothing promotes.
+			expect(salvagedBlocks[0].nativeArgs).toMatchObject({ path: "a.ts", limit: 5 })
+			const limit = (salvagedBlocks[0].nativeArgs as Record<string, unknown>).limit
+			expect(typeof limit).toBe("number")
+			expect(Number.isInteger(limit)).toBe(true)
+			warnSpy.mockRestore()
+		})
+
+		it("rejects a fractional limit on an integer-declared parameter (Regression Evidence)", async () => {
+			const task = await createStreamingTask()
+			const counter = recordNoToolUsePeak(task)
+			const { assistantEntries } = recordApiHistoryEntries(task)
+			const responseText = "<read_file><path>a.ts</path><limit>1.5</limit></read_file>"
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: responseText }]))
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call",
+							id: "toolu_native_int",
+							name: "write_to_file",
+							arguments: '{"path":"b.ts","content":"hi"}',
+						},
+					]),
+				)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// 1.5 parses to the number shape, which the declared integer
+			// list does not include: the whole salvage rejects, the response
+			// stays plain text, and no tool_use block is promoted. Under the
+			// inverted Number.isInteger branch the value would slip through
+			// as the integer shape and promote.
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const historyBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(historyBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(historyBlocks.find((block) => block.type === "text")?.text).toBe(responseText)
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const toolUses = content.filter((block) => block.type === "tool_use")
+			expect(toolUses).toHaveLength(1)
+			expect(toolUses[0].id).toBe("toolu_native_int")
+			expect(counter.peak()).toBe(1)
+		})
+
+		it.each([
+			[
+				"a null value on the integer-declared limit",
+				"<read_file><path>a.ts</path><limit>null</limit></read_file>",
+			],
+			[
+				"a non-numeric value on the integer-declared limit",
+				"<read_file><path>a.ts</path><limit>abc</limit></read_file>",
+			],
+			[
+				"a non-numeric value on the array-declared follow_up",
+				"<read_file><path>a.ts</path></read_file><ask_followup_question><question>Q</question><follow_up>abc</follow_up></ask_followup_question>",
+			],
+		])("rejects %s (Regression Evidence)", async (_label, responseText) => {
+			const task = await createStreamingTask()
+			const counter = recordNoToolUsePeak(task)
+			const { assistantEntries } = recordApiHistoryEntries(task)
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: responseText }]))
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call",
+							id: "toolu_native_rej",
+							name: "write_to_file",
+							arguments: '{"path":"b.ts","content":"hi"}',
+						},
+					]),
+				)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// A null parses to the null shape and a non-numeric text is not
+			// JSON at all - neither is in the declared type list, so the
+			// existing rejection pattern keeps the response as plain text.
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const historyBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(historyBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(historyBlocks.find((block) => block.type === "text")?.text).toBe(responseText)
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const toolUses = content.filter((block) => block.type === "tool_use")
+			expect(toolUses).toHaveLength(1)
+			expect(toolUses[0].id).toBe("toolu_native_rej")
+			expect(counter.peak()).toBe(1)
+		})
+
 		it("leaves prose-wrapped XML alone (no false promotion)", async () => {
 			const task = await createStreamingTask()
 			const counter = recordNoToolUsePeak(task)
