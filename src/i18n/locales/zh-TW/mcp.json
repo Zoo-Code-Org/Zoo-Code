@@ -38,6 +38,7 @@
 			"authenticateButton": "驗證身份",
 			"cancelled": "OAuth 身份驗證已取消",
 			"timedOut": "OAuth 身份驗證已逾時",
+			"retriesExhausted": "{{name}} 的 OAuth 登入在多次重試後失敗。請重新連接伺服器以再次登入。",
 			"connected": "OAuth 身份驗證後，MCP 伺服器 \"{{name}}\" 已成功連線。"
 		}
 	}

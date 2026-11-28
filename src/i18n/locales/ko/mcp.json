@@ -38,6 +38,7 @@
 			"authenticateButton": "인증",
 			"cancelled": "OAuth 인증이 취소되었습니다",
 			"timedOut": "OAuth 인증 시간이 초과되었습니다",
+			"retriesExhausted": "\"{{name}}\"의 OAuth 로그인이 반복된 재시도 후 실패했습니다. 서버에 다시 연결하여 다시 로그인하세요.",
 			"connected": "OAuth 인증 후 MCP 서버 \"{{name}}\"가 성공적으로 연결되었습니다."
 		}
 	}

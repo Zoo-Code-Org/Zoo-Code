@@ -35,8 +35,9 @@ vi.mock("@modelcontextprotocol/sdk/client/auth.js", () => ({
 	}),
 }))
 
-// Set up fetch mock to return auth metadata with "none" auth method
-mockFetch.mockResolvedValue({
+// Default auth metadata with "none" auth method. Shared with beforeEach so the
+// default can be restored after queued one-time responses are reset.
+const defaultAuthServerFetch = () => ({
 	ok: true,
 	json: () =>
 		Promise.resolve({
@@ -49,6 +50,7 @@ mockFetch.mockResolvedValue({
 			grant_types_supported: ["authorization_code", "refresh_token"],
 		}),
 })
+mockFetch.mockImplementation(defaultAuthServerFetch)
 
 import { McpOAuthClientProvider } from "../McpOAuthClientProvider"
 import { SecretStorageService, StoredMcpOAuthData } from "../SecretStorageService"
@@ -166,6 +168,9 @@ describe("McpOAuthClientProvider", () => {
 		// clearAllMocks() keeps queued one-time listeners. Reset them so a failed test cannot leak them.
 		vi.mocked(startCallbackServer).mockReset()
 		vi.mocked(stopCallbackServer).mockReset().mockResolvedValue(undefined)
+		// Same for queued one-time fetch responses.
+		mockFetch.mockReset()
+		mockFetch.mockImplementation(defaultAuthServerFetch)
 		McpOAuthClientProvider.clearNonOAuthCache()
 	})
 
@@ -334,9 +339,110 @@ describe("McpOAuthClientProvider", () => {
 			const secretStorage = createMockSecretStorage()
 			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
 			// Port 0 is intentional: the server starts lazily in _ensureCallbackServer().
-			// DCR and authorization flows always call _ensureCallbackServer() first to obtain
-			// a real port before using redirectUrl, so port 0 is never sent to an OAuth server.
+			// A cached client returns early from registerClientIfNeeded() without DCR, so
+			// port 0 IS what the SDK puts into the authorization URL at this point. The
+			// fix lives in redirectToAuthorization(), which starts the listener first and
+			// then overrides redirect_uri with the active port before the URL is stored.
 			expect(provider.redirectUrl).toBe("http://127.0.0.1:0/callback")
+		})
+	})
+
+	describe("redirectToAuthorization redirect_uri", () => {
+		/** Builds an authorization URL exactly like the SDK does before the listener starts. */
+		function sdkAuthorizationUrl(): URL {
+			return new URL(
+				"https://auth.example.com/authorize?client_id=abc&code_challenge=xyz&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A0%2Fcallback",
+			)
+		}
+
+		it("overrides redirect_uri with the active listener port for a fresh client", async () => {
+			mockOAuthDiscovery()
+			mockCallbackListeners(1)
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			const url = sdkAuthorizationUrl()
+			await provider.redirectToAuthorization(url)
+
+			expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:12345/callback")
+			// The SDK-generated parameters survive the override.
+			expect(url.searchParams.get("client_id")).toBe("abc")
+			expect(url.searchParams.get("code_challenge")).toBe("xyz")
+			await provider.close()
+		})
+
+		it("covers the cached-client path that returns early from registerClientIfNeeded", async () => {
+			mockOAuthDiscovery()
+			const secretStorage = createMockSecretStorage()
+			await secretStorage.saveOAuthData("https://example.com/mcp", {
+				tokens: { access_token: "stale", token_type: "Bearer" },
+				expires_at: Date.now() + 60 * 60 * 1000,
+				issuer: "https://auth.example.com",
+				client_info: {
+					client_id: "cached-client",
+					redirect_uris: ["http://127.0.0.1:9999/callback"],
+				},
+			})
+			mockCallbackListeners(1)
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
+
+			// The cached early-return path must also start the listener, so both the
+			// stored client info and the authorization URL carry the active port.
+			await provider.registerClientIfNeeded()
+			expect(await provider.clientInformation()).toMatchObject({
+				redirect_uris: ["http://127.0.0.1:12345/callback"],
+			})
+
+			const url = sdkAuthorizationUrl()
+			await provider.redirectToAuthorization(url)
+			expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:12345/callback")
+			await provider.close()
+		})
+
+		it("carries the replacement listener's port on a later 401", async () => {
+			mockOAuthDiscovery()
+			const listeners = mockCallbackListeners(2)
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			const firstUrl = sdkAuthorizationUrl()
+			await provider.redirectToAuthorization(firstUrl)
+			expect(firstUrl.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:12345/callback")
+
+			// The first listener dies (for example a callback timeout). A later 401
+			// starts a replacement listener, and the new URL must carry ITS port.
+			listeners[0].result.reject(new Error("Callback timeout"))
+			await flushPromises()
+
+			const secondUrl = sdkAuthorizationUrl()
+			await provider.redirectToAuthorization(secondUrl)
+			expect(secondUrl.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:12346/callback")
+			await provider.close()
+		})
+
+		it("still sends a real port when a failed token refresh forces full re-auth", async () => {
+			mockOAuthDiscovery()
+			// The refresh exchange is rejected by the server.
+			mockFetch.mockResolvedValueOnce({
+				ok: false,
+				status: 400,
+				text: () => Promise.resolve("invalid_grant"),
+			})
+			const secretStorage = createMockSecretStorage()
+			await secretStorage.saveOAuthData("https://example.com/mcp", {
+				tokens: { access_token: "expired", refresh_token: "dead-refresh", token_type: "Bearer" },
+				expires_at: Date.now() - 1000,
+				issuer: "https://auth.example.com",
+			})
+			mockCallbackListeners(1)
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
+
+			// The failed refresh clears the stale data; the next sign-in is a full flow.
+			expect(await provider.tokens()).toBeUndefined()
+			expect(secretStorage.deleteOAuthData).toHaveBeenCalled()
+
+			const url = sdkAuthorizationUrl()
+			await provider.redirectToAuthorization(url)
+			expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:12345/callback")
+			await provider.close()
 		})
 	})
 
@@ -1685,6 +1791,22 @@ describe("McpOAuthClientProvider", () => {
 			await provider.registerClientIfNeeded()
 
 			expect((await provider.clientInformation())?.client_id).toBe("cached-client-id")
+			await provider.close()
+		})
+
+		it("keeps cached registration when the callback listener cannot bind", async () => {
+			mockOAuthDiscovery()
+			const storage = createMockSecretStorage()
+			await storage.saveOAuthData("https://example.com/mcp", {
+				tokens: { access_token: "saved", token_type: "Bearer" },
+				expires_at: Date.now() + 600_000,
+				issuer: "https://auth.example.com",
+				client_info: { client_id: "cached-client", redirect_uris: ["http://127.0.0.1:9999/callback"] },
+			})
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", storage)
+			vi.mocked(startCallbackServer).mockRejectedValueOnce(new Error("listener bind failed"))
+			await expect(provider.registerClientIfNeeded()).rejects.toThrow("listener bind failed")
+			expect((await provider.clientInformation())?.client_id).toBe("cached-client")
 			await provider.close()
 		})
 

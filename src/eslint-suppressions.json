@@ -1231,7 +1231,7 @@
 	},
 	"services/mcp/__tests__/McpHub.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 150
+			"count": 143
 		}
 	},
 	"services/mcp/__tests__/McpOAuthClientProvider.spec.ts": {

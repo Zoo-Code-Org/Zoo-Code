@@ -41,6 +41,7 @@
 			"authenticateButton": "Uwierzytelnij",
 			"cancelled": "Uwierzytelnianie OAuth zostało anulowane",
 			"timedOut": "Uwierzytelnianie OAuth przekroczyło limit czasu",
+			"retriesExhausted": "Logowanie OAuth dla \"{{name}}\" nie powiodło się po wielu próbach. Połącz serwer ponownie, aby zalogować się jeszcze raz.",
 			"connected": "Serwer MCP \"{{name}}\" połączył się pomyślnie po uwierzytelnieniu OAuth."
 		}
 	}

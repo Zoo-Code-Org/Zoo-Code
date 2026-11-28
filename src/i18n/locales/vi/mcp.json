@@ -38,6 +38,7 @@
 			"authenticateButton": "Xác thực",
 			"cancelled": "Xác thực OAuth đã bị hủy",
 			"timedOut": "Xác thực OAuth đã hết thời gian chờ",
+			"retriesExhausted": "Đăng nhập OAuth cho \"{{name}}\" đã thất bại sau nhiều lần thử. Kết nối lại máy chủ để đăng nhập lại.",
 			"connected": "Máy chủ MCP \"{{name}}\" đã kết nối thành công sau khi xác thực OAuth."
 		}
 	}

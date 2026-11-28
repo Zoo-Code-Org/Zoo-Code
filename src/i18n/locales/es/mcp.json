@@ -40,6 +40,7 @@
 			"authenticateButton": "Autenticar",
 			"cancelled": "La autenticación OAuth fue cancelada",
 			"timedOut": "La autenticación OAuth ha expirado",
+			"retriesExhausted": "El inicio de sesión OAuth para \"{{name}}\" falló después de varios intentos. Vuelve a conectar el servidor para iniciar sesión de nuevo.",
 			"connected": "El servidor MCP \"{{name}}\" se conectó correctamente tras la autenticación OAuth."
 		}
 	}

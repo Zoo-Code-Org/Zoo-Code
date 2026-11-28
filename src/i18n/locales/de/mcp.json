@@ -39,6 +39,7 @@
 			"authenticateButton": "Authentifizieren",
 			"cancelled": "OAuth-Authentifizierung wurde abgebrochen",
 			"timedOut": "OAuth-Authentifizierung ist abgelaufen",
+			"retriesExhausted": "Die OAuth-Anmeldung für \"{{name}}\" ist nach wiederholten Versuchen fehlgeschlagen. Verbinde den Server erneut, um dich neu anzumelden.",
 			"connected": "MCP-Server \"{{name}}\" wurde nach der OAuth-Authentifizierung erfolgreich verbunden."
 		}
 	}

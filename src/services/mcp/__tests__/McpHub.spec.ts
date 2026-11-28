@@ -11,8 +11,10 @@ import type { SecretStorageService } from "../SecretStorageService"
 
 import type { McpHub as McpHubType, McpConnection, ConnectedMcpConnection, DisconnectedMcpConnection } from "../McpHub"
 import { ServerConfigSchema, McpHub } from "../McpHub"
+import { McpOAuthFlow } from "../McpOAuthFlow"
 import { McpOAuthClientProvider } from "../McpOAuthClientProvider"
-import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
+import { OAUTH_FLOW_TIMEOUT_MS, OAUTH_TOKEN_RETRY_MAX_ATTEMPTS } from "../constants"
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import { t } from "../../../i18n"
 
 type McpHubPrivate = {
@@ -569,10 +571,11 @@ describe("McpHub", () => {
 				typeof vi.fn
 			>
 			let resolveProvider!: (provider: McpOAuthClientProvider) => void
-			vi.mocked(McpOAuthClientProvider.create).mockReturnValueOnce(
-				new Promise<McpOAuthClientProvider>((resolve) => {
-					resolveProvider = resolve
-				}),
+			vi.mocked(McpOAuthClientProvider.create).mockImplementationOnce(
+				() =>
+					new Promise<McpOAuthClientProvider>((resolve) => {
+						resolveProvider = resolve
+					}),
 			)
 			const mockAuthProvider = {
 				registerClientIfNeeded: vi.fn(),
@@ -593,14 +596,17 @@ describe("McpHub", () => {
 				}),
 			)
 
+			vi.mocked(StreamableHTTPClientTransport).mockClear()
+			vi.mocked(fs.access).mockRejectedValue(new Error("no project config"))
 			const hub = new McpHub(mockProvider as ClineProvider, secretStorage)
-			await Promise.resolve()
+			await vi.waitFor(() => expect(resolveProvider).toBeTypeOf("function"))
 			await hub.dispose()
 			resolveProvider(mockAuthProvider)
 			await hub.waitUntilReady()
 
 			expect(mockAuthProvider.close).toHaveBeenCalledTimes(1)
 			expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
+			vi.mocked(fs.access).mockResolvedValue(undefined)
 		})
 	})
 
@@ -2900,10 +2906,15 @@ describe("McpHub", () => {
 				close: vi.fn().mockResolvedValue(undefined),
 			}
 
-			mockTransport = {}
+			mockTransport = { close: vi.fn().mockResolvedValue(undefined) }
 
 			mockConnection = {
+				client: { close: vi.fn().mockResolvedValue(undefined) },
+				transport: mockTransport,
+				authProvider: mockAuthProvider,
+				type: "connected",
 				server: {
+					source,
 					status: "connecting",
 					config: JSON.stringify(config),
 					name: serverName,
@@ -2916,10 +2927,13 @@ describe("McpHub", () => {
 			}
 			;(mcpHub as any).secretStorage = mockSecretStorage
 
-			vi.spyOn(mcpHub as any, "deleteConnection").mockResolvedValue(undefined)
-			vi.spyOn(mcpHub as any, "connectToServer").mockResolvedValue(undefined)
+			mcpHub.connections = [mockConnection]
+			vi.spyOn(mcpHub, "deleteConnection")
+			vi.spyOn(mcpHub as any, "connectToServer").mockImplementation(async () => {
+				mcpHub.connections = [{ ...mockConnection, server: { ...mockConnection.server, status: "connected" } }]
+			})
 			vi.spyOn(mcpHub as any, "notifyWebviewOfServerChanges").mockResolvedValue(undefined)
-			vi.spyOn(mcpHub as any, "findConnection").mockReturnValue(mockConnection)
+			vi.spyOn(mcpHub as any, "findConnection")
 			vi.spyOn(mcpHub as any, "validateServerConfig").mockReturnValue(config)
 			vi.spyOn(mcpHub as any, "appendErrorMessage").mockReturnValue(undefined)
 		})
@@ -3008,7 +3022,7 @@ describe("McpHub", () => {
 			)
 
 			expect(mockAuthProvider.close).toHaveBeenCalled()
-			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source)
+			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source, expect.any(McpOAuthFlow))
 			expect((mcpHub as any).connectToServer).toHaveBeenCalled()
 		})
 
@@ -3028,7 +3042,7 @@ describe("McpHub", () => {
 
 			expect(vsc.window.withProgress).not.toHaveBeenCalled()
 			expect(mockAuthProvider.close).toHaveBeenCalled()
-			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source)
+			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source, expect.any(McpOAuthFlow))
 			expect((mcpHub as any).connectToServer).toHaveBeenCalled()
 		})
 
@@ -3101,20 +3115,18 @@ describe("McpHub", () => {
 					mockTransport,
 					mockConnection,
 				),
-			).resolves.toBeUndefined()
+			).resolves.toBe("cancelled")
 
 			expect(mockConnection.server.status).toBe("disconnected")
 			expect((mcpHub as any).appendErrorMessage).toHaveBeenCalled()
 			expect(mockAuthProvider.close).toHaveBeenCalled()
 
-			// Pin the watcher-after-cleanup race: when the cancellation callback fires
-			// synchronously during onCancellationRequested(...) registration, cleanup()
-			// runs before the _oauthWatchers.set() that would have added the entry.
+			// A listener returned after synchronous cancellation must be disposed immediately.
 			// If the registration happens AFTER the callback is installed, the entry
 			// is added after disposal and remains orphaned in the map. Registering the
 			// watcher BEFORE installing the callback ensures cleanup() finds and
 			// deletes it cleanly.
-			expect((mcpHub as any)._oauthWatchers.has(`${serverName}:${source}`)).toBe(false)
+			expect((mcpHub as any).oauthFlows.has(mockConnection)).toBe(false)
 		})
 
 		it("should disconnect and flag error when OAuth flow times out", async () => {
@@ -3138,6 +3150,43 @@ describe("McpHub", () => {
 			expect(mockConnection.server.status).toBe("disconnected")
 			expect((mcpHub as any).appendErrorMessage).toHaveBeenCalled()
 			expect(mockAuthProvider.close).toHaveBeenCalled()
+		})
+
+		it("clears the approval timer when Authenticate is clicked late", async () => {
+			vi.useFakeTimers()
+			let approve!: (choice: string) => void
+			let code!: (value: string) => void
+			vsc.window.showInformationMessage.mockImplementationOnce(
+				() =>
+					new Promise<string>((resolve) => {
+						approve = resolve
+					}),
+			)
+			mockAuthProvider.waitForAuthCode.mockImplementationOnce(
+				() =>
+					new Promise<string>((resolve) => {
+						code = resolve
+					}),
+			)
+			const result = mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+			try {
+				await vi.advanceTimersByTimeAsync(OAUTH_FLOW_TIMEOUT_MS - 1000)
+				approve(t("mcp:oauth.flow.authenticateButton"))
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.advanceTimersByTimeAsync(1001)
+				expect(mcpHub["oauthFlows"].get(mockConnection)?.phase).toBe("authenticating")
+				expect(mockConnection.server.status).toBe("connecting")
+			} finally {
+				code("late-code")
+				await result
+			}
 		})
 
 		it("should dispose the cancellation listener when the OAuth flow times out", async () => {
@@ -3191,7 +3240,7 @@ describe("McpHub", () => {
 
 			expect(completeOAuthSpy).not.toHaveBeenCalled()
 			expect(mockAuthProvider.close).toHaveBeenCalled()
-			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source)
+			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source, expect.any(McpOAuthFlow))
 			expect((mcpHub as any).connectToServer).toHaveBeenCalled()
 		})
 
@@ -3208,7 +3257,7 @@ describe("McpHub", () => {
 					mockTransport,
 					mockConnection,
 				),
-			).resolves.toBeUndefined()
+			).resolves.toBe("failed")
 		})
 
 		it("should record the callback error and disconnect when waitForAuthCode rejects", async () => {
@@ -3414,55 +3463,544 @@ describe("McpHub", () => {
 			await flowPromise
 
 			expect(mockAuthProvider.close).toHaveBeenCalled()
-			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source)
+			expect((mcpHub as any).deleteConnection).toHaveBeenCalledWith(serverName, source, expect.any(McpOAuthFlow))
 			expect((mcpHub as any).connectToServer).toHaveBeenCalled()
 			expect(vsc.window.withProgress).not.toHaveBeenCalled()
 		})
 
-		it("should cancel the previous watcher when called again for the same server", async () => {
+		it("joins repeated OAuth requests on the same connection", async () => {
 			vi.useFakeTimers()
-			vsc.window.showInformationMessage.mockImplementation(() => {
-				return new Promise(() => {})
+			vsc.window.showInformationMessage.mockImplementation(() => new Promise(() => {}))
+			const first = mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			const flow = mcpHub["oauthFlows"].get(mockConnection)
+			const subscriptions = mockSecretStorage.onDidChange.mock.calls.length
+			const second = mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mcpHub["oauthFlows"].get(mockConnection)).toBe(flow)
+			expect(mockSecretStorage.onDidChange).toHaveBeenCalledTimes(subscriptions)
+			await vi.advanceTimersByTimeAsync(OAUTH_FLOW_TIMEOUT_MS)
+			await Promise.all([first, second])
+			expect(mcpHub["oauthFlows"].size).toBe(0)
+		})
+
+		it("keeps a replacement flow when an old toast resolves", async () => {
+			vi.useFakeTimers()
+			let resolveFirstToast!: (choice?: string) => void
+			vsc.window.showInformationMessage.mockImplementationOnce(
+				() =>
+					new Promise<string | undefined>((resolve) => {
+						resolveFirstToast = resolve
+					}),
+			)
+			vsc.window.showInformationMessage.mockImplementation(() => new Promise(() => {}))
+			const first = mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			const replacement = { ...mockConnection, server: { ...mockConnection.server } }
+			vi.mocked(mcpHub["findConnection"]).mockReturnValue(replacement)
+			const second = mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				replacement,
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			const currentFlow = mcpHub["oauthFlows"].get(replacement)
+			resolveFirstToast(t("mcp:oauth.flow.authenticateButton"))
+			await vi.advanceTimersByTimeAsync(0)
+			await first
+			expect(currentFlow?.phase).toBe("waiting")
+			expect(mcpHub["oauthFlows"].get(replacement)).toBe(currentFlow)
+			expect(mcpHub["connectToServer"]).not.toHaveBeenCalled()
+			await vi.advanceTimersByTimeAsync(OAUTH_FLOW_TIMEOUT_MS)
+			await second
+			expect(mcpHub["oauthFlows"].size).toBe(0)
+		})
+
+		it("ends the flow and surfaces the error when the token-watcher reconnect throws", async () => {
+			vi.useFakeTimers()
+			const hub = mcpHub as unknown as {
+				oauthFlows: Map<string, unknown>
+				_initiateOAuthFlow: (
+					name: string,
+					source: "global" | "project",
+					config: unknown,
+					authProvider: unknown,
+					transport: unknown,
+					connection: unknown,
+				) => Promise<void>
+				appendErrorMessage: Mock & ((connection: unknown, message: string) => void)
+				connectToServer: Mock & ((...args: unknown[]) => Promise<void>)
+			}
+			const closeMock = vi.fn().mockResolvedValue(undefined)
+			mockAuthProvider.close = closeMock
+			hub.connectToServer.mockImplementation(async () => {
+				mcpHub.connections = [
+					{
+						...mockConnection,
+						server: { ...mockConnection.server, status: "disconnected", error: "reconnect failed" },
+					},
+				]
+				throw new Error("reconnect failed")
+			})
+			// Two subscriptions happen: the cross-window pre-read watcher in
+			// _initiateOAuthFlow stays silent; the flow watcher delivers valid tokens.
+			let subscriptions = 0
+			mockSecretStorage.onDidChange.mockImplementation((_url: string, cb: () => void) => {
+				subscriptions += 1
+				if (subscriptions === 1) return vi.fn()
+				queueMicrotask(() => {
+					mockSecretStorage.getOAuthData.mockResolvedValue({ expires_at: Date.now() + 10 * 60 * 1000 })
+					cb()
+				})
+				return vi.fn()
 			})
 
-			// Start first flow (intentionally not awaited — the second call orphans it)
-			;(mcpHub as any)._initiateOAuthFlow(
-				serverName,
-				source,
-				config,
-				mockAuthProvider,
-				mockTransport,
-				mockConnection,
-			)
+			// Must resolve through the catch path instead of staying pending forever.
+			await hub._initiateOAuthFlow(serverName, source, config, mockAuthProvider, {}, mockConnection)
 
-			// Flush microtasks: getOAuthData resolves, then withProgress fires synchronously
-			// (registering the watcher) — no tick-counting needed.
+			expect(mcpHub.connections[0]?.server.status).toBe("disconnected")
+			expect(mcpHub.connections[0]?.server.error).toBe("reconnect failed")
+			expect(hub.appendErrorMessage).not.toHaveBeenCalledWith(mockConnection, "reconnect failed")
+			expect(closeMock).toHaveBeenCalled()
+			expect(hub.oauthFlows.size).toBe(0)
+		})
+
+		it("ends the flow and surfaces the error when the Authenticate fast-path reconnect throws", async () => {
+			vsc.window.showInformationMessage.mockResolvedValueOnce(t("mcp:oauth.flow.authenticateButton"))
+			mockSecretStorage.getOAuthData
+				.mockResolvedValueOnce(undefined) // no tokens before the flow starts
+				.mockResolvedValue({ expires_at: Date.now() + 10 * 60 * 1000 }) // tokens at click time
+			const hub = mcpHub as unknown as {
+				oauthFlows: Map<string, unknown>
+				_initiateOAuthFlow: (
+					name: string,
+					source: "global" | "project",
+					config: unknown,
+					authProvider: unknown,
+					transport: unknown,
+					connection: unknown,
+				) => Promise<void>
+				appendErrorMessage: Mock & ((connection: unknown, message: string) => void)
+				connectToServer: Mock & ((...args: unknown[]) => Promise<void>)
+			}
+			hub.connectToServer.mockImplementation(async () => {
+				mcpHub.connections = [
+					{
+						...mockConnection,
+						server: { ...mockConnection.server, status: "disconnected", error: "fast reconnect failed" },
+					},
+				]
+				throw new Error("fast reconnect failed")
+			})
+
+			await hub._initiateOAuthFlow(serverName, source, config, mockAuthProvider, {}, mockConnection)
+
+			expect(mcpHub.connections[0]?.server.status).toBe("disconnected")
+			expect(mcpHub.connections[0]?.server.error).toBe("fast reconnect failed")
+			expect(hub.appendErrorMessage).not.toHaveBeenCalledWith(mockConnection, "fast reconnect failed")
+			expect(hub.oauthFlows.size).toBe(0)
+		})
+
+		it("does not wait for an ended flow when a tool call hits a 401", async () => {
+			vi.useFakeTimers()
+			const requestMock = vi.fn().mockRejectedValue(new UnauthorizedError())
+			// Minimal connected-connection double: request rejects with 401, the
+			// transport and client close, and the auth provider drives the flow.
+			const localConnection = {
+				type: "connected",
+				server: { name: serverName, config: JSON.stringify(config), status: "connected", source },
+				client: { close: vi.fn().mockResolvedValue(undefined), request: requestMock },
+				transport: { close: vi.fn().mockResolvedValue(undefined) },
+				authProvider: mockAuthProvider,
+			} as unknown as ConnectedMcpConnection
+			mcpHub.connections = [localConnection]
+
+			// This test drives the real findConnection, deleteConnection, and OAuth flow.
+			vi.mocked(mcpHub["findConnection"]).mockRestore()
+			vi.mocked(mcpHub["deleteConnection"]).mockRestore()
+
+			const hub = mcpHub as unknown as {
+				oauthFlows: Map<string, unknown>
+				callTool: typeof mcpHub.callTool
+				deleteConnection: (name: string, source?: "global" | "project") => Promise<void>
+			}
+
+			const callPromise = mcpHub.callTool(serverName, "some-tool", {}, source)
 			await vi.advanceTimersByTimeAsync(0)
-			expect((mcpHub as any)._oauthWatchers.size).toBe(1)
-			const firstEntry = (mcpHub as any)._oauthWatchers.get(`${serverName}:${source}`)
+			// The 401 started a real OAuth flow and the tool call is waiting on it.
+			expect(hub.oauthFlows.size).toBe(1)
+			expect(requestMock).toHaveBeenCalledTimes(1)
 
-			// Start second flow for the same server — should tear down the first watcher
-			const secondFlow = (mcpHub as any)._initiateOAuthFlow(
-				serverName,
-				source,
-				config,
-				mockAuthProvider,
-				mockTransport,
-				mockConnection,
+			// Deleting the connection ends the flow through the shared removal path.
+			// Attach the rejection expectation first so the fast failure is handled.
+			const callAssertion = expect(callPromise).rejects.toThrow(
+				`Failed to reconnect to server ${serverName} after OAuth`,
 			)
+			await hub.deleteConnection(serverName, source)
+			await vi.advanceTimersByTimeAsync(1000)
 
-			await vi.advanceTimersByTimeAsync(0)
-			// Still exactly one watcher for this server key
-			expect((mcpHub as any)._oauthWatchers.size).toBe(1)
-			// The first watcher's unsubscribe must have been called before replacement
-			expect(firstEntry.unsubscribe).toHaveBeenCalledOnce()
-			// Watcher entry was replaced (second flow's entry, not first)
-			const secondEntry = (mcpHub as any)._oauthWatchers.get(`${serverName}:${source}`)
-			expect(secondEntry).not.toBe(firstEntry)
+			// The tool call must fail fast, not wait for the 5-minute flow timeout.
+			await callAssertion
+			expect(hub.oauthFlows.size).toBe(0)
+		})
+	})
 
-			// Advance past timeout so the second flow resolves
-			await vi.advanceTimersByTimeAsync(OAUTH_FLOW_TIMEOUT_MS)
-			await secondFlow
+	describe("OAuth reconnect fault injection (connect path)", () => {
+		const serverName = "rejected-server"
+		const serverUrl = "https://rejected.example.com/mcp"
+
+		/**
+		 * Wires the SDK doubles so every `client.connect()` rejects with
+		 * UnauthorizedError for the first `rejectCount` attempts. The saved token in
+		 * SecretStorage never expires, so each 401 drives the automatic reconnect
+		 * path exactly like the issue's fake-server reproduction did.
+		 */
+		async function setupRejectingServer(
+			rejectCount: number,
+			hasMetadata = true,
+		): Promise<{ connectCount: () => number }> {
+			let connectCount = 0
+			const connect = vi.fn(async () => {
+				connectCount += 1
+				if (connectCount <= rejectCount) {
+					throw new UnauthorizedError()
+				}
+			})
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			vi.mocked(streamableModule.StreamableHTTPClientTransport).mockImplementation(function () {
+				return { close: vi.fn().mockResolvedValue(undefined) } as unknown as StreamableHTTPClientTransport
+			})
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			vi.mocked(clientModule.Client).mockImplementation(function () {
+				return {
+					connect,
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn(),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				} as unknown as Client
+			})
+			const authProvider = {
+				hasMetadata,
+				registerClientIfNeeded: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.mocked(McpOAuthClientProvider.create).mockResolvedValue(
+				authProvider as unknown as McpOAuthClientProvider,
+			)
+			return { connectCount: () => connectCount }
+		}
+
+		/** A hub whose SecretStorage holds one unexpired, never-changing saved token. */
+		async function createHubWithSavedToken(): Promise<McpHubType> {
+			const secretStorage = {
+				hasOAuthData: vi.fn().mockResolvedValue(true),
+				getOAuthData: vi.fn().mockResolvedValue({
+					tokens: { access_token: "rejected-token" },
+					expires_at: Date.now() + 60 * 60 * 1000,
+					issuer: "https://auth.example.com",
+				}),
+				onDidChange: vi.fn().mockReturnValue(vi.fn()),
+				deleteOAuthData: vi.fn().mockResolvedValue(undefined),
+			}
+			// No project config in this harness: the project-level initialization
+			// must not connect a second copy of the server.
+			vi.mocked(fs.access).mockRejectedValue(new Error("no project config"))
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						[serverName]: {
+							type: "streamable-http",
+							url: serverUrl,
+						},
+					},
+				}),
+			)
+			const hub = new McpHub(mockProvider as ClineProvider, secretStorage as unknown as SecretStorageService)
+			await hub.waitUntilReady()
+			return hub
+		}
+
+		it("ends in connected when the server accepts the token after two 401s", async () => {
+			const { connectCount } = await setupRejectingServer(2)
+			const hub = await createHubWithSavedToken()
+			try {
+				await vi.waitFor(() => {
+					const conn = hub.connections.find((c) => c.server.name === serverName)
+					expect(conn?.server.status).toBe("connected")
+				})
+				// Initial connect plus one reconnect per rejected attempt.
+				expect(connectCount()).toBe(3)
+			} finally {
+				await hub.dispose()
+			}
+		})
+
+		it.each([true, false])("bounds rejected-token retries after discovery (metadata=%s)", async (hasMetadata) => {
+			const { connectCount } = await setupRejectingServer(Number.POSITIVE_INFINITY, hasMetadata)
+			const hub = await createHubWithSavedToken()
+			try {
+				await vi.waitFor(() => {
+					const conn = hub.connections.find((c) => c.server.name === serverName)
+					expect(conn?.server.status).toBe("disconnected")
+				})
+				// One initial connect plus the bounded retries — then the loop stops.
+				expect(connectCount()).toBe(1 + OAUTH_TOKEN_RETRY_MAX_ATTEMPTS)
+				const conn = hub.connections.find((c) => c.server.name === serverName)
+				expect(conn?.server.error).toBe(t("mcp:oauth.flow.retriesExhausted", { name: serverName }))
+				// Let any remaining detached work settle; the count must stay bounded.
+				await new Promise((resolve) => setTimeout(resolve, 20))
+				expect(connectCount()).toBe(1 + OAUTH_TOKEN_RETRY_MAX_ATTEMPTS)
+			} finally {
+				await hub.dispose()
+			}
+		})
+
+		it("records stdio errors while the process is connecting", async () => {
+			await setupRejectingServer(0)
+			const hub = await createHubWithSavedToken()
+			const stdio = await import("@modelcontextprotocol/sdk/client/stdio.js")
+			vi.mocked(stdio.StdioClientTransport).mockImplementation(function () {
+				// The transport double supplies process startup, close, and the absent stderr stream.
+				return {
+					start: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					stderr: null,
+				} as unknown as InstanceType<typeof stdio.StdioClientTransport>
+			})
+			try {
+				await hub["connectToServer"](
+					"stdio-errors",
+					ServerConfigSchema.parse({ type: "stdio", command: "node" }),
+					"global",
+				)
+				const connection = hub.connections.find((entry) => entry.server.name === "stdio-errors")
+				if (!connection || connection.type !== "connected") throw new Error("Missing stdio connection")
+				connection.server.status = "connecting"
+				await connection.transport.onerror?.(new Error("stdio startup failed"))
+				expect(connection.server.status).toBe("disconnected")
+				expect(connection.server.error).toContain("stdio startup failed")
+			} finally {
+				await hub.dispose()
+			}
+		})
+
+		it.each(["401", "generic"])("ignores a %s error from an old HTTP transport", async (kind) => {
+			await setupRejectingServer(0)
+			const hub = await createHubWithSavedToken()
+			try {
+				const old = hub.connections[0]
+				if (!old || old.type !== "connected") throw new Error("Missing old connection")
+				await hub["connectToServer"](
+					serverName,
+					hub["validateServerConfig"](JSON.parse(old.server.config), serverName),
+					"global",
+				)
+				const replacement = hub.connections[0]
+				const before = structuredClone(replacement?.server)
+				const error = kind === "401" ? new UnauthorizedError() : new Error("late HTTP failure")
+				await old.transport.onerror?.(error)
+				expect(replacement?.server).toEqual(before)
+				expect(hub["oauthFlows"].size).toBe(0)
+			} finally {
+				await hub.dispose()
+			}
+		})
+
+		it.each(["connecting", "connected"] as const)(
+			"handles a current generic HTTP error while %s",
+			async (status) => {
+				await setupRejectingServer(0)
+				const hub = await createHubWithSavedToken()
+				try {
+					const connection = hub.connections[0]
+					if (!connection || connection.type !== "connected") throw new Error("Missing connection")
+					connection.server.status = status
+					await connection.transport.onerror?.(new Error("current HTTP failure"))
+					expect(connection.server.status).toBe(status === "connecting" ? "connecting" : "disconnected")
+					if (status === "connecting") expect(connection.server.error).not.toContain("current HTTP failure")
+					else expect(connection.server.error).toContain("current HTTP failure")
+				} finally {
+					await hub.dispose()
+				}
+			},
+		)
+
+		it("starts a new transport re-auth flow for a replacement connection", async () => {
+			await setupRejectingServer(0)
+			const hub = await createHubWithSavedToken()
+			const releases: Array<() => void> = []
+			const initiate = vi.fn<(typeof hub)["performOAuthFlow"]>(
+				() => new Promise<void>((resolve) => releases.push(resolve)),
+			)
+			hub["performOAuthFlow"] = initiate
+			try {
+				const first = hub.connections[0]
+				if (!first || first.type !== "connected") throw new Error("Missing first connection")
+				first.transport.onerror?.(new UnauthorizedError())
+				await hub["connectToServer"](
+					serverName,
+					hub["validateServerConfig"](JSON.parse(first.server.config), serverName),
+					"global",
+				)
+				const second = hub.connections[0]
+				if (!second || second.type !== "connected") throw new Error("Missing replacement connection")
+				expect(second).not.toBe(first)
+				second.transport.onerror?.(new UnauthorizedError())
+				expect(initiate).toHaveBeenCalledTimes(2)
+				expect(hub["oauthFlows"].size).toBe(1)
+			} finally {
+				for (const release of releases) release()
+				await Promise.all([...hub["oauthFlows"].values()].map((flow) => flow.promise))
+				await hub.dispose()
+			}
+		})
+
+		it("does not reset the rejected-token budget when initialize succeeds", async () => {
+			const { connectCount } = await setupRejectingServer(0)
+			const hub = await createHubWithSavedToken()
+			try {
+				for (let attempt = 0; attempt <= OAUTH_TOKEN_RETRY_MAX_ATTEMPTS; attempt++) {
+					const connection = hub.connections.find((entry) => entry.server.name === serverName)
+					if (!connection || connection.type !== "connected" || !connection.authProvider)
+						throw new Error("Missing connection")
+					connection.server.status = "connecting"
+					await hub["_initiateOAuthFlow"](
+						serverName,
+						"global",
+						hub["validateServerConfig"](JSON.parse(connection.server.config), serverName),
+						connection.authProvider,
+						connection.transport as StreamableHTTPClientTransport,
+						connection,
+					)
+				}
+				expect(connectCount()).toBe(1 + OAUTH_TOKEN_RETRY_MAX_ATTEMPTS)
+				expect(hub.connections[0]?.server.status).toBe("disconnected")
+				expect(hub.connections[0]?.server.error).toBe(
+					t("mcp:oauth.flow.retriesExhausted", { name: serverName }),
+				)
+			} finally {
+				await hub.dispose()
+			}
+		})
+
+		it("delays each automatic reconnect of the same rejected token", async () => {
+			await setupRejectingServer(Number.POSITIVE_INFINITY)
+			const hub = await createHubWithSavedToken()
+			try {
+				const delayModule = await import("delay")
+				const delayMock = vi.mocked(delayModule.default)
+				await vi.waitFor(() => {
+					const conn = hub.connections.find((c) => c.server.name === serverName)
+					expect(conn?.server.status).toBe("disconnected")
+				})
+				// Exponential backoff for the three bounded attempts. Filter out the
+				// unrelated short delays the hub uses elsewhere (100ms, 500ms).
+				const backoffCalls = delayMock.mock.calls.map((args) => args[0]).filter((ms) => ms >= 1000)
+				expect(backoffCalls).toEqual([1000, 2000, 4000])
+			} finally {
+				await hub.dispose()
+			}
+		})
+
+		it("updates the panel when the status changes to connected and again when the lists arrive", async () => {
+			let resolveTools!: (value: { tools: Array<{ name: string }> }) => void
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			vi.mocked(streamableModule.StreamableHTTPClientTransport).mockImplementation(function () {
+				return { close: vi.fn().mockResolvedValue(undefined) } as unknown as StreamableHTTPClientTransport
+			})
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			vi.mocked(clientModule.Client).mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn(),
+					request: vi.fn((request: { method: string }) => {
+						if (request.method === "tools/list") {
+							return new Promise((resolve) => {
+								resolveTools = resolve
+							})
+						}
+						return Promise.resolve({ resources: [], resourceTemplates: [] })
+					}),
+				} as unknown as Client
+			})
+			const authProvider = {
+				hasMetadata: true,
+				registerClientIfNeeded: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.mocked(McpOAuthClientProvider.create).mockResolvedValue(
+				authProvider as unknown as McpOAuthClientProvider,
+			)
+			const secretStorage = {
+				hasOAuthData: vi.fn().mockResolvedValue(false),
+				onDidChange: vi.fn().mockReturnValue(vi.fn()),
+			}
+			vi.mocked(fs.access).mockRejectedValue(new Error("no project config"))
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						[serverName]: {
+							type: "streamable-http",
+							url: serverUrl,
+						},
+					},
+				}),
+			)
+			const hub = new McpHub(mockProvider as ClineProvider, secretStorage as unknown as SecretStorageService)
+			try {
+				const notifySpy = vi.spyOn(
+					hub as unknown as { notifyWebviewOfServerChanges: () => Promise<void> },
+					"notifyWebviewOfServerChanges",
+				)
+				const ready = hub.waitUntilReady()
+				const conn = () => {
+					const found = hub.connections.find((c) => c.server.name === serverName)
+					return found?.type === "connected" ? found : undefined
+				}
+
+				// The panel shows connected while the tools list is still pending.
+				await vi.waitFor(() => {
+					expect(conn()?.server.status).toBe("connected")
+					expect(notifySpy).toHaveBeenCalledTimes(1)
+				})
+				expect(conn()?.server.tools).toBeUndefined()
+
+				// When the lists arrive, the panel updates again with their results.
+				resolveTools!({ tools: [{ name: "slow-tool" }] })
+				await ready
+				// The early connected update plus at least one post-list update.
+				await vi.waitFor(() => expect(notifySpy.mock.calls.length).toBeGreaterThanOrEqual(2))
+				expect(conn()?.server.tools).toEqual([
+					{ name: "slow-tool", alwaysAllow: false, enabledForPrompt: true },
+				])
+			} finally {
+				await hub.dispose()
+			}
 		})
 	})
 })
