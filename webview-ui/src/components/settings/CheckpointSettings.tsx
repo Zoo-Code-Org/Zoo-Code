@@ -1,4 +1,4 @@
-import { HTMLAttributes } from "react"
+import { HTMLAttributes, type FormEvent } from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
@@ -13,17 +13,34 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_PER_WRITE_CHECKPOINTS,
+	DEFAULT_CHANGE_CARD_DETAIL,
+	type ChangeCardDetail,
 } from "@roo-code/types"
+
+/**
+ * The `checked` state of a VSCodeCheckbox change event. The real toolkit
+ * dispatches a native `Event` whose current target is the web component;
+ * the test mock forwards a synthetic event on the underlying input. Both
+ * expose a boolean `checked` on the current target.
+ */
+type CheckboxEventTarget = { checked?: boolean }
 
 type CheckpointSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	enableCheckpoints?: boolean
 	checkpointTimeout?: number
-	setCachedStateField: SetCachedStateField<"enableCheckpoints" | "checkpointTimeout">
+	perWriteCheckpoints?: boolean
+	changeCardDetail?: ChangeCardDetail
+	setCachedStateField: SetCachedStateField<
+		"enableCheckpoints" | "checkpointTimeout" | "perWriteCheckpoints" | "changeCardDetail"
+	>
 }
 
 export const CheckpointSettings = ({
 	enableCheckpoints,
 	checkpointTimeout,
+	perWriteCheckpoints,
+	changeCardDetail,
 	setCachedStateField,
 	...props
 }: CheckpointSettingsProps) => {
@@ -34,13 +51,50 @@ export const CheckpointSettings = ({
 
 			<Section>
 				<SearchableSetting
+					settingId="checkpoints-perWriteCheckpoints"
+					section="checkpoints"
+					label={t("settings:checkpoints.perWrite.label")}>
+					<VSCodeCheckbox
+						data-testid="per-write-checkbox"
+						checked={perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS}
+						onChange={(e: Event | FormEvent<HTMLElement>) => {
+							const target = e.currentTarget as CheckboxEventTarget | null
+							setCachedStateField("perWriteCheckpoints", target?.checked === true)
+						}}>
+						<span className="font-medium">{t("settings:checkpoints.perWrite.label")}</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:checkpoints.perWrite.description")}
+					</div>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="checkpoints-changeCardDetail"
+					section="checkpoints"
+					label={t("settings:checkpoints.changeCardDetail.label")}>
+					<VSCodeCheckbox
+						checked={(changeCardDetail ?? DEFAULT_CHANGE_CARD_DETAIL) === "full"}
+						onChange={(e: Event | FormEvent<HTMLElement>) => {
+							const target = e.currentTarget as CheckboxEventTarget | null
+							setCachedStateField("changeCardDetail", target?.checked === true ? "full" : "summary")
+						}}
+						data-testid="change-card-detail-checkbox">
+						<span className="font-medium">{t("settings:checkpoints.changeCardDetail.label")}</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:checkpoints.changeCardDetail.description")}
+					</div>
+				</SearchableSetting>
+
+				<SearchableSetting
 					settingId="checkpoints-enable"
 					section="checkpoints"
 					label={t("settings:checkpoints.enable.label")}>
 					<VSCodeCheckbox
 						checked={enableCheckpoints}
-						onChange={(e: any) => {
-							setCachedStateField("enableCheckpoints", e.target.checked)
+						onChange={(e: Event | FormEvent<HTMLElement>) => {
+							const target = e.currentTarget as CheckboxEventTarget | null
+							setCachedStateField("enableCheckpoints", target?.checked === true)
 						}}>
 						<span className="font-medium">{t("settings:checkpoints.enable.label")}</span>
 					</VSCodeCheckbox>
