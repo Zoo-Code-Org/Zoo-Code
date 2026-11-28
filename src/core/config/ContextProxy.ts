@@ -67,7 +67,20 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Host-minted claim tokens and per-view selections are not user-settings: exporting
+	// them would let a settings file be replayed as another view's identity.
+	viewStates: true,
 })
+
+/**
+ * Global settings a settings file may not carry in either direction. Per-view selections and the
+ * claim token that binds them are minted and held by the extension host, so a file that could
+ * set them would be replayable as another view's identity. The export side omits the key above;
+ * the import side consults this list in `sanitizeGlobalSettings`.
+ */
+const NON_PORTABLE_SETTINGS_KEYS: readonly string[] = ["viewStates"]
+
+export const isNonPortableSettingsKey = (key: string): boolean => NON_PORTABLE_SETTINGS_KEYS.includes(key)
 
 export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
@@ -666,7 +679,16 @@ export class ContextProxy {
 	 * rollback, must provide it themselves.
 	 */
 	public async setValues(values: RooCodeSettings) {
-		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
+		// viewStates is host-owned: per-view selections and the claim token that binds them are
+		// minted by the extension host, so no configuration path may carry them. Every caller of
+		// this setter takes input that did not originate inside the host - a posted updateSettings,
+		// a newTask taskConfiguration, the external API, an imported settings file - so the filter
+		// lives here rather than at whichever caller a reviewer happened to point at. The host's
+		// own view-state methods write through setValue("viewStates", ...), which stays open.
+		const entries = Object.entries(values).filter(([key]) => !isNonPortableSettingsKey(key)) as [
+			RooCodeSettingsKey,
+			unknown,
+		][]
 		const results = await Promise.allSettled(entries.map(([key, value]) => this.setValue(key, value)))
 
 		const committed: string[] = []

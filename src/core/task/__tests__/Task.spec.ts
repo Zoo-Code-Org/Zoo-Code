@@ -5079,6 +5079,7 @@ describe("Cline", () => {
 					const { ts, text, partial } = message.clineMessage
 					messageUpdates.push({ ts, text, partial })
 				}
+				return true
 			})
 
 			const task = new Task({
