@@ -20,12 +20,21 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue(""),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rmdir: vi.fn().mockResolvedValue(undefined),
+	// The task-history store writes through safeWriteJson: it stats the directory with access,
+	// renames the temporary file into place, and cleans up with rm and readdir.
+	access: vi.fn().mockResolvedValue(undefined),
+	rename: vi.fn().mockResolvedValue(undefined),
+	rm: vi.fn().mockResolvedValue(undefined),
+	readdir: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
 	getGlobalStoragePath: vi.fn().mockResolvedValue("/test/storage/path"),
+	// The task-history store resolves its file under this path, and a switch that has a stored
+	// history row writes through it: without this export the history write cannot even run.
+	getStorageBasePath: vi.fn().mockResolvedValue("/test/storage/base"),
 }))
 
 vi.mock("p-wait-for", () => ({
@@ -145,6 +154,11 @@ vi.mock("@roo-code/cloud", () => ({
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://app.roocode.com"),
 }))
 
+// A same-name profile save joins the manager's cross-instance critical section, so a
+// double that stubs the manager must still run the callback inline: the real lock does
+// that whenever no other view holds the section.
+const runManagerSectionInline = (cb: () => Promise<unknown>): Promise<unknown> => cb()
+
 describe("ClineProvider - API Handler Rebuild Guard", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
@@ -242,9 +256,16 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
 		provider["initialModeConfigIds"] = Promise.resolve({})
 
-		// Mock providerSettingsManager
+		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
+		// the record it wrote: the real manager reads back the stored record, and
+		// persistProviderProfile builds its activation writes from that read-back.
+		const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
 		;(provider as any).providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			saveConfig: vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			}),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -261,6 +282,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}),
+			// Mirrors ProviderSettingsManager.hasConfig: the sibling-overlay snapshot asks
+			// before reading a pinned profile so a dangling pin can be left alone.
+			hasConfig: vi.fn().mockResolvedValue(true),
 			getProfile: vi.fn().mockResolvedValue({
 				name: "test-config",
 				id: "test-id",
@@ -853,7 +877,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
+			// The activation now takes a sibling-overlay snapshot before it asks the manager to
+			// write, so flush past that pre-flight await rather than a single microtask: the
+			// assertions below still prove only the first mutation had started.
+			await new Promise((resolve) => setImmediate(resolve))
 			expect(events).toEqual(["first:start"])
 
 			resolveFirst()
@@ -933,6 +960,46 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
+		test("a timed-out activation stops before the abandoned profile is stored", async () => {
+			// The sibling snapshot runs before the manager write. When the queue times the
+			// activation out during that snapshot, the queue has already released the next
+			// mutation: storing the abandoned profile here would move the shared selection
+			// back to it while the view and ContextProxy report the activation that ran next.
+			vi.useFakeTimers()
+			let releaseSnapshot: () => void = () => {}
+			let snapshotFinished = false
+			const snapshot = new Promise<void>((resolve) => {
+				releaseSnapshot = resolve
+			})
+			// Direct assignment: both members are private, and the bracket access keeps the
+			// substitution compile-time safe without a structural cast.
+			provider["snapshotSiblingOverlaysBeforeSharedSettingsWrite"] = vi.fn(async () => {
+				await snapshot
+				snapshotFinished = true
+			})
+			const activateProfile = vi.fn().mockResolvedValue({
+				name: "stalled-profile",
+				id: "stalled-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			provider["providerSettingsManager"].activateProfile = activateProfile
+
+			try {
+				const activation = provider.activateProviderProfile({ name: "stalled-profile" })
+				const timedOut = expect(activation).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await timedOut
+
+				// The snapshot finishes after the queue let the next mutation start: the aborted
+				// activation resumes here and must stop before the storage write.
+				releaseSnapshot()
+				await vi.advanceTimersByTimeAsync(10)
+				expect(snapshotFinished).toBe(true)
+				expect(activateProfile).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
 		test("mode switch preserves its default task when queued behind a profile mutation", async () => {
 			let releaseProfileActivation!: () => void
 			const profileActivation = new Promise<void>((resolve) => {
@@ -966,6 +1033,229 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			expect(firstTask["_taskMode"]).toBe("ask")
 			expect(secondTask["_taskMode"]).toBe("code")
+		})
+
+		test("a timed-out mode switch leaves a newer switch's writes alone", async () => {
+			vi.useFakeTimers()
+			await provider.setViewStateId("rebuild-sidebar-view")
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskId", { value: "switch-task-id" })
+			task["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(task)
+			// addClineToStack does not create a history row, and without a stored item this switch
+			// skips its task-history write entirely: seeding the row is what makes the history half of
+			// the rollback observable, so the ownership fence is proven for the stored mode and not only
+			// for the in-memory task mode.
+			provider["taskHistoryStore"]["cache"].set("switch-task-id", {
+				id: "switch-task-id",
+				task: "seeded before the switch",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				mode: "code",
+			})
+			provider["taskHistoryStoreInitialized"] = true
+			// The stored row is what these tests assert on, so the history write goes through a stub
+			// that writes straight into the store's cache: the file-backed write, its directory and its
+			// lock are not what the ownership fence is about, and this spec does not mock them.
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(async (item) => {
+				provider["taskHistoryStore"]["cache"].set(item.id, item)
+				return []
+			})
+			const logSpy = vi.spyOn(provider, "log")
+
+			// The view mode pin is this switch's first durable write. Hanging it is what reproduces
+			// the state a timeout leaves behind: the queue advances without waiting for this function
+			// to return, so the next mutation runs to completion while this one is still inside an
+			// await, and only then does this one reach its own reconciliation.
+			const originalSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			let releasePinWrite!: () => void
+			const pinWrite = new Promise<void>((resolve) => {
+				releasePinWrite = resolve
+			})
+			// Every viewStates write that succeeds for this view, recorded in landing order: the pin's
+			// history is what shows whether a stale restore replayed itself after a newer pin, which the
+			// final-state assertions below cannot see, because the newer pin lands last either way.
+			const pinHistory: string[] = []
+			// Hang only the write that pins this switch's own mode. The history seed above moves the two
+			// switches' writes around in time, so hanging the run's first viewStates write would hang the
+			// newer switch instead and change what the test is about.
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				// The viewStates write carries the whole map; this view's entry is the field the switch is
+				// trying to move, and that is the write to hold open.
+				const states = value as Record<string, { mode?: string } | undefined> | undefined
+				if (key === "viewStates" && states?.[provider["viewStateId"]]?.mode === "ask") {
+					await pinWrite
+				}
+				await originalSetValue(key, value)
+				if (key === "viewStates") {
+					pinHistory.push(states?.[provider["viewStateId"]]?.mode ?? "cleared")
+				}
+			})
+
+			try {
+				const firstSwitch = provider.handleModeSwitch("ask" as Mode)
+				const firstResult = expect(firstSwitch).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+
+				// The timeout released the mutation queue, so the newer switch starts and gets as far
+				// as its own mode pin: the serialized view-state queue holds that write behind the
+				// older switch's, but the task mode write is not in that queue and has already landed
+				// by the time the pin write is merely pending.
+				const secondSwitch = provider.handleModeSwitch("debug" as Mode)
+				await vi.advanceTimersByTimeAsync(50)
+				expect(task["_taskMode"]).toBe("debug")
+
+				// Now the timed-out switch resumes inside its own pin write and reaches the reconcile
+				// that restores everything it landed. Restoring the pin, the task mode, or the task
+				// history here would replay the pre-switch values over the newer switch's committed
+				// writes: the restore queues behind the newer switch's own pin write, so it lands last.
+				releasePinWrite()
+				await secondSwitch
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				const persisted = mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
+				expect(persisted["rebuild-sidebar-view"].mode).toBe("debug")
+				// The landing order, not only the final value. This switch does restore its pin - the fence asks the
+				// ownership question before queueing, and nothing had landed on the pin by then - but the serialized
+				// queue puts that restore behind the newer switch's pin, so the trace carries a stale entry after the
+				// newer pin, and the pin ends on debug only because the newer switch writes it again afterwards. The
+				// final-value assertion above reads debug in both orders, which is why the trace is asserted here.
+				// Skipping a restore whose queued slot has been passed by a newer write is issue 2488's, and the
+				// criterion is that this trace stops carrying a stale entry behind the newer pin.
+				const firstNewerPin = pinHistory.indexOf("debug")
+				expect(firstNewerPin).toBeGreaterThanOrEqual(0)
+				expect(pinHistory.slice(firstNewerPin + 1)).toContain("cleared")
+				expect(pinHistory[pinHistory.length - 1]).toBe("debug")
+				expect(provider["viewLocalState"].mode).toBe("debug")
+				expect(provider.contextProxy.getValue("mode")).toBe("debug")
+				expect(task["_taskMode"]).toBe("debug")
+				// The stored mode is the half no assertion covered: the newer switch's history write is a
+				// real write now, and the timed-out switch's restore would overwrite it with the older
+				// mode if the fence did not own that field.
+				expect(provider["taskHistoryStore"].get("switch-task-id")?.mode).toBe("debug")
+				// Ownership is per field now. The newer switch had already moved the task mode by the
+				// time this one resumed, so that half of the rollback is skipped; the view pin had not
+				// moved yet - the serialized queue held it behind this very write - so this switch still
+				// owns that field and restores it, and the newer switch's own pin lands after it.
+				expect(logSpy).not.toHaveBeenCalledWith(
+					expect.stringContaining("Skipping the rollback of view mode pin for the switch to ask"),
+				)
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Skipping the rollback of task mode writes for the switch to ask"),
+				)
+			} finally {
+				releasePinWrite()
+				vi.useRealTimers()
+			}
+		})
+
+		test("a timed-out switch still reconciles when the queue was taken by a save of another profile", async () => {
+			vi.useFakeTimers()
+			await provider.setViewStateId("rebuild-unrelated-view")
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskId", { value: "unrelated-save-task" })
+			task["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(task)
+			provider["taskHistoryStore"]["cache"].set("unrelated-save-task", {
+				id: "unrelated-save-task",
+				task: "seeded before the switch",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				mode: "code",
+			})
+			provider["taskHistoryStoreInitialized"] = true
+			// The stored row is what these tests assert on, so the history write goes through a stub
+			// that writes straight into the store's cache: the file-backed write, its directory and its
+			// lock are not what the ownership fence is about, and this spec does not mock them.
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(async (item) => {
+				provider["taskHistoryStore"]["cache"].set(item.id, item)
+				return []
+			})
+			const logSpy = vi.spyOn(provider, "log")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// Same hanging view mode pin as the test above: the timeout releases the mutation queue while
+			// this switch is still inside its first durable write.
+			// The shared mode holds the pre-switch value the finding describes; this switch bails before its
+			// own shared write, so the shared mode must stay code while the view and the task are on ask.
+			await provider.setValues({ mode: "code" })
+
+			const originalSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			let releasePinWrite!: () => void
+			const pinWrite = new Promise<void>((resolve) => {
+				releasePinWrite = resolve
+			})
+			// Hang only the write that pins this switch's own mode. The history seed above moves the two
+			// switches' writes around in time, so hanging the run's first viewStates write would hang the
+			// newer switch instead and change what the test is about.
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				// The viewStates write carries the whole map; this view's entry is the field the switch is
+				// trying to move, and that is the write to hold open.
+				const states = value as Record<string, { mode?: string } | undefined> | undefined
+				if (key === "viewStates" && states?.[provider["viewStateId"]]?.mode === "ask") {
+					await pinWrite
+				}
+				return originalSetValue(key, value)
+			})
+
+			try {
+				const firstSwitch = provider.handleModeSwitch("ask" as Mode)
+				const firstResult = expect(firstSwitch).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+
+				// The mutation that takes the released queue saves another profile without activating it:
+				// it stores that record, refreshes listApiConfigMeta and the buffers of views pinned to
+				// that profile, and never writes the shared mode, this view's mode pin or this task's
+				// mode. Losing the rollback to it is the bug this test pins.
+				await provider.upsertProviderProfile(
+					"unrelated-profile",
+					{ apiProvider: providerIdentifiers.anthropic },
+					false,
+				)
+				expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+					"unrelated-profile",
+					expect.anything(),
+				)
+
+				releasePinWrite()
+				// The timed-out switch is still running: its caller-facing promise settled at the
+				// timeout, so the only way to reach its own reconciliation is to give the fake clock
+				// the ticks its remaining awaits need and drain the queue it rejoins.
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.advanceTimersByTimeAsync(1000)
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				// The mutation that took the queue owns none of these fields, so the rollback runs and
+				// brings the pre-switch mode back everywhere this switch had moved one: the shared mode
+				// was never written, while the view pin, the task mode and the stored history row all
+				// come back from ask to code.
+				expect(provider.contextProxy.getValue("mode")).toBe("code")
+				expect(provider["viewLocalState"].mode).toBe("code")
+				expect(
+					(mockContext.globalState.get("viewStates") as Record<string, { mode?: string }> | undefined)?.[
+						"rebuild-unrelated-view"
+					]?.mode,
+				).toBe("code")
+				expect(task["_taskMode"]).toBe("code")
+				expect(provider["taskHistoryStore"].get("unrelated-save-task")?.mode).toBe("code")
+				// The opposite-outcome case is the test above: there the mutation that took the queue is
+				// a newer switch that really does own the task-mode field, and that half of the rollback
+				// is skipped. A save of another profile must not buy the same skip.
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Skipping the rollback"))
+			} finally {
+				releasePinWrite()
+				vi.useRealTimers()
+			}
 		})
 
 		test("fan-out preparation leaves the focused task untouched", async () => {

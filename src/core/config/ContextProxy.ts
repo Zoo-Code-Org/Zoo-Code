@@ -67,6 +67,9 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Per-view selection state is machine-local: it keeps flowing through the
+	// normal runtime and pruning paths but must not transfer between settings.
+	viewStates: true,
 })
 
 export class ContextProxy {
@@ -74,6 +77,7 @@ export class ContextProxy {
 
 	private stateCache: GlobalState
 	private secretCache: SecretState
+
 	private _isInitialized = false
 
 	constructor(context: vscode.ExtensionContext) {
@@ -119,6 +123,33 @@ export class ContextProxy {
 		]
 
 		await Promise.all(promises)
+
+		// Migration: provider keys that moved from plaintext global state to secret
+		// storage keep working for users who configured them before the move: the
+		// value is relocated to secret storage and the plaintext copy is dropped.
+		for (const key of ["mimoApiKey", "poeApiKey"] as const) {
+			try {
+				const legacyValue = this.originalContext.globalState.get<string>(key)
+				if (legacyValue === undefined) {
+					continue
+				}
+				// Preserve an existing secret: the plaintext copy is redundant once a
+				// secret exists, and a deletion that failed earlier must still be
+				// retried while the secret already wins reads.
+				if (this.secretCache[key] === undefined) {
+					await this.originalContext.secrets.store(key, legacyValue)
+					this.secretCache[key] = legacyValue
+				}
+				// Erase the plaintext only after the secret write succeeded (or was
+				// unnecessary): a failed store leaves the value for a retry instead of
+				// losing the user's key.
+				await this.originalContext.globalState.update(key, undefined)
+			} catch (error) {
+				logger.error(
+					`Error migrating legacy secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
 
 		// Migration: Check for old nested image generation settings and migrate them
 		await this.migrateImageGenerationSettings()
@@ -314,7 +345,12 @@ export class ContextProxy {
 	private async migrateImageGenerationSettings() {
 		try {
 			// Check if there's an old nested structure
-			const oldNestedSettings = this.originalContext.globalState.get<any>("openRouterImageGenerationSettings")
+			// The pre-typed nested layout only ever carried these two fields (the
+			// migration below reads nothing else).
+			const oldNestedSettings = this.originalContext.globalState.get<{
+				openRouterApiKey?: string
+				selectedModel?: string
+			}>("openRouterImageGenerationSettings")
 
 			if (oldNestedSettings && typeof oldNestedSettings === "object") {
 				logger.info("Migrating old nested image generation settings to flattened structure")
@@ -499,6 +535,10 @@ export class ContextProxy {
 	 * This is useful when you need to ensure the cache has the latest values
 	 */
 	async refreshSecrets(): Promise<void> {
+		// The refresh reloads every secret from storage. refreshSecret leaves a key alone when a
+		// write of it started during the read (secretWriteCount), and otherwise takes ownership of
+		// the key away from a write that is still in flight (secretWriteOwner), so the loaded value
+		// is what the cache holds afterwards and that older write cannot roll it back on failure.
 		const promises = [
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
@@ -716,7 +756,10 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
-		// Clear in-memory caches
+		// Clear in-memory caches. The owner maps are left in place: a write that started before
+		// the reset still owns its key, so when it fails it reads the key back from storage rather
+		// than restoring a pre-reset cache value, and it drops its entry only if no newer write
+		// took the key in the meantime.
 		this.stateCache = {}
 		this.secretCache = {}
 

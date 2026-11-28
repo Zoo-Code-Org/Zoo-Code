@@ -1,0 +1,920 @@
+import { EventEmitter } from "events"
+import { makeClineProviderFactory } from "../../test-utils/provider"
+
+import { describe, expect, it, vi, beforeEach, type Mock } from "vitest"
+import * as vscode from "vscode"
+
+import { RooCodeEventName, type ModeConfig, type RooCodeSettings } from "@roo-code/types"
+
+import { API } from "../api"
+import { ClineProvider } from "../../core/webview/ClineProvider"
+
+const { openClineInNewTabMock } = vi.hoisted(() => ({
+	openClineInNewTabMock: vi.fn(),
+}))
+
+// The API module reads ClineProvider's live-instance list as a value when it decides whether a
+// new-tab provider is its own to dispose, so the module is stubbed here: loading the real one
+// pulls in the editor-decoration chain, which this file's partial vscode mock below cannot
+// satisfy. The providers under test are the doubles built by makeClineProviderFactory, and none
+// of them is registered in that list.
+vi.mock("../../core/webview/ClineProvider", () => ({
+	ClineProvider: { getAllInstances: vi.fn(() => []) },
+}))
+
+vi.mock("vscode", () => ({
+	commands: {
+		executeCommand: vi.fn().mockResolvedValue(undefined),
+	},
+	ExtensionMode: {
+		Development: 1,
+		ExtensionDevelopment: 2,
+		Test: 3,
+		Production: 4,
+	},
+}))
+
+vi.mock("@roo-code/ipc", () => ({
+	IpcServer: class {},
+}))
+
+vi.mock("../../activate/registerCommands", () => ({
+	openClineInNewTab: openClineInNewTabMock,
+}))
+
+vi.mock("../../integrations/terminal/Terminal", () => ({
+	Terminal: {
+		getTerminalProfile: vi.fn(),
+		setTerminalProfile: vi.fn(),
+	},
+}))
+
+vi.mock("../../integrations/terminal/TerminalRegistry", () => ({
+	TerminalRegistry: {
+		closeIdleTerminals: vi.fn(),
+	},
+}))
+
+type CreatedTask = {
+	taskId: string
+}
+
+type ProviderDouble = EventEmitter & {
+	// Minimal context surface exercised by the task-control tests: the mode guard
+	// reads extensionMode and getGlobalState/setGlobalState read/update globalState.
+	context: {
+		extensionMode: vscode.ExtensionMode
+		globalState: {
+			get: (key: string) => unknown
+			update?: (key: string, value: unknown) => Promise<void>
+		}
+	}
+	evictCurrentTask: Mock<() => Promise<void>>
+	postStateToWebview: Mock<() => Promise<void>>
+	postMessageToWebview: Mock<(message: unknown) => Promise<void>>
+	createTask: Mock<(...args: unknown[]) => Promise<CreatedTask>>
+	getCurrentTaskStack: Mock<() => string[]>
+	getCurrentTask: Mock<() => undefined>
+	getState: Mock<() => Promise<{ customModes?: ModeConfig[] }>>
+	handleModeSwitch: Mock<(mode: string, targetTask?: unknown) => Promise<void>>
+	viewLaunched: boolean
+	hasResolvedView: boolean
+	isDisposed: boolean
+	viewStateReadiness: Promise<void>
+	taskHistoryStore: Map<string, unknown>
+}
+
+type TaskDouble = EventEmitter & {
+	taskId: string
+	parentTaskId?: string
+	approveAsk: Mock<() => void>
+	denyAsk: Mock<() => void>
+	handleWebviewAskResponse: Mock<(response: "messageResponse", text?: string, images?: string[]) => void>
+}
+
+const configuration: RooCodeSettings = {}
+
+function asClineProvider(provider: ProviderDouble): ClineProvider {
+	// ClineProvider has private members, so a structural test double requires an unknown bridge.
+	return provider as unknown as ClineProvider
+}
+
+function createProvider(taskId = "task-1"): ProviderDouble {
+	const provider = new EventEmitter() as ProviderDouble
+	// The default double leaves extensionMode unset (never Production), so the test-only
+	// guard stays inert for the task-control tests.
+	provider.context = {} as ProviderDouble["context"]
+	provider.evictCurrentTask = vi.fn().mockResolvedValue(undefined)
+	provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
+	provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
+	provider.createTask = vi.fn().mockResolvedValue({ taskId })
+	provider.getCurrentTaskStack = vi.fn().mockReturnValue([])
+	provider.getCurrentTask = vi.fn().mockReturnValue(undefined)
+	provider.getState = vi.fn().mockResolvedValue({ customModes: [] })
+	provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+	provider.viewLaunched = true
+	provider.hasResolvedView = true
+	provider.isDisposed = false
+	provider.viewStateReadiness = Promise.resolve()
+	provider.taskHistoryStore = new Map()
+	return provider
+}
+
+function createTask(taskId: string): TaskDouble {
+	const task = new EventEmitter() as TaskDouble
+	task.taskId = taskId
+	task.approveAsk = vi.fn()
+	task.denyAsk = vi.fn()
+	task.handleWebviewAskResponse = vi.fn()
+	return task
+}
+
+// The merged API creates editor tabs through ClineProviderFactory; route the factory's
+// createInNewTab through the registerCommands mock so the tab-creation assertions keep
+// exercising the same seam (payload and resolved provider).
+const makeTabCreatingFactory = (provider: { context: unknown }, channel: unknown) => {
+	const factory = makeClineProviderFactory()
+	factory.createInNewTab = vi
+		.fn()
+		.mockImplementation(async () => openClineInNewTabMock({ context: provider.context, outputChannel: channel }))
+	return factory
+}
+describe("API task controls", () => {
+	let outputChannel: vscode.OutputChannel
+	let sidebarProvider: ProviderDouble
+	let api: API
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		sidebarProvider = createProvider("sidebar-task")
+		api = new API(
+			outputChannel,
+			asClineProvider(sidebarProvider),
+			makeTabCreatingFactory(sidebarProvider, outputChannel),
+		)
+	})
+
+	describe("startNewTask", () => {
+		// The readiness tests below switch to fake timers. An awaited advance that rejects
+		// skips the restore in its own finally, and a leaked fake clock makes every later test
+		// that awaits a real setTimeout wait for a tick that never arrives. Restore
+		// unconditionally so a leak cannot leave this describe.
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+		it("reverts and closes existing editors before opening a new tab unless preserveOpenTabs is true", async () => {
+			const newTabProvider = createProvider("new-tab-task")
+			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+
+			const taskId = await api.startNewTask({ configuration, text: "new task", newTab: true })
+
+			expect(taskId).toBe("new-tab-task")
+			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(1, "workbench.action.files.revert")
+			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(2, "workbench.action.closeAllEditors")
+			expect(openClineInNewTabMock).toHaveBeenCalledWith({
+				context: sidebarProvider.context,
+				outputChannel,
+			})
+			expect(newTabProvider.evictCurrentTask).toHaveBeenCalledOnce()
+			expect(newTabProvider.createTask).toHaveBeenCalledWith(
+				"new task",
+				undefined,
+				undefined,
+				{
+					consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+					toolRepetitionSoftLimit: 0,
+					segments: [{ source: "user", text: "new task" }],
+				},
+				configuration,
+			)
+		})
+
+		it("opens a new tab without revert or close commands when preserveOpenTabs is true", async () => {
+			const newTabProvider = createProvider("preserved-tab-task")
+			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+
+			const taskId = await api.startNewTask({
+				configuration,
+				text: "keep editors",
+				newTab: true,
+				preserveOpenTabs: true,
+			})
+
+			expect(taskId).toBe("preserved-tab-task")
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+			expect(openClineInNewTabMock).toHaveBeenCalledWith({
+				context: sidebarProvider.context,
+				outputChannel,
+			})
+			expect(newTabProvider.createTask).toHaveBeenCalledWith(
+				"keep editors",
+				undefined,
+				undefined,
+				{
+					consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+					toolRepetitionSoftLimit: 0,
+					segments: [{ source: "user", text: "keep editors" }],
+				},
+				configuration,
+			)
+		})
+
+		it("fails task creation when the view state is not ready within the readiness bound", async () => {
+			// A readiness promise that never settles: the bound must reject task creation
+			// instead of letting createTask run against stale shared defaults. Fake timers keep
+			// the assertion from paying the whole 3000 ms bound on the wall clock.
+			vi.useFakeTimers()
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "new task" })
+			// Attach the rejection handler before advancing: with fake timers the bound fires
+			// during the advance, and a handler attached afterwards would see the rejection
+			// briefly unhandled.
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			await vi.advanceTimersByTimeAsync(3000)
+
+			try {
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
+			vi.useFakeTimers()
+			let resolveReady!: () => void
+			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
+				resolveReady = resolve
+			})
+
+			const started = api.startNewTask({ configuration, text: "ready task" })
+			await vi.advanceTimersByTimeAsync(50)
+			resolveReady()
+
+			try {
+				await expect(started).resolves.toBe("sidebar-task")
+				// The readiness bound's timer must be gone once readiness wins: a live timer
+				// would later reject an unawaited promise and surface as an unhandled
+				// rejection.
+				expect(vi.getTimerCount()).toBe(0)
+				// No late rejection can fire after the bound either.
+				await vi.advanceTimersByTimeAsync(3000)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("continues with the shared-state fallback when the webview never launches", async () => {
+			// Headless API callers create tasks without ever launching a webview: the
+			// readiness bound expiring must not reject them - the pre-existing
+			// shared-state fallback still applies.
+			vi.useFakeTimers()
+			sidebarProvider.viewLaunched = false
+			sidebarProvider.hasResolvedView = false
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "headless task" })
+			// No timer advance: the headless fast path must not wait for the readiness bound at
+			// all. Advancing here would let a regression back into the timeout fallback pass.
+
+			try {
+				await expect(started).resolves.toBe("sidebar-task")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("still rejects when the webview launched but the readiness bound expires", async () => {
+			// A launched view whose readiness never settles is a real failure: the
+			// task must not consume shared defaults behind a live view.
+			vi.useFakeTimers()
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "stuck view task" })
+			// Attach the rejection handler before advancing: with fake timers the
+			// bound fires during the advance, and a handler attached afterwards would
+			// see the rejection briefly unhandled.
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			await vi.advanceTimersByTimeAsync(3000)
+
+			try {
+				await settled
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("waits on readiness when only the resolved-view flag is set", async () => {
+			// Every term of the barrier condition must be load-bearing on its own: with only this
+			// flag true a webview exists, so the bound is a real failure condition and the task
+			// must not be created against the shared defaults while readiness is pending.
+			vi.useFakeTimers()
+			sidebarProvider.viewLaunched = false
+			sidebarProvider.hasResolvedView = true
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "resolved view task" })
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			try {
+				await vi.advanceTimersByTimeAsync(50)
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(2950)
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("waits on readiness when only the launch flag is set", async () => {
+			// A launch message alone proves a webview exists even when the view reference was
+			// cleared, so this term keeps the barrier on its own.
+			vi.useFakeTimers()
+			sidebarProvider.viewLaunched = true
+			sidebarProvider.hasResolvedView = false
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "launched view task" })
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			try {
+				await vi.advanceTimersByTimeAsync(50)
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(2950)
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("waits on readiness when only the new-tab flag is set", async () => {
+			// Both view flags are false on a freshly created tab, so this term alone must hold
+			// the barrier: the tab always creates a view, and creating the task before that
+			// view registered its state would start it against shared defaults.
+			vi.useFakeTimers()
+			const newTabProvider = createProvider("new-tab-unready-task")
+			newTabProvider.viewLaunched = false
+			newTabProvider.hasResolvedView = false
+			newTabProvider.viewStateReadiness = new Promise<void>(() => {})
+			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+
+			const started = api.startNewTask({ configuration, text: "unready tab task", newTab: true })
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			try {
+				await vi.advanceTimersByTimeAsync(50)
+				expect(newTabProvider.createTask).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(2950)
+				await settled
+				expect(newTabProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("fails task creation when the provider is disposed while the view is being prepared", async () => {
+			// The readiness-stage check has already passed by the time the state posts run, and a
+			// post against a closed tab resolves without delivering anything: createTask must
+			// not build and register a task on a provider that can no longer deliver it.
+			sidebarProvider.postStateToWebview = vi.fn().mockImplementation(async () => {
+				// The tab closes while the state is being posted to it.
+				sidebarProvider.isDisposed = true
+			})
+
+			await expect(api.startNewTask({ configuration, text: "closed tab task" })).rejects.toThrow(
+				"The provider was disposed while preparing the view for a new task",
+			)
+			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+		})
+		it("fails task creation when the provider is disposed while the readiness wait is pending", async () => {
+			// Disposal resolves viewStateReadiness to release waiters (see ClineProvider.dispose)
+			// and marks the provider disposed first: the wait must then fail instead of
+			// creating a task against the disposed view.
+			vi.useFakeTimers()
+			let resolveReady!: () => void
+			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
+				resolveReady = resolve
+			})
+
+			const started = api.startNewTask({ configuration, text: "new task" })
+			const settled = expect(started).rejects.toThrow(
+				"The provider was disposed while waiting for the view state to become ready",
+			)
+			try {
+				// The readiness bound arms exactly one timer when the wait is entered, so an
+				// armed timer proves the wait started; elapsed wall-clock time does not.
+				await vi.advanceTimersByTimeAsync(0)
+				expect(vi.getTimerCount()).toBe(1)
+				sidebarProvider.isDisposed = true
+				resolveReady()
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+	})
+
+	describe("task ask registry", () => {
+		it("returns false when approving an unknown task", async () => {
+			await expect(api.approveTaskAsk("missing-task")).resolves.toBe(false)
+		})
+
+		it("registers tasks on TaskCreated and approves a task by id", async () => {
+			const task = createTask("task-to-approve")
+
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			await expect(api.approveTaskAsk(task.taskId)).resolves.toBe(true)
+			expect(task.approveAsk).toHaveBeenCalledOnce()
+		})
+		it("denies a registered task by id", async () => {
+			const task = createTask("task-to-deny")
+
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			await expect(api.denyTaskAsk(task.taskId)).resolves.toBe(true)
+			expect(task.denyAsk).toHaveBeenCalledOnce()
+		})
+
+		it("returns false when denying an unknown or de-registered task", async () => {
+			const task = createTask("task-denied-lifecycle")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+			task.emit(RooCodeEventName.TaskCompleted, task.taskId, {}, {})
+
+			// Unknown id, and an id whose registry entry was removed on completion.
+			await expect(api.denyTaskAsk("missing-task")).resolves.toBe(false)
+			await expect(api.denyTaskAsk(task.taskId)).resolves.toBe(false)
+		})
+
+		it("removes completed, aborted, and unfocused tasks from the registry", async () => {
+			const completedTask = createTask("completed-task")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, completedTask)
+			completedTask.emit(RooCodeEventName.TaskCompleted, completedTask.taskId, {}, {})
+
+			await expect(api.approveTaskAsk(completedTask.taskId)).resolves.toBe(false)
+
+			const abortedTask = createTask("aborted-task")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, abortedTask)
+			abortedTask.emit(RooCodeEventName.TaskAborted)
+
+			await expect(api.approveTaskAsk(abortedTask.taskId)).resolves.toBe(false)
+
+			const unfocusedTask = createTask("unfocused-task")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, unfocusedTask)
+			unfocusedTask.emit(RooCodeEventName.TaskUnfocused)
+
+			await expect(api.approveTaskAsk(unfocusedTask.taskId)).resolves.toBe(false)
+		})
+
+		it("ignores a late teardown event after the registry entry was already removed", async () => {
+			const task = createTask("late-teardown-task")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+			task.emit(RooCodeEventName.TaskCompleted, task.taskId, {}, {})
+
+			// The completed event already removed the entry. A late duplicate teardown event
+			// must be a silent no-op, not a crash on the missing entry.
+			expect(() => task.emit(RooCodeEventName.TaskAborted)).not.toThrow()
+			await expect(api.approveTaskAsk(task.taskId)).resolves.toBe(false)
+		})
+
+		it("re-emits TaskStarted and records it in the message log for a registered task", async () => {
+			// The per-task TaskStarted listener re-emits the event on the API and records it
+			// through fileLog: spy on the prototype so the message content is observable
+			// (fileLog is a no-op without the enableLogging flag).
+			// fileLog is private: target the spy on the prototype shape directly; the
+			// `"fileLog" as keyof API` cast pushes the spyOn overload union past the
+			// compiler complexity ceiling after the setConfiguration queue landed.
+			const fileLogSpy = vi
+				.spyOn(API.prototype as unknown as { fileLog: (message: string) => Promise<void> }, "fileLog")
+				.mockResolvedValue(undefined)
+			const task = createTask("task-to-start")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			const started = new Promise<string>((resolve) => {
+				api.once(RooCodeEventName.TaskStarted, (taskId: string) => resolve(taskId))
+			})
+			task.emit(RooCodeEventName.TaskStarted)
+
+			await expect(started).resolves.toBe("task-to-start")
+			expect(fileLogSpy).toHaveBeenCalledWith(expect.stringContaining("taskStarted -> task-to-start"))
+			fileLogSpy.mockRestore()
+		})
+	})
+
+	describe("selectTaskFollowupSuggestion", () => {
+		it("returns false when the task is unknown", async () => {
+			await expect(
+				api.selectTaskFollowupSuggestion({ taskId: "missing-task", answer: "Use this" }),
+			).resolves.toBe(false)
+		})
+
+		it("responds to the task without switching modes when no mode is provided", async () => {
+			const task = createTask("task-without-mode")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			await expect(api.selectTaskFollowupSuggestion({ taskId: task.taskId, answer: "Continue" })).resolves.toBe(
+				true,
+			)
+
+			expect(sidebarProvider.getState).not.toHaveBeenCalled()
+			expect(sidebarProvider.handleModeSwitch).not.toHaveBeenCalled()
+			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Continue")
+		})
+
+		it("refuses the answer when the task is torn down while its modes are validated", async () => {
+			// Validating modes awaits a state read. A teardown during that read removes the
+			// registration, and switching the mode on the stale entry would move a replacement
+			// task - or a torn-down one - onto another mode.
+			const task = createTask("task-torn-down-during-validation")
+			let resolveState!: () => void
+			const stateRead = new Promise<Awaited<ReturnType<typeof sidebarProvider.getState>>>((resolve) => {
+				resolveState = () => resolve({ customModes: [] })
+			})
+			sidebarProvider.getState.mockImplementation(() => stateRead)
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			const selecting = api.selectTaskFollowupSuggestion({
+				taskId: task.taskId,
+				answer: "Use architect",
+				mode: "architect",
+			})
+			for (let i = 0; i < 8; i++) {
+				await Promise.resolve()
+			}
+
+			task.emit(RooCodeEventName.TaskAborted)
+			resolveState()
+
+			await expect(selecting).resolves.toBe(false)
+			expect(sidebarProvider.handleModeSwitch).not.toHaveBeenCalled()
+			expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+		})
+
+		it("refuses the answer when the task is torn down during the mode switch", async () => {
+			// The mode switch awaits as well: once the entry is gone the answer belongs to
+			// whoever registers this id next, so it must be reported as not delivered rather
+			// than handed to the captured instance as a success.
+			const task = createTask("task-torn-down-during-switch")
+			let releaseModeSwitch: () => void = () => {}
+			const modeSwitchSettled = new Promise<void>((resolve) => {
+				releaseModeSwitch = resolve
+			})
+			sidebarProvider.handleModeSwitch.mockImplementation(() => modeSwitchSettled)
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			const selecting = api.selectTaskFollowupSuggestion({
+				taskId: task.taskId,
+				answer: "Use architect",
+				mode: "architect",
+			})
+			for (let i = 0; i < 8; i++) {
+				await Promise.resolve()
+			}
+			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
+
+			task.emit(RooCodeEventName.TaskAborted)
+			releaseModeSwitch()
+
+			await expect(selecting).resolves.toBe(false)
+			expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+		})
+		it("switches to a valid built-in mode before responding", async () => {
+			const task = createTask("task-built-in-mode")
+			// Deferred mode switch: the follow-up answer must stay pending while the
+			// switch is, so the assertion below can observe the in-between state.
+			let releaseModeSwitch: () => void = () => {}
+			const modeSwitchSettled = new Promise<void>((resolve) => {
+				releaseModeSwitch = resolve
+			})
+			sidebarProvider.handleModeSwitch.mockImplementation(() => modeSwitchSettled)
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			const selecting = api.selectTaskFollowupSuggestion({
+				taskId: task.taskId,
+				answer: "Use architect",
+				mode: "architect",
+			})
+
+			// Flush microtasks so the flow reaches the (still pending) mode-switch await.
+			for (let i = 0; i < 8; i++) {
+				await Promise.resolve()
+			}
+
+			expect(sidebarProvider.getState).toHaveBeenCalledOnce()
+			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
+			// The mode switch must be awaited before answering: while it is still
+			// pending, the task's ask stays unanswered.
+			expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+
+			releaseModeSwitch()
+			await expect(selecting).resolves.toBe(true)
+			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Use architect")
+		})
+
+		it("responds without switching modes and logs when the requested mode is invalid", async () => {
+			const task = createTask("task-invalid-mode")
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+				undefined,
+				true,
+			)
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			await expect(
+				api.selectTaskFollowupSuggestion({ taskId: task.taskId, answer: "Use invalid", mode: "not-a-mode" }),
+			).resolves.toBe(true)
+
+			expect(sidebarProvider.getState).toHaveBeenCalledOnce()
+			expect(sidebarProvider.handleModeSwitch).not.toHaveBeenCalled()
+			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Use invalid")
+			expect(outputChannel.appendLine).toHaveBeenCalledWith(
+				'[API#selectTaskFollowupSuggestion] ignoring unknown mode "not-a-mode" for task task-invalid-mode',
+			)
+		})
+
+		it("treats custom modes from the task provider state as valid", async () => {
+			const task = createTask("task-custom-mode")
+			const customMode: ModeConfig = {
+				slug: "custom-review",
+				name: "Custom Review",
+				roleDefinition: "Review the implementation",
+				groups: ["read"],
+			}
+			sidebarProvider.getState.mockResolvedValue({ customModes: [customMode] })
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			await expect(
+				api.selectTaskFollowupSuggestion({ taskId: task.taskId, answer: "Review it", mode: customMode.slug }),
+			).resolves.toBe(true)
+
+			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith(customMode.slug, task)
+			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Review it")
+		})
+	})
+})
+
+describe("API task controls - per-view review fixes", () => {
+	let outputChannel: vscode.OutputChannel
+	let sidebarProvider: ProviderDouble
+	let api: API
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		sidebarProvider = createProvider("sidebar-task")
+		api = new API(
+			outputChannel,
+			asClineProvider(sidebarProvider),
+			makeTabCreatingFactory(sidebarProvider, outputChannel),
+		)
+	})
+
+	it("keeps the new registration when a replaced task instance tears down", async () => {
+		const staleTask = createTask("replaced-task")
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, staleTask)
+
+		// A new instance reusing the same taskId replaces the stale registration.
+		const freshTask = createTask("replaced-task")
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, freshTask)
+
+		// The stale instance teardown must not drop the new registration.
+		staleTask.emit(RooCodeEventName.TaskAborted)
+		await expect(api.approveTaskAsk("replaced-task")).resolves.toBe(true)
+
+		freshTask.emit(RooCodeEventName.TaskUnfocused)
+		await expect(api.approveTaskAsk("replaced-task")).resolves.toBe(false)
+	})
+
+	it("still delivers the follow-up answer when the mode switch fails", async () => {
+		const task = createTask("task-failing-switch")
+		api = new API(
+			outputChannel,
+			asClineProvider(sidebarProvider),
+			makeTabCreatingFactory(sidebarProvider, outputChannel),
+			undefined,
+			true,
+		)
+		sidebarProvider.handleModeSwitch.mockRejectedValueOnce(new Error("persist failed"))
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+		await expect(
+			api.selectTaskFollowupSuggestion({ taskId: task.taskId, answer: "Deliver anyway", mode: "architect" }),
+		).resolves.toBe(true)
+
+		expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
+		expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Deliver anyway")
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			"[API#selectTaskFollowupSuggestion] mode switch failed for task task-failing-switch: persist failed",
+		)
+	})
+
+	describe("test-only API production guard", () => {
+		function withProductionContext() {
+			return {
+				extensionMode: vscode.ExtensionMode.Production,
+				globalState: { get: vi.fn() },
+			}
+		}
+
+		it("rejects the task ask and global-state surface in production mode", async () => {
+			sidebarProvider.context = withProductionContext()
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
+
+			// Pin the method name in each message: the guard builds the error from the
+			// method argument, and a partial match would leave the argument untested.
+			await expect(api.approveTaskAsk("task-1")).rejects.toThrow("approveTaskAsk is a test-only API")
+			await expect(api.denyTaskAsk("task-1")).rejects.toThrow("denyTaskAsk is a test-only API")
+			await expect(api.selectTaskFollowupSuggestion({ taskId: "task-1", answer: "yes" })).rejects.toThrow(
+				"selectTaskFollowupSuggestion is a test-only API",
+			)
+			expect(() => api.getGlobalState("mode")).toThrow("getGlobalState is a test-only API")
+			// setGlobalState is async: the guard rejects instead of throwing synchronously.
+			await expect(api.setGlobalState("mode", "ask")).rejects.toThrow("setGlobalState is a test-only API")
+		})
+
+		it("keeps the task ask and global-state surface available outside production mode", async () => {
+			const get = vi.fn().mockReturnValue("code")
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
+
+			expect(api.getGlobalState("mode")).toBe("code")
+			expect(get).toHaveBeenCalledWith("mode")
+			await api.setGlobalState("mode", "ask")
+			expect(update).toHaveBeenCalledWith("mode", "ask")
+			await expect(api.approveTaskAsk("missing-task")).resolves.toBe(false)
+		})
+
+		it("rejects PII keys and malformed values before touching global-state storage", async () => {
+			const get = vi.fn().mockReturnValue("stored")
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
+
+			// Task history carries user PII and stays unreachable even though it is a
+			// plain GlobalState key.
+			expect(() => api.getGlobalState("taskHistory")).toThrow("PII-bearing key")
+			await expect(api.setGlobalState("taskHistory", [])).rejects.toThrow("PII-bearing key")
+			// Values are runtime data: a malformed value is rejected before storage.
+			await expect(api.setGlobalState("alwaysAllowWrite", {} as never)).rejects.toThrow("invalid value for key")
+			// Provider-settings keys have no global-settings schema entry.
+			await expect(api.setGlobalState("apiModelId", "x")).rejects.toThrow("without a value schema")
+			expect(update).not.toHaveBeenCalled()
+			expect(get).not.toHaveBeenCalled()
+			// An allowed key with a valid value still works.
+			await api.setGlobalState("mode", "ask")
+			expect(update).toHaveBeenCalledWith("mode", "ask")
+			// Non-strict object schemas strip unknown fields only in the parsed
+			// value: the API must persist the parsed data, not the raw payload.
+			await api.setGlobalState("viewStates", {
+				"view-a": { mode: "debug", apiKey: "stray-secret" },
+			} as never)
+			expect(update).toHaveBeenLastCalledWith("viewStates", { "view-a": { mode: "debug" } })
+		})
+		const credentialFixtures = [
+			{ key: "zooSessionToken", value: "x" },
+			{ key: "openAiHeaders", value: { Authorization: "Bearer x" } },
+		] as const
+
+		// Each case needs its own doubles. The point of the table is that a failure on one
+		// credential reports itself and leaves the other credential reporting on its own,
+		// which shared doubles would spoil; the helper therefore returns fresh doubles and
+		// installs a fresh API on each call rather than handing back a shared pair.
+		const makeStorageHarness = () => {
+			const get = vi.fn().mockReturnValue("stored")
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
+			return { get, update }
+		}
+
+		it.each(credentialFixtures)(
+			"refuses $key on both directions before storage sees it",
+			async ({ key, value }) => {
+				const { get, update } = makeStorageHarness()
+
+				// Both fixtures are provider-settings keys, so they survive the secret-state
+				// omission that defines GlobalState, and neither has an entry in the
+				// global-settings shape. The credential check is therefore the only thing that
+				// refuses them by name. With that check removed both calls are still refused,
+				// but by the value-schema guard further down and with different text, so the
+				// assertions below pin rejection by the credential check before value-schema
+				// lookup; the exact wording is what tells those two guards apart, which is why
+				// it is kept rather than relaxed to a shapeless rejection check.
+				expect(() => api.getGlobalState(key)).toThrow("credential-bearing key")
+				await expect(api.setGlobalState(key, value)).rejects.toThrow("credential-bearing key")
+				expect(get).not.toHaveBeenCalled()
+				expect(update).not.toHaveBeenCalled()
+				// Control on the same doubles: a non-credential key still reaches storage on both
+				// directions, so a refusal here is evidence about the key and not about a surface
+				// that rejects everything.
+				expect(api.getGlobalState("mode")).toBe("stored")
+				await api.setGlobalState("mode", "ask")
+				expect(get).toHaveBeenCalledWith("mode")
+				expect(update).toHaveBeenCalledWith("mode", "ask")
+			},
+		)
+
+		it("refuses a key outside the settings schema on both directions before storage sees it", async () => {
+			const { get, update } = makeStorageHarness()
+
+			// The generic constrains typed callers only: a crafted runtime key can be any
+			// string, which is why the key check is a runtime check on GLOBAL_STATE_KEYS.
+			// The as never below is the single assertion that lets the test hand the API a
+			// key no typed caller could name, mirroring the malformed-value cases above. The
+			// value needs the same assertion once the key is never, because the value
+			// parameter is then indexed by never.
+			expect(() => api.getGlobalState("notARealKey" as never)).toThrow("outside the settings schema")
+			await expect(api.setGlobalState("notARealKey" as never, "x" as never)).rejects.toThrow(
+				"outside the settings schema",
+			)
+			expect(get).not.toHaveBeenCalled()
+			expect(update).not.toHaveBeenCalled()
+			// A sibling key that is absent from the schema for a different reason - a
+			// provider setting with no value schema - is refused by that later guard,
+			// so this row pins the schema guard specifically and not the refusal itself.
+			await expect(api.setGlobalState("apiModelId", "x")).rejects.toThrow("without a value schema")
+			expect(update).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("startNewTask view-state readiness", () => {
+		it("waits for the provider view state to load before creating the task", async () => {
+			let resolveReadiness: () => void = () => {}
+			const readiness = new Promise<void>((resolve) => {
+				resolveReadiness = resolve
+			})
+			const newTabProvider = createProvider("new-tab-task")
+			newTabProvider.viewStateReadiness = readiness
+			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+
+			vi.useFakeTimers()
+			const started = api.startNewTask({ configuration, text: "wait for view state", newTab: true })
+
+			try {
+				// The task must not start while the view persisted state is still loading, and
+				// the bound's armed timer is what proves the wait was entered.
+				await vi.advanceTimersByTimeAsync(0)
+				expect(vi.getTimerCount()).toBe(1)
+				expect(newTabProvider.createTask).not.toHaveBeenCalled()
+
+				resolveReadiness()
+
+				await expect(started).resolves.toBe("new-tab-task")
+				expect(newTabProvider.createTask).toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+	})
+
+	describe("startNewTask listener idempotency", () => {
+		it("registers provider listeners once when the same provider is reused", async () => {
+			const sharedProvider = createProvider("shared-task")
+			openClineInNewTabMock.mockResolvedValue(sharedProvider)
+
+			await api.startNewTask({ configuration, text: "one", newTab: true })
+			await api.startNewTask({ configuration, text: "two", newTab: true })
+
+			// Re-registering the same provider must not stack duplicate listeners.
+			expect(sharedProvider.listenerCount(RooCodeEventName.TaskCompleted)).toBe(1)
+
+			let completions = 0
+			api.on(RooCodeEventName.TaskCompleted, () => {
+				completions++
+			})
+			sharedProvider.emit(RooCodeEventName.TaskCompleted, "shared-task")
+
+			expect(completions).toBe(1)
+		})
+	})
+})
