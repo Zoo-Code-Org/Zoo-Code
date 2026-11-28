@@ -144,6 +144,7 @@ import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
+import { projectEnvironmentHistory } from "./projectEnvironmentHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
@@ -5952,7 +5953,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const messagesSinceLastSummary = getMessagesSinceLastSummary(effectiveHistory)
 		// For API only: merge consecutive user messages (excludes summary messages per
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
-		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
+		const projectedHistory = projectEnvironmentHistory(messagesSinceLastSummary)
+		const mergedForApi = mergeConsecutiveApiMessages(projectedHistory, { roles: ["user"] })
 		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
 		const cleanConversationHistory = this.buildCleanConversationHistory(
 			messagesWithoutImages as ApiMessage[],
