@@ -1888,6 +1888,73 @@ describe("OpenAiCodexHandler.createMessage abort bridging", () => {
 		await expect(collectStream(iter)).rejects.toThrow(/connectionFailed|stream torn down/)
 		expect(captureException).toHaveBeenCalledTimes(2)
 	})
+
+	// The bridge registers on the caller's long-lived signal, so a request that finishes
+	// normally has to detach it: a listener left behind retains this request's controller for
+	// as long as that signal lives, which is every completed request rather than the one in
+	// flight.
+	it("detaches the caller's abort listener when the stream completes", async () => {
+		const handler = createHandler()
+		const caller = new AbortController()
+		const addSpy = vitest.spyOn(caller.signal, "addEventListener")
+		const removeSpy = vitest.spyOn(caller.signal, "removeEventListener")
+		const create = vitest.fn().mockResolvedValue(createCompletedStream())
+		Reflect.set(handler, "client", { responses: { create } })
+
+		await collectStream(
+			handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+				taskId: "task-test",
+				abortSignal: caller.signal,
+			}),
+		)
+
+		// Every listener this request attached to the caller's signal must be detached again:
+		// the race on the token lookup and the bridge both register on it.
+		const added = addSpy.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+		const detached = removeSpy.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+		expect(added.length).toBeGreaterThan(0)
+		expect(detached).toEqual(expect.arrayContaining(added))
+	})
+
+	// Only the consumer stopping the iteration can end this request: the SDK stream yields
+	// one event and then stays pending. Detaching the caller's listener has to run on that
+	// path too, or the generator that owned the request leaves a listener attached to a
+	// signal that outlives it.
+	it("detaches the caller's abort listener when the consumer stops early", async () => {
+		const handler = createHandler()
+		const caller = new AbortController()
+		const addSpy = vitest.spyOn(caller.signal, "addEventListener")
+		const removeSpy = vitest.spyOn(caller.signal, "removeEventListener")
+		let signalDuringRequest: AbortSignal | undefined
+		const create = vitest.fn().mockImplementation((_body: unknown, options: { signal: AbortSignal }) => {
+			signalDuringRequest = options.signal
+			return Promise.resolve(
+				(async function* () {
+					yield { type: "response.output_text.delta", delta: "first" }
+					await new Promise<never>(() => {})
+				})(),
+			)
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+
+		const iter = handler.createMessage("System", [{ role: "user", content: "Hello" }], {
+			taskId: "task-test",
+			abortSignal: caller.signal,
+		})
+		const first = await iter.next()
+		expect(first.value).toMatchObject({ type: "text", text: "first" })
+		// The transport is handed the request-local controller's signal, never the caller's.
+		expect(signalDuringRequest).toBeInstanceOf(AbortSignal)
+		expect(signalDuringRequest).not.toBe(caller.signal)
+
+		await iter.return(undefined)
+
+		// The consumer stopping early ends the generator, and the detach runs on that path too.
+		const added = addSpy.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+		const detached = removeSpy.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+		expect(added.length).toBeGreaterThan(0)
+		expect(detached).toEqual(expect.arrayContaining(added))
+	})
 })
 
 describe("OpenAiCodexHandler verbosity", () => {
