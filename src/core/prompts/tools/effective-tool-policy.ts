@@ -23,8 +23,8 @@ type EffectiveMcpHub = {
  * route. A model-profile `excludedTools` entry still suppresses the re-add and
  * reaches the runtime requirements, so prompt and validator agree on it too.
  *
- * `attempt_completion` is the only tool with no coherent prompt state when absent
- * (the task loop can only exit through it), so it is the sole protocol entry.
+ * Delegated tasks use `attempt_completion` for parent handoff. Top-level tasks
+ * may also finish with plain text when this tool is unavailable.
  */
 export const PROTOCOL_TOOLS: readonly string[] = ["attempt_completion"]
 

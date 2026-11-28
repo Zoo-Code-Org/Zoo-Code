@@ -105,6 +105,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
+import { attemptCompletionTool } from "../tools/AttemptCompletionTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -3928,6 +3929,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Task Loop
 
+	private async completePlainTextResponse(result: string): Promise<void> {
+		await attemptCompletionTool.execute({ result, alreadyPresented: true }, this, {
+			toolCallId: "",
+			askApproval: async () => false,
+			askFinishSubTaskApproval: async () => false,
+			toolDescription: () => "plain response",
+			pushToolResult: (content) => {
+				this.userMessageContent.push(
+					...(typeof content === "string" ? [{ type: "text" as const, text: content }] : content),
+				)
+			},
+			handleError: async (action, error) => {
+				await this.say("error", `Error ${action}: ${error.message}`)
+				this.userMessageContent.push({ type: "text", text: `Error ${action}: ${error.message}. Please retry.` })
+			},
+		})
+	}
+
 	/**
 	 * Builds the content blocks for user input. Only user segments expand mentions.
 	 * A slash command in the input can switch the mode.
@@ -3982,20 +4001,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails)
 			includeFileDetails = false // We only need file details the first time.
 
-			// The way this agentic loop works is that cline will be given a
-			// task that he then calls tools to complete. Unless there's an
-			// attempt_completion call, we keep responding back to him with his
-			// tool's responses until he either attempt_completion or does not
-			// use anymore tools. If he does not use anymore tools, we ask him
-			// to consider if he's completed the task and then call
-			// attempt_completion, otherwise proceed with completing the task.
+			// Tool results continue the loop; a plain final answer or
+			// attempt_completion presents a completion for user review.
 			// There is a MAX_REQUESTS_PER_TASK limit to prevent infinite
 			// requests, but Cline is prompted to finish the task as efficiently
 			// as he can.
 
 			if (didEndLoop) {
-				// For now a task never 'completes'. This will only happen if
-				// the user hits max requests and denies resetting the count.
+				// Completion approval ends the active loop.
 				break
 			} else {
 				nextUserContent = [{ type: "text", text: formatResponse.noToolsUsed() }]
@@ -5204,12 +5217,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						)
 					}
 
-					// If the model did not tool use, then we need to tell it to
-					// either use a tool or attempt_completion.
+					// A visible plain response can complete a top-level task. Subtasks
+					// retain their explicit finish tool and delegated approval flow.
 					const didToolUse = this.assistantMessageContent.some(
 						(block) => block.type === "tool_use" || block.type === "mcp_tool_use",
 					)
 
+					if (!didToolUse && assistantMessage.trim() && !this.parentTaskId) {
+						await this.completePlainTextResponse(assistantMessage.trim())
+						if (this.userMessageContent.length === 0) return true
+						stack.push({ userContent: [...this.userMessageContent], includeFileDetails: false })
+						continue
+					}
 					if (!didToolUse) {
 						// Increment consecutive no-tool-use counter
 						this.consecutiveNoToolUseCount++
@@ -6445,7 +6464,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * since the last installment, so idle/shutdown checks don't emit empty events
 	 * for tasks that were already fully reported (e.g. right after attempt_completion).
 	 */
-	public flushTelemetryInstallment(reason: "attempt_completion" | "idle" | "shutdown"): void {
+	public flushTelemetryInstallment(reason: "attempt_completion" | "plain_text" | "idle" | "shutdown"): void {
 		const toolUsageDelta: ToolUsage = {}
 
 		for (const [toolName, usage] of Object.entries(this.toolUsage) as [ToolName, ToolUsage[ToolName]][]) {

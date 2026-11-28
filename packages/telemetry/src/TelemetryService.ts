@@ -201,7 +201,7 @@ export class TelemetryService {
 		taskId: string,
 		toolsUsed?: ToolUsage,
 		messageCount?: { user: number; assistant: number },
-		completionReason: "attempt_completion" | "idle" | "shutdown" = "attempt_completion",
+		completionReason: "attempt_completion" | "plain_text" | "idle" | "shutdown" = "attempt_completion",
 	): void {
 		this.captureEvent(TelemetryEventName.TASK_COMPLETED, {
 			taskId,

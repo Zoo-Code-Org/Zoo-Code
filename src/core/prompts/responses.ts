@@ -65,7 +65,7 @@ export const formatResponse = {
 	noToolsUsed: () => {
 		const instructions = getToolInstructionsReminder()
 
-		return `[ERROR] You did not use a tool in your previous response! Please retry with a tool use.
+		return `[ERROR] The delegated task needs a tool call to continue. Please retry with a tool use.
 
 ${instructions}
 
