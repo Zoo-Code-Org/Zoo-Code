@@ -20,6 +20,7 @@ import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 import { resolveCacheTtl } from "../transform/caching/ttl"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 import type {
 	SingleCompletionHandler,
@@ -29,7 +30,8 @@ import type {
 } from "../index"
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
-import { getZooGatewayModels } from "./fetchers/zoo-gateway"
+import { AuthScopedCatalogObsoleteError } from "./fetchers/modelCache"
+import { getZooGatewayModels, ZooGatewayModelsUnauthorizedError } from "./fetchers/zoo-gateway"
 import {
 	bridgeExternalAbortSignal,
 	createAbortError,
@@ -194,8 +196,43 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		return { urlScoped: true, keyScoped: true, authScoped: true }
 	}
 
+	override getModel() {
+		const model = super.getModel()
+		// Anthropic thinking is signature-based. Other gateway models reject the next
+		// turn unless the previous assistant reasoning is still on the request.
+		if (model.id.startsWith("anthropic/")) {
+			return model
+		}
+		return { ...model, info: { ...model.info, preserveReasoning: true } }
+	}
+
+	// Catalog discovery only supplies model metadata. If it fails, send the request with the
+	// configured model and fallback metadata instead of blocking inference. A rejected session
+	// and cancellation still surface.
+	private async fetchModelForRequest() {
+		try {
+			return await this.fetchModel()
+		} catch (error) {
+			if (
+				error instanceof ZooGatewayModelsUnauthorizedError ||
+				error instanceof AuthScopedCatalogObsoleteError ||
+				isRequestAborted(error)
+			) {
+				throw error
+			}
+			console.error(
+				`[ZooGateway] Model catalog unavailable, using fallback metadata: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return this.getModel()
+		}
+	}
+
 	async fetchModels(options: GetModelsOptions): Promise<ModelRecord> {
-		return getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+		const result = await getZooGatewayModels({
+			zooSessionToken: options.apiKey,
+			zooGatewayBaseUrl: options.baseUrl,
+		})
+		return result.kind === "ok" ? result.models : {}
 	}
 
 	private ensureAuthenticated(): void {
@@ -211,7 +248,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 	): ApiStream {
 		this.ensureAuthenticated()
 
-		const { id: modelId, info } = await this.fetchModel()
+		const { id: modelId, info } = await this.fetchModelForRequest()
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -261,6 +298,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 
 				const delta = chunk.choices[0]?.delta
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
 				if (delta?.content) {
 					yield {
 						type: "text",
@@ -323,8 +366,8 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			let model: Awaited<ReturnType<ZooGatewayHandler["fetchModel"]>>
 			try {
 				model = requestAbortSignal
-					? await rejectOnAbort(this.fetchModel(), requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
-					: await this.fetchModel()
+					? await rejectOnAbort(this.fetchModelForRequest(), requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
+					: await this.fetchModelForRequest()
 			} catch (error) {
 				if (isRequestAborted(error, requestAbortSignal)) {
 					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)

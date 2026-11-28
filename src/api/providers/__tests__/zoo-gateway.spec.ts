@@ -77,6 +77,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 		return Promise.resolve(DEFAULT_MODEL_CATALOG)
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
+	AuthScopedCatalogObsoleteError: class AuthScopedCatalogObsoleteError extends Error {
+		override name = "AuthScopedCatalogObsoleteError"
+	},
 }))
 
 const mockGetCachedZooCodeToken = vitest.hoisted(() => vitest.fn<() => string | undefined>(() => undefined))
@@ -457,6 +460,83 @@ describe("ZooGatewayHandler", () => {
 			])
 		})
 
+		it("yields reasoning chunks from delta.reasoning and delta.reasoning_content before text", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { reasoning: "Let me think" }, index: 0 }],
+					},
+					{
+						choices: [{ delta: { reasoning_content: " carefully", content: "answer" }, index: 0 }],
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const chunks = await collectStream(handler.createMessage("prompt", [{ role: "user", content: "Hi" }]))
+
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "Let me think" },
+				{ type: "reasoning", text: " carefully" },
+				{ type: "text", text: "answer" },
+			])
+		})
+
+		it("preserves reasoning on follow-up requests for non-Anthropic models", () => {
+			const handler = new ZooGatewayHandler({ ...mockOptions, zooGatewayModelId: "reflection/beam-free" })
+
+			expect(handler.getModel().info.preserveReasoning).toBe(true)
+		})
+
+		it("leaves Anthropic models on their existing thinking path", () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			expect(handler.getModel().info.preserveReasoning).toBeUndefined()
+		})
+
+		it("sends reasoning_content on the follow-up request when history has a reasoning block", async () => {
+			mockCreate.mockImplementation(async () => asyncStreamFrom([]))
+			const handler = new ZooGatewayHandler({ ...mockOptions, zooGatewayModelId: "reflection/beam-free" })
+			const history = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning" as const, text: "I need to read a file.", summary: [] },
+						{ type: "tool_use" as const, id: "call_abc", name: "read_file", input: { path: "foo.txt" } },
+					],
+				},
+				{
+					role: "user" as const,
+					content: [{ type: "tool_result" as const, tool_use_id: "call_abc", content: "file contents" }],
+				},
+			] as unknown as Parameters<ZooGatewayHandler["createMessage"]>[1]
+
+			await handler.createMessage("prompt", history).next()
+
+			const assistant = mockCreate.mock.calls[0][0].messages.find(
+				(message: { role?: string }) => message.role === "assistant",
+			)
+			expect(assistant.reasoning_content).toBe("I need to read a file.")
+			expect(assistant.tool_calls[0].id).toBe("call_abc")
+			expect(assistant.tool_calls[0].function.name).toBe("read_file")
+		})
+
+		it("does not yield a reasoning chunk when the delta has no reasoning text", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "just text" }, index: 0 }],
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const chunks = await collectStream(handler.createMessage("prompt", [{ role: "user", content: "Hi" }]))
+
+			expect(chunks).toEqual([{ type: "text", text: "just text" }])
+			expect(chunks.some((chunk) => chunk.type === "reasoning")).toBe(false)
+		})
+
 		it("throws the upstream reason when the gateway sends an in-stream error chunk", async () => {
 			mockCreate.mockImplementation(async () =>
 				asyncStreamFrom([
@@ -582,16 +662,69 @@ describe("ZooGatewayHandler", () => {
 			},
 		)
 
-		it("keeps an ordinary model lookup failure while the caller signal is live", async () => {
+		it("sends the request with fallback metadata when the model catalog is unavailable", async () => {
 			const { getModels, refreshModels } = await import("../fetchers/modelCache")
 			const lookupFailure = new Error("model catalog unavailable")
 			vitest.mocked(getModels).mockRejectedValue(lookupFailure)
 			vitest.mocked(refreshModels).mockRejectedValue(lookupFailure)
 			const handler = new ZooGatewayHandler(mockOptions)
 
-			await expect(handler.completePrompt("Test", { abortSignal: new AbortController().signal })).rejects.toBe(
-				lookupFailure,
+			await expect(handler.completePrompt("Test", { abortSignal: new AbortController().signal })).resolves.toBe(
+				"Test completion response",
 			)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "anthropic/claude-sonnet-4" }),
+				expect.anything(),
+			)
+		})
+
+		it("stops the request when a refresh for a missing model finds a rejected session", async () => {
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
+			const { ZooGatewayModelsUnauthorizedError } = await import("../fetchers/zoo-gateway")
+			const unauthorized = new ZooGatewayModelsUnauthorizedError()
+			// A fresh catalog that does not list the configured model makes fetchModel refresh.
+			vitest
+				.mocked(getModels)
+				.mockResolvedValueOnce({ "other/model": DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"] })
+			vitest.mocked(refreshModels).mockRejectedValueOnce(unauthorized)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(unauthorized)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("stops the request when a refresh for a missing model belongs to a session that ended", async () => {
+			const modelCache = await import("../fetchers/modelCache")
+			const obsolete = new modelCache.AuthScopedCatalogObsoleteError()
+			vitest
+				.mocked(modelCache.getModels)
+				.mockResolvedValueOnce({ "other/model": DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"] })
+			vitest.mocked(modelCache.refreshModels).mockRejectedValueOnce(obsolete)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(obsolete)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("stops the request when the model lookup belongs to a session that ended", async () => {
+			const modelCache = await import("../fetchers/modelCache")
+			const obsolete = new modelCache.AuthScopedCatalogObsoleteError()
+			vitest.mocked(modelCache.getModels).mockRejectedValueOnce(obsolete)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(obsolete)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("still surfaces a rejected session from the model lookup", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			const { ZooGatewayModelsUnauthorizedError } = await import("../fetchers/zoo-gateway")
+			const unauthorized = new ZooGatewayModelsUnauthorizedError()
+			vitest.mocked(getModels).mockRejectedValue(unauthorized)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(unauthorized)
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it.each([

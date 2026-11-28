@@ -60,6 +60,7 @@ const flushModelsMock = vi.fn()
 vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: (...args: any[]) => getModelsMock(...args),
 	flushModels: (...args: any[]) => flushModelsMock(...args),
+	getAuthScopedSessionGeneration: () => 0,
 }))
 
 // Real handlers eagerly fetch models in their constructors, so use lightweight doubles.

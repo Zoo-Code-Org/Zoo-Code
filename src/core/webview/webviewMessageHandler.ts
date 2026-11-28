@@ -99,7 +99,7 @@ import { getWorkspacePath } from "../../utils/path"
 import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Mode, defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler, type ApiHandler } from "../../api"
-import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
+import { getModels, flushModels, getAuthScopedSessionGeneration } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -134,6 +134,11 @@ import {
 
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
+
+// Matched by name so the check holds when modelCache is mocked in tests.
+function isObsoleteCatalogError(error: unknown) {
+	return error instanceof Error && error.name === "AuthScopedCatalogObsoleteError"
+}
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -1446,11 +1451,31 @@ export const webviewMessageHandler = async (
 				? candidates.filter(({ key }) => key === providerFilter)
 				: candidates
 
+			// Zoo Gateway discovery (including a forced refresh) clears the session on 401.
+			// Capture the auth state first so a sign-out caused by this request is pushed below.
+			// A failed secret read means "unknown": it must not block the reply for any provider.
+			const fetchesZooGateway = modelFetchPromises.some(({ key }) => key === providerIdentifiers.zooGateway)
+			const { isZooCodeAuthenticated } = await import("../../services/zoo-code-auth")
+			const readZooAuthenticated = async () => {
+				try {
+					return await isZooCodeAuthenticated()
+				} catch (error) {
+					console.error(
+						`[requestRouterModels] Could not read Zoo sign-in state: ${error instanceof Error ? error.message : String(error)}`,
+					)
+					return undefined
+				}
+			}
+			// Only a confirmed signed-out state skips the refresh below. An unknown state does not.
+			const zooNotSignedOutBefore = fetchesZooGateway && (await readZooAuthenticated()) !== false
+
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
 				await flushModels(targetCandidate.options, handlerFor(apiConfiguration, targetCandidate.key), true)
 			}
+
+			const zooSessionAtStart = getAuthScopedSessionGeneration(providerIdentifiers.zooGateway)
 
 			const results = await Promise.allSettled(
 				modelFetchPromises.map(async ({ key, options }) => {
@@ -1459,34 +1484,92 @@ export const webviewMessageHandler = async (
 				}),
 			)
 
+			const obsoleteResults = new Set<RouterName>()
+			// Errors are posted after the Zoo session check below, so a refetch for a new session
+			// can replace the error of the session that ended.
+			const fetchErrors = new Map<RouterName, string>()
+
 			results.forEach((result, index) => {
 				const routerName = modelFetchPromises[index].key
 
-				if (result.status === "fulfilled") {
+				if (result.status === "rejected" && isObsoleteCatalogError(result.reason)) {
+					obsoleteResults.add(routerName)
+					routerModels[routerName] = {}
+				} else if (result.status === "fulfilled") {
 					routerModels[routerName] = result.value.models
 
 					// Ollama and LM Studio settings pages still need these events. They are not fetched here.
 				} else {
-					// Handle rejection: Post a specific error message for this provider.
 					const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason)
 					console.error(`Error fetching models for ${routerName}:`, result.reason)
 
 					routerModels[routerName] = {} // Ensure it's an empty object in the main routerModels message.
-
-					void provider.postMessageToWebview({
-						type: RouterModelsMessageType.singleRouterModelFetchResponse,
-						success: false,
-						error: errorMessage,
-						values: { provider: routerName },
-					})
+					fetchErrors.set(routerName, errorMessage)
 				}
 			})
 
-			await provider.postMessageToWebview({
-				type: RouterModelsMessageType.routerModels,
-				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
+			// A Zoo result from a session that ended during the request, including one that finished
+			// while slower providers were still loading, must not replace the current session's
+			// catalog. Fetch it once more for the current session right before publishing.
+			const zooCandidate = modelFetchPromises.find(({ key }) => key === providerIdentifiers.zooGateway)
+			const zooIndex = zooCandidate ? modelFetchPromises.indexOf(zooCandidate) : -1
+			const zooSessionChanged =
+				zooIndex !== -1 && getAuthScopedSessionGeneration(providerIdentifiers.zooGateway) !== zooSessionAtStart
+			// A failed request can also be replaced, but only by a session that is signed in now.
+			// After a sign-out (including the clear that a 401 causes) the error stays.
+			const refetchFailedZoo =
+				zooSessionChanged &&
+				fetchErrors.has(providerIdentifiers.zooGateway) &&
+				(await readZooAuthenticated()) === true
+			const refetchZoo =
+				obsoleteResults.has(providerIdentifiers.zooGateway) ||
+				(zooSessionChanged && results[zooIndex].status === "fulfilled") ||
+				refetchFailedZoo
+			if (zooCandidate && refetchZoo) {
+				obsoleteResults.delete(providerIdentifiers.zooGateway)
+				fetchErrors.delete(providerIdentifiers.zooGateway)
+				try {
+					routerModels[providerIdentifiers.zooGateway] = await safeGetModels(
+						zooCandidate.options,
+						handlerFor(apiConfiguration, providerIdentifiers.zooGateway),
+					)
+				} catch (error) {
+					if (isObsoleteCatalogError(error)) {
+						obsoleteResults.add(providerIdentifiers.zooGateway)
+					} else {
+						fetchErrors.set(
+							providerIdentifiers.zooGateway,
+							error instanceof Error ? error.message : String(error),
+						)
+					}
+					routerModels[providerIdentifiers.zooGateway] = {}
+				}
+			}
+
+			fetchErrors.forEach((errorMessage, routerName) => {
+				void provider.postMessageToWebview({
+					type: RouterModelsMessageType.singleRouterModelFetchResponse,
+					success: false,
+					error: errorMessage,
+					values: { provider: routerName },
+				})
 			})
+
+			// If a single-provider result is still obsolete, send nothing. The waiting picker
+			// retries and gets the current session's catalog.
+			if (!(providerFilter && obsoleteResults.has(providerFilter))) {
+				await provider.postMessageToWebview({
+					type: RouterModelsMessageType.routerModels,
+					routerModels,
+					values: providerFilter ? { provider: requestedProvider } : undefined,
+				})
+			}
+
+			// Refresh state so the settings panel shows the sign-in prompt instead of an empty
+			// model list next to "Authenticated".
+			if (zooNotSignedOutBefore && (await readZooAuthenticated()) === false) {
+				await provider.postStateToWebview()
+			}
 			break
 		}
 		case OllamaModelsMessageType.requestOllamaModels: {

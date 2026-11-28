@@ -285,6 +285,7 @@ describe("model catalog adapters", () => {
 			fetcher.mockReset()
 			fetcher.mockResolvedValue(CATALOG)
 		}
+		fetchers.getZooGatewayModels.mockResolvedValue({ kind: "ok", models: CATALOG })
 
 		modelCache.getModels.mockReset()
 		modelCache.getModels.mockImplementation((opts: GetModelsOptions, handler: ApiHandler) =>

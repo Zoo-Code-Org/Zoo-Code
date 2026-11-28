@@ -233,6 +233,8 @@ export class KimiCodeOAuthManager {
 		await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
 		this.credentials = null
 		this.state = { status: "idle" }
+		const { clearAuthSessionModelsForProvider } = await import("../../api/providers/fetchers/modelCache")
+		clearAuthSessionModelsForProvider(providerIdentifiers.kimiCode)
 	}
 
 	async isAuthenticated(): Promise<boolean> {

@@ -317,6 +317,7 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: vi.fn().mockResolvedValue({}),
 	flushModels: vi.fn(),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
+	getAuthScopedSessionGeneration: vi.fn().mockReturnValue(0),
 }))
 
 vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
@@ -330,6 +331,7 @@ vi.mock("../../../services/zoo-code-auth", () => ({
 	handleAuthCallback: vi.fn(),
 	setZooCodeUserInfo: vi.fn(),
 	disconnectZooCode: vi.fn(),
+	isZooCodeAuthenticated: vi.fn().mockResolvedValue(false),
 }))
 
 vi.mock("../../../shared/modes", () => ({
@@ -400,6 +402,7 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: vi.fn().mockResolvedValue({}),
 	flushModels: vi.fn(),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
+	getAuthScopedSessionGeneration: vi.fn().mockReturnValue(0),
 }))
 
 vi.mock("../diff/strategies/multi-search-replace", () => ({

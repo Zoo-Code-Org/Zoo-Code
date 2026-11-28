@@ -3,7 +3,11 @@ import axios from "axios"
 import type { ModelInfo } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../../shared/api"
-import { getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
+import {
+	clearZooCodeTokenIfCurrent,
+	getZooCodeBaseUrl,
+	resolveZooGatewaySessionToken,
+} from "../../../services/zoo-code-auth"
 
 import {
 	type VercelAiGatewayModel,
@@ -15,34 +19,67 @@ import {
 const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
 
 /**
- * getZooGatewayModels
- *
- * Fetches models from the Zoo Gateway API. Requires authentication via the zoo_ext_ token.
+ * Thrown when the gateway rejects the session token. The session is cleared before
+ * this is thrown so the UI can prompt for sign-in instead of showing an empty catalog.
  */
+export class ZooGatewayModelsUnauthorizedError extends Error {
+	constructor() {
+		super("Zoo Gateway session is no longer valid")
+		this.name = "ZooGatewayModelsUnauthorizedError"
+	}
+}
 
-export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export type ZooGatewayModelsFetchResult =
+	{ kind: "ok"; models: Record<string, ModelInfo>; etag?: string } | { kind: "not_modified" }
+
+/**
+ * Fetches models from the Zoo Gateway API. Requires authentication via the zoo_ext_ token.
+ *
+ * Pass `ifNoneMatch` with a previously returned `etag` to revalidate; the result is
+ * `not_modified` when the catalog is unchanged. Returns an empty `ok` catalog when no
+ * session token is available. On 401, clears the session if the rejected token is still
+ * active and throws `ZooGatewayModelsUnauthorizedError`; if a newer session replaced it, the
+ * session is left alone and a sanitized `Error` is thrown. Any other failure throws a
+ * sanitized `Error`.
+ */
+export async function getZooGatewayModels(
+	options?: ApiHandlerOptions & { ifNoneMatch?: string },
+): Promise<ZooGatewayModelsFetchResult> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
 	const sessionToken = resolveZooGatewaySessionToken(options?.zooSessionToken)
 	if (!sessionToken) {
-		return models
+		return { kind: "ok", models }
 	}
 
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${sessionToken}`,
+	}
+	// Stryker disable next-line OptionalChaining,ConditionalExpression: options is defined whenever sessionToken resolved from it
+	if (options?.ifNoneMatch) {
+		headers["If-None-Match"] = options.ifNoneMatch
 	}
 
 	try {
 		const response = await axios.get(`${baseURL}/models`, {
 			headers,
 			timeout: MODEL_DISCOVERY_TIMEOUT_MS,
+			validateStatus: (status) => (status >= 200 && status < 300) || status === 304,
 		})
+
+		if (response.status === 304) {
+			return { kind: "not_modified" }
+		}
+
+		// Stryker disable next-line ConditionalExpression: Node lowercases header names; non-string etag values are ignored
+		const etag = typeof response.headers.etag === "string" ? response.headers.etag : undefined
+
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)
 
 		if (!result.success) {
 			console.error(`Zoo Gateway models response is invalid ${JSON.stringify(result.error.format())}`)
-			return models
+			throw new Error("Zoo Gateway models response is invalid")
 		}
 
 		for (const model of result.data.data) {
@@ -56,21 +93,40 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 
 			models[id] = parseZooGatewayModel({ id, model })
 		}
+
+		return { kind: "ok", models, etag }
 	} catch (error) {
-		// Log only safe fields; never serialize the full error object because it
-		// includes request config/headers which carry the bearer session token.
+		// Log and rethrow only safe fields; never serialize or rethrow the original error
+		// because its request config/headers carry the bearer session token.
 		const err = error as {
 			message?: string
 			name?: string
 			code?: string
 			response?: { status?: number; statusText?: string }
 		}
+		const status = err.response?.status
 		console.error(
-			`Error fetching Zoo Gateway models: name=${err.name ?? "Error"} code=${err.code ?? "unknown"} status=${err.response?.status ?? "unknown"} ${err.response?.statusText ?? ""} message=${err.message ?? "unknown error"}`,
+			`Error fetching Zoo Gateway models: name=${err.name ?? "Error"} code=${err.code ?? "unknown"} status=${status ?? "unknown"} ${err.response?.statusText ?? ""} message=${err.message ?? "unknown error"}`,
 		)
-	}
 
-	return models
+		if (status === 401) {
+			let cleared = true
+			try {
+				cleared = await clearZooCodeTokenIfCurrent(sessionToken)
+			} catch (clearError) {
+				// The session is already invalidated in memory; only persisting the removal failed.
+				console.error(
+					`Failed to remove the rejected Zoo Gateway session from secret storage: ${clearError instanceof Error ? clearError.message : String(clearError)}`,
+				)
+			}
+			if (!cleared) {
+				throw new Error("Zoo Gateway models request used a session that was replaced")
+			}
+			throw new ZooGatewayModelsUnauthorizedError()
+		}
+
+		throw new Error(`Zoo Gateway models request failed (status=${status ?? "none"} code=${err.code ?? "unknown"})`)
+	}
 }
 
 /**
