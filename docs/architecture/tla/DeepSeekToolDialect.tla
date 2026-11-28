@@ -63,11 +63,16 @@
 \*             literal keyword keeps its schema unrelocated - the map's keys
 \*             are property names, not keywords, so the literal exclusion
 \*             must not suppress relocation there (review 4724111355).
+\* Failure 21: a moved rule's own $ref pointer survives compilation but
+\*             the walk stops at it - the rule's sibling schema maps can
+\*             still carry references through the removed location, and an
+\*             unrelocated sibling pointer dangles after patternProperties
+\*             is deleted (review 4724550474).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
 \*             SatPreserved, SiblingConjunctKept, ArraySatKept,
 \*             MovedRefResolvable, LiteralPreserved, ExpansionBounded,
 \*             MovedRefSiblingOuter, MovedConjunctResolvable,
-\*             MapEntryResolvable.
+\*             MapEntryResolvable, SurvivingRefSiblingResolvable.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
 \* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate, KeepUnevaluated and
@@ -78,7 +83,8 @@
 \* Expect: UnboundedDiamond fails ExpansionBounded. AbsorbRefSibling fails
 \* Expect: MovedRefSiblingOuter. KeepRefConjunct fails
 \* Expect: MovedConjunctResolvable. KeepMapEntryRef fails
-\* Expect: MapEntryResolvable.
+\* Expect: MapEntryResolvable. KeepSurvivingRefSibling fails
+\* Expect: SurvivingRefSiblingResolvable.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -97,14 +103,15 @@
 \* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
 \* regression test for review 4712438384).
 \* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).
-\* Result: Fixed holds in 33554432 states. ForceRequired fails RequiredPreserved.
+\* Result: Fixed holds in 67108864 states. ForceRequired fails RequiredPreserved.
 \* KeepPattern fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded.
 \* NotTighten, KeepOneOf, KeepClosed and KeepConditional each fail
 \* SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. TLC found no state
 \* outside the sabotages. RewriteLiteral fails LiteralPreserved;
 \* UnboundedDiamond fails ExpansionBounded; AbsorbRefSibling fails
 \* MovedRefSiblingOuter; KeepRefConjunct fails MovedConjunctResolvable;
-\* KeepMapEntryRef fails MapEntryResolvable.
+\* KeepMapEntryRef fails MapEntryResolvable; KeepSurvivingRefSibling fails
+\* SurvivingRefSiblingResolvable.
 \* Cost: TLC runs in seconds. Agent time is not measured.
 \* Review: 3 added (4712438380, 4712438393, 4712438405), 1 gap (4712438384
 \* __proto__ own-property semantics are a JS artifact, pinned by the
@@ -135,6 +142,9 @@
 \* MovedConjunctResolvable; a schema-map entry named after a literal
 \* keyword keeps relocating its schema, MapEntryResolvable), 0 covered,
 \* 0 gap.
+\* Round 11 (review 4724550474): 1 added (a surviving reference's sibling
+\* schema maps still relocate, SurvivingRefSiblingResolvable), 0 covered,
+\* 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
@@ -144,7 +154,8 @@ CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "KeepPrefixEvaluator", "KeepUepSchema"
                                   \* or "KeepMovedRef", "RewriteLiteral",
                                   \* "UnboundedDiamond", "AbsorbRefSibling",
-                                  \* "KeepRefConjunct", "KeepMapEntryRef"
+                                  \* "KeepRefConjunct", "KeepMapEntryRef",
+                                  \* "KeepSurvivingRefSibling"
 
 VARIABLE in
 
@@ -177,7 +188,10 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* existing allOf conjunct carrying its own reference through the removed
 \* location (refConjunct2), and the moved rule's properties map holding an
 \* entry named after a literal keyword whose schema carries such a
-\* reference (mapKeyLiteral2).
+\* reference (mapKeyLiteral2), and the moved rule carrying its own
+\* surviving $ref - a pointer that resolves outside the removed location -
+\* beside a schema-map sibling holding a reference through the removed
+\* location (survivingRefSibling2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
@@ -187,7 +201,8 @@ Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            uepSchema2 : BOOLEAN, movedRef2 : BOOLEAN,
            literalRef2 : BOOLEAN, budgetDiamond2 : BOOLEAN,
            refSibling2 : BOOLEAN, refConjunct2 : BOOLEAN,
-           mapKeyLiteral2 : BOOLEAN]
+           mapKeyLiteral2 : BOOLEAN,
+           survivingRefSibling2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -230,6 +245,7 @@ Decisions(i) ==
          conjunctRelocated |-> TRUE,
          literalKept |-> TRUE,
          mapEntryRelocated |-> TRUE,
+         survivingSiblingRelocated |-> TRUE,
          diamondRelaxed |-> i.budgetDiamond2,
          siblingOnOuter |-> TRUE,
          siblingKept |-> TRUE,
@@ -279,6 +295,8 @@ Decisions(i) ==
         [fixed EXCEPT !["conjunctRelocated"] = FALSE]
     [] Variant = "KeepMapEntryRef" ->
         [fixed EXCEPT !["mapEntryRelocated"] = FALSE]
+    [] Variant = "KeepSurvivingRefSibling" ->
+        [fixed EXCEPT !["survivingSiblingRelocated"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -299,6 +317,7 @@ TypeOK ==
     /\ Decisions(in).siblingOnOuter \in BOOLEAN
     /\ Decisions(in).conjunctRelocated \in BOOLEAN
     /\ Decisions(in).mapEntryRelocated \in BOOLEAN
+    /\ Decisions(in).survivingSiblingRelocated \in BOOLEAN
 
 Init == in \in Inputs
 Next == UNCHANGED in
@@ -419,5 +438,16 @@ MovedConjunctResolvable ==
 MapEntryResolvable ==
     (in.closed2 /\ in.uepSchema2 /\ in.mapKeyLiteral2) =>
         Decisions(in).mapEntryRelocated
+
+\* Safety (review 4724550474): a moved rule's own $ref whose pointer
+\* survives compilation (it resolves outside the removed location) must
+\* not stop the relocation walk - the rule's sibling schema maps can
+\* still carry references through the removed location, compilation
+\* deletes that location, and an unrelocated sibling pointer would
+\* dangle in the compiled document and reject values the original
+\* accepted.
+SurvivingRefSiblingResolvable ==
+    (in.closed2 /\ in.uepSchema2 /\ in.survivingRefSibling2) =>
+        Decisions(in).survivingSiblingRelocated
 
 ====

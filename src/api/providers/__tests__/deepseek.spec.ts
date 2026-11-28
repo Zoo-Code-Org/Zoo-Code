@@ -2166,6 +2166,49 @@ describe("DeepSeekHandler", () => {
 			assertNoDanglingLocalRefs(params)
 		})
 
+		it("relocates a surviving reference's sibling schema maps in a moved rule (review 4724550474)", () => {
+			const tools = convert([
+				{
+					type: "function",
+					function: {
+						name: "search_files",
+						description: "Search",
+						strict: true,
+						parameters: {
+							type: "object",
+							$defs: { base: { type: "object" } },
+							patternProperties: {
+								"^x": {
+									$defs: { v: { type: "string" } },
+									$ref: "#/$defs/base",
+									properties: { const: { $ref: "#/patternProperties/^x/$defs/v" } },
+								},
+							},
+							required: ["x"],
+							additionalProperties: { type: "number" },
+						},
+					},
+				},
+			])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The rule's own reference survives compilation ($defs stays at its
+			// location), but the walk must not stop there: the sibling properties
+			// map carries a reference through the removed patternProperties
+			// location, compilation deletes it, and an unrelocated pointer would
+			// dangle so the value the original accepted breaks.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [
+					{ type: "number" },
+					{
+						$defs: { v: { type: "string" } },
+						$ref: "#/$defs/base",
+						properties: { const: { type: "string" } },
+					},
+				],
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
 		it("keeps a $ref-shaped const literal unrewritten (review 4723722038)", () => {
 			const literal = { $ref: "#/patternProperties/^x/$defs/v" }
 			const tools = convert([

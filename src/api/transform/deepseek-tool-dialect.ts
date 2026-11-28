@@ -254,9 +254,12 @@ function pointerTraversesLostKey(ref: string): boolean {
  * conjuncts and relocate through the same walk, so a conjunct's own
  * reference through the removed location stays resolvable (issue #547
  * review 4724111350).
- * The rule is passed through unchanged when its pointer is external, never
- * resolved locally even in the original, or still resolves in the compiled
- * document. An acyclic reference graph can still branch, so relocation
+ * The rule's reference is kept when its pointer is external, never resolved
+ * locally even in the original, or still resolves in the compiled document;
+ * a surviving reference's sibling keywords still relocate through the same
+ * walk, while an unresolvable pointer keeps the rule exactly as the
+ * untouched pass-through would (issue #547 review 4724550474). An acyclic
+ * reference graph can still branch, so relocation
  * counts the nodes it creates and abandons past MAX_RELOCATION_NODES - the
  * caller then relaxes instead of moving the rule (issue #547 review
  * 4723722021). abandon.hit marks both the cycle stop and the budget stop.
@@ -293,7 +296,27 @@ function relocateMovedRefs(
 	if (typeof node.$ref === "string") {
 		const ref: string = node.$ref
 		if (!pointerTraversesLostKey(ref)) {
-			return node
+			// The reference itself survives compilation, but its sibling
+			// keywords can still carry references through the removed
+			// location: keep the reference and relocate the siblings
+			// through the same walk (issue #547 review 4724550474).
+			budget.remaining -= 1
+			if (budget.remaining <= 0) {
+				abandon.hit = true
+				return node
+			}
+			const out: Record<string, unknown> = {}
+			for (const [key, value] of Object.entries(node)) {
+				defineOwnKey(
+					out,
+					key,
+					relocateMovedRefs(value, root, depth, memo, chain, abandon, budget, entersSchemaMap(key, value)),
+				)
+			}
+			if (abandon.hit) {
+				return node
+			}
+			return out
 		}
 		const resolved = resolveLocalRef(root, ref)
 		if (!resolved.resolved) {
