@@ -113,21 +113,21 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: model, info, maxTokens, temperature } = this.getModel()
+		const { id: model, info, maxTokens } = this.getModel()
 
 		// Build request options
 		const requestOptions: {
 			model: string
 			messages: ReturnType<typeof convertToMistralMessages>
 			maxTokens: number
-			temperature: number
 			tools?: MistralTool[]
 			toolChoice?: "auto" | "none" | "any" | "required" | { type: "function"; function: { name: string } }
 		} = {
 			model,
 			messages: [{ role: "system", content: systemPrompt }, ...convertToMistralMessages(messages)],
 			maxTokens: maxTokens ?? info.maxTokens,
-			temperature,
+			// Only send temperature when the user set a custom value (#242).
+			...(this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 		}
 
 		requestOptions.tools = this.convertToolsForMistral(metadata?.tools ?? [])
@@ -274,7 +274,7 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		// Fast-fail if the request was already aborted before building.
 		throwIfAborted(options?.abortSignal)
 
-		const { id: model, temperature } = this.getModel()
+		const { id: model } = this.getModel()
 		const callerAbortSignal = options?.abortSignal
 		// Build a single signal that combines the external abort with the per-request
 		// timeout (timeoutMs <= 0 disables the timeout; see mergeAbortSignalAndTimeout).
@@ -291,7 +291,10 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 				{
 					model,
 					messages: [{ role: "user", content: prompt }],
-					temperature,
+					// Only send temperature when the user set a custom value (#242).
+					...(this.options.modelTemperature != null && {
+						temperature: this.options.modelTemperature,
+					}),
 				},
 				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
 			)

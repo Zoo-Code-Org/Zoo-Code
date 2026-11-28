@@ -25,7 +25,7 @@ import type {
 } from "../index"
 
 interface OllamaChatOptions {
-	temperature: number
+	temperature?: number
 	num_ctx?: number
 }
 
@@ -438,8 +438,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	private buildChatRequestOptions(
 		useR1Format: boolean,
 	): [OllamaChatOptions, boolean | "high" | "medium" | "low" | undefined] {
-		const chatOptions: OllamaChatOptions = {
-			temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
+		const chatOptions: OllamaChatOptions = {}
+		// R1-format models require temperature; send their default when unset (#242).
+		if (this.options.modelTemperature != null) {
+			chatOptions.temperature = this.options.modelTemperature
+		} else if (useR1Format) {
+			chatOptions.temperature = DEEP_SEEK_DEFAULT_TEMPERATURE
 		}
 
 		// Only include num_ctx if explicitly set via ollamaNumCtx

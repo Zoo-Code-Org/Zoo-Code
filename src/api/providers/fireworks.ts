@@ -13,7 +13,6 @@ export class FireworksHandler extends BaseOpenAiCompatibleProvider<FireworksMode
 			apiKey: options.fireworksApiKey,
 			defaultProviderModelId: fireworksDefaultModelId,
 			providerModels: fireworksModels,
-			defaultTemperature: 0.5,
 		})
 	}
 }

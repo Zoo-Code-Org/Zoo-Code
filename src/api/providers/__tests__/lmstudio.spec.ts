@@ -302,11 +302,12 @@ describe("LmStudioHandler", () => {
 				{
 					model: mockOptions.lmStudioModelId,
 					messages: [{ role: "user", content: "Test prompt" }],
-					temperature: 0,
 					stream: false,
 				},
 				undefined, // no abort signal or timeout: no request options reach the SDK
 			)
+			// No custom temperature: the request must omit the field (#242).
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 		})
 
 		it("should handle API errors", async () => {

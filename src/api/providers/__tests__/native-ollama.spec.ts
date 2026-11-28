@@ -1,6 +1,7 @@
 // pnpm exec vitest run api/providers/__tests__/native-ollama.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
+import { DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
 import { NativeOllamaHandler } from "../native-ollama"
 import { ApiHandlerOptions } from "../../../shared/api"
@@ -365,6 +366,74 @@ describe("NativeOllamaHandler", () => {
 			// Should detect reasoning vs regular text
 			expect(results.some((r) => r.type === "reasoning")).toBe(true)
 			expect(results.some((r) => r.type === "text")).toBe(true)
+		})
+
+		describe("R1-format temperature (#242)", () => {
+			// R1-format models require a temperature; buildChatRequestOptions
+			// sends DEEP_SEEK_DEFAULT_TEMPERATURE when no custom value is set.
+			const makeR1 = (modelTemperature: number | null | undefined) => {
+				const options: ApiHandlerOptions = {
+					apiModelId: "deepseek-r1",
+					ollamaModelId: "deepseek-r1",
+					ollamaBaseUrl: "http://localhost:11434",
+				}
+				if (modelTemperature !== undefined) {
+					options.modelTemperature = modelTemperature
+				}
+				return new NativeOllamaHandler(options)
+			}
+
+			it.each([undefined, null])(
+				"sends DEEP_SEEK_DEFAULT_TEMPERATURE when modelTemperature is %s",
+				async (modelTemperature) => {
+					handler = makeR1(modelTemperature)
+
+					mockChat.mockImplementation(async function* () {
+						yield { message: { content: "ok" } }
+					})
+
+					await collectStream(handler.createMessage("System", [{ role: "user" as const, content: "Hi" }]))
+
+					const chatOptions = (mockChat.mock.calls[0][0] as Record<string, unknown>).options as Record<
+						string,
+						unknown
+					>
+					expect("temperature" in chatOptions).toBe(true)
+					expect(chatOptions.temperature).toBe(DEEP_SEEK_DEFAULT_TEMPERATURE)
+				},
+			)
+
+			it("sends an explicit custom temperature of 0 for deepseek-r1", async () => {
+				handler = makeR1(0)
+
+				mockChat.mockImplementation(async function* () {
+					yield { message: { content: "ok" } }
+				})
+
+				await collectStream(handler.createMessage("System", [{ role: "user" as const, content: "Hi" }]))
+
+				const chatOptions = (mockChat.mock.calls[0][0] as Record<string, unknown>).options as Record<
+					string,
+					unknown
+				>
+				expect(chatOptions.temperature).toBe(0)
+			})
+
+			it("sends a custom temperature unchanged for deepseek-r1", async () => {
+				handler = makeR1(0.7)
+
+				mockChat.mockImplementation(async function* () {
+					yield { message: { content: "ok" } }
+				})
+
+				await collectStream(handler.createMessage("System", [{ role: "user" as const, content: "Hi" }]))
+
+				const chatOptions = (mockChat.mock.calls[0][0] as Record<string, unknown>).options as Record<
+					string,
+					unknown
+				>
+				expect(chatOptions.temperature).toBe(0.7)
+			})
 		})
 
 		it("should surface Ollama's native message.thinking field as reasoning", async () => {
@@ -784,11 +853,60 @@ describe("NativeOllamaHandler", () => {
 				model: "llama2",
 				messages: [{ role: "user", content: "Tell me a joke" }],
 				stream: false,
-				options: {
-					temperature: 0,
-				},
+				// No custom temperature: options must omit the field (#242).
+				options: {},
 			})
 			expect(result).toBe("This is the response")
+		})
+
+		it.each([undefined, null])(
+			"completePrompt sends DEEP_SEEK_DEFAULT_TEMPERATURE for deepseek-r1 when modelTemperature is %s",
+			async (modelTemperature) => {
+				const options: ApiHandlerOptions = {
+					apiModelId: "deepseek-r1",
+					ollamaModelId: "deepseek-r1",
+					ollamaBaseUrl: "http://localhost:11434",
+				}
+				if (modelTemperature !== undefined) {
+					options.modelTemperature = modelTemperature
+				}
+				handler = new NativeOllamaHandler(options)
+
+				mockChat.mockResolvedValue({
+					message: { content: "ok" },
+				})
+
+				await handler.completePrompt("Test prompt")
+
+				const chatOptions = (mockChat.mock.calls[0][0] as Record<string, unknown>).options as Record<
+					string,
+					unknown
+				>
+				expect("temperature" in chatOptions).toBe(true)
+				expect(chatOptions.temperature).toBe(DEEP_SEEK_DEFAULT_TEMPERATURE)
+			},
+		)
+
+		it("completePrompt sends an explicit custom temperature of 0 for deepseek-r1", async () => {
+			const options: ApiHandlerOptions = {
+				apiModelId: "deepseek-r1",
+				ollamaModelId: "deepseek-r1",
+				ollamaBaseUrl: "http://localhost:11434",
+				modelTemperature: 0,
+			}
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockResolvedValue({
+				message: { content: "ok" },
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			const chatOptions = (mockChat.mock.calls[0][0] as Record<string, unknown>).options as Record<
+				string,
+				unknown
+			>
+			expect(chatOptions.temperature).toBe(0)
 		})
 
 		it("should not include num_ctx in completePrompt by default", async () => {
@@ -849,7 +967,7 @@ describe("NativeOllamaHandler", () => {
 					model: "llama2",
 					messages: [{ role: "user", content: "Test prompt" }],
 					stream: false,
-					options: { temperature: 0 },
+					options: {},
 				}),
 			)
 			expect(mockChat).toHaveBeenCalledTimes(1)
@@ -868,7 +986,7 @@ describe("NativeOllamaHandler", () => {
 					model: "llama2",
 					messages: [{ role: "user", content: "Test prompt" }],
 					stream: false,
-					options: { temperature: 0 },
+					options: {},
 				}),
 			)
 		})

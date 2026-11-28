@@ -4,7 +4,6 @@ import OpenAI from "openai"
 import {
 	vercelAiGatewayDefaultModelId,
 	vercelAiGatewayDefaultModelInfo,
-	VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
 	providerIdentifiers,
 	type ModelInfo,
@@ -92,9 +91,9 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		const body: OpenAI.Chat.ChatCompletionCreateParams = {
 			model: modelId,
 			messages: openAiMessages,
-			temperature: supportsTemperature
-				? (this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE)
-				: undefined,
+			// Only send temperature when the user set a custom value (#242).
+			...(supportsTemperature &&
+				this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 			max_completion_tokens: info.maxTokens,
 			stream: true,
 			stream_options: { include_usage: true },
@@ -169,8 +168,12 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 				;(requestOptions as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 			}
 
-			if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
-				requestOptions.temperature = this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE
+			if (
+				info.supportsTemperature !== false &&
+				this.supportsTemperature(modelId) &&
+				this.options.modelTemperature != null
+			) {
+				requestOptions.temperature = this.options.modelTemperature
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens

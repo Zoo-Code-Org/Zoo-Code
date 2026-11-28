@@ -16,7 +16,7 @@ import { VercelAiGatewayHandler } from "../vercel-ai-gateway"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
-import { vercelAiGatewayDefaultModelId, VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import { vercelAiGatewayDefaultModelId } from "@roo-code/types"
 
 // Mock dependencies
 vitest.mock("openai")
@@ -332,7 +332,7 @@ describe("VercelAiGatewayHandler", () => {
 			)
 		})
 
-		it("uses default temperature when none provided", async () => {
+		it("omits temperature when none is provided (#242)", async () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
 
 			const systemPrompt = "You are a helpful assistant."
@@ -340,11 +340,9 @@ describe("VercelAiGatewayHandler", () => {
 
 			await handler.createMessage(systemPrompt, messages).next()
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					temperature: VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
-				}),
-			)
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(call.temperature).toBeUndefined()
+			expect("temperature" in call).toBe(false)
 		})
 
 		it("omits temperature for Claude Fable 5", async () => {
@@ -360,10 +358,10 @@ describe("VercelAiGatewayHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "anthropic/claude-fable-5",
-					temperature: undefined,
 					max_completion_tokens: 128000,
 				}),
 			)
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
 		it("omits temperature for Claude Fable 5.1", async () => {
@@ -379,9 +377,9 @@ describe("VercelAiGatewayHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "anthropic/claude-fable-5.1",
-					temperature: undefined,
 				}),
 			)
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
 		it("omits temperature for Claude Sonnet 5", async () => {
@@ -775,10 +773,11 @@ describe("VercelAiGatewayHandler", () => {
 					model: "anthropic/claude-sonnet-4",
 					messages: [{ role: "user", content: prompt }],
 					stream: false,
-					temperature: VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
 			)
+			// No custom temperature: the request must omit the field (#242).
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
 		it("uses custom temperature for completion", async () => {

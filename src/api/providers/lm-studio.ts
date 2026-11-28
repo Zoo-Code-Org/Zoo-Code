@@ -1,13 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import {
-	type ModelInfo,
-	type ModelRecord,
-	openAiModelInfoSaneDefaults,
-	LMSTUDIO_DEFAULT_TEMPERATURE,
-	providerIdentifiers,
-} from "@roo-code/types"
+import { type ModelInfo, type ModelRecord, openAiModelInfoSaneDefaults, providerIdentifiers } from "@roo-code/types"
 
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
@@ -162,7 +156,8 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming & { draft_model?: string } = {
 				model: this.getModel().id,
 				messages: openAiMessages,
-				temperature: this.options.modelTemperature ?? LMSTUDIO_DEFAULT_TEMPERATURE,
+				// Only send temperature when the user set a custom value (#242).
+				...(this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 				stream: true,
 				tools: this.convertToolsForOpenAI(metadata?.tools),
 				tool_choice: metadata?.tool_choice,
@@ -347,7 +342,8 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			const params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming & { draft_model?: string } = {
 				model: this.getModel().id,
 				messages: [{ role: "user", content: prompt }],
-				temperature: this.options.modelTemperature ?? LMSTUDIO_DEFAULT_TEMPERATURE,
+				// Only send temperature when the user set a custom value (#242).
+				...(this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 				stream: false,
 			}
 

@@ -268,9 +268,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			if (this.arnInfo.awsUseCrossRegionInference) this.options.awsUseCrossRegionInference = true
 		}
 
-		if (!this.options.modelTemperature) {
-			this.options.modelTemperature = BEDROCK_DEFAULT_TEMPERATURE
-		}
+		// #242: keep modelTemperature nullish when no custom temperature is set.
+		// The non-adaptive request paths omit the key so the Bedrock service
+		// default applies; getModel still reports the service default as a hint.
 
 		this.costModelConfig = this.getModel()
 
@@ -510,10 +510,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		const inferenceConfig: BedrockInferenceConfig = {
 			maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
 			// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
-			// sending temperature causes a 400 error.
+			// sending temperature causes a 400 error. #242: the non-adaptive path
+			// sends only the user's custom value and omits the key when unset so
+			// the service default applies.
 			...(isAdaptiveThinkingModel
 				? {}
-				: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
+				: this.options.modelTemperature == null
+					? {}
+					: { temperature: this.options.modelTemperature }),
 		}
 
 		// Check if 1M context is enabled for supported Claude 4 models
@@ -895,9 +899,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
 				// sending temperature causes a 400 error. Guard the non-stream path the
 				// same way createMessage does so completePrompt also works for these models.
+				// #242: the non-adaptive path sends only the user's custom value and
+				// omits the key when unset so the service default applies.
 				...(this.isAdaptiveThinkingModel(modelConfig.id)
 					? {}
-					: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
+					: this.options.modelTemperature == null
+						? {}
+						: { temperature: this.options.modelTemperature }),
 			}
 
 			// For completePrompt, use a unique conversation ID based on the prompt

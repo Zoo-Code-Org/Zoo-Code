@@ -10,7 +10,6 @@ import {
 	mainlandZAiDefaultModelId,
 	internationalZAiModels,
 	mainlandZAiModels,
-	ZAI_DEFAULT_TEMPERATURE,
 	getZAiModels,
 } from "@roo-code/types"
 
@@ -583,13 +582,14 @@ describe("ZAiHandler", () => {
 				expect.objectContaining({
 					model: modelId,
 					max_tokens: expectedMaxTokens,
-					temperature: ZAI_DEFAULT_TEMPERATURE,
 					messages: expect.arrayContaining([{ role: "system", content: systemPrompt }]),
 					stream: true,
 					stream_options: { include_usage: true },
 				}),
 				undefined,
 			)
+			// No custom temperature: the request must omit the field (#242).
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 		})
 	})
 
@@ -730,7 +730,6 @@ describe("ZAiHandler", () => {
 					model: "glm-5.3",
 					thinking: { type: "enabled", clear_thinking: false },
 					reasoning_effort: "max",
-					temperature: 1,
 				}),
 			)
 		})
@@ -753,7 +752,6 @@ describe("ZAiHandler", () => {
 					model: "glm-5.3-flash",
 					thinking: { type: "enabled", clear_thinking: false },
 					reasoning_effort: "max",
-					temperature: 1,
 				}),
 			)
 		})
@@ -794,7 +792,6 @@ describe("ZAiHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith({
 				model: "glm-5.3",
 				messages: [{ role: "user", content: "prompt" }],
-				temperature: 1,
 				thinking: { type: "enabled", clear_thinking: false },
 				reasoning_effort: "low",
 			})
@@ -814,7 +811,6 @@ describe("ZAiHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith({
 				model: "glm-5.3-flash",
 				messages: [{ role: "user", content: "prompt" }],
-				temperature: 1,
 				thinking: { type: "enabled", clear_thinking: false },
 				reasoning_effort: "low",
 			})

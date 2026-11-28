@@ -2047,6 +2047,9 @@ describe("AwsBedrockHandler", () => {
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true,
+				// #242: only an explicit custom temperature reaches the request;
+				// an unset value omits the key (covered in temperature-omission.spec.ts).
+				modelTemperature: 0.5,
 			})
 
 			const generator = opus46Handler.createMessage("System prompt", messages)
@@ -2058,8 +2061,8 @@ describe("AwsBedrockHandler", () => {
 			// 4.6 still uses the budget_tokens-based thinking format.
 			expect(commandArg.additionalModelRequestFields?.thinking?.type).toBe("enabled")
 			expect(commandArg.additionalModelRequestFields?.thinking?.budget_tokens).toBeGreaterThan(0)
-			// 4.6 still accepts temperature.
-			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
+			// 4.6 still accepts temperature; the custom value flows unchanged.
+			expect(commandArg.inferenceConfig?.temperature).toBe(0.5)
 		})
 
 		it("should detect adaptive-thinking models via cross-region inference prefix (us.anthropic.claude-opus-4-8)", async () => {
@@ -2136,7 +2139,8 @@ describe("AwsBedrockHandler", () => {
 
 		it("completePrompt should still send temperature for older Claude Opus 4.6 (non-stream path)", async () => {
 			// 4.6 and earlier still accept sampling parameters, so completePrompt must
-			// continue to send temperature for them.
+			// keep sending an explicit custom temperature for them. #242: an unset
+			// value omits the key (covered in temperature-omission.spec.ts).
 			const mockConverseCommand = vi.mocked(ConverseCommand)
 
 			const opus46Handler = new AwsBedrockHandler({
@@ -2144,6 +2148,7 @@ describe("AwsBedrockHandler", () => {
 				awsAccessKey: "test-access-key",
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
+				modelTemperature: 0.5,
 			})
 
 			await opus46Handler.completePrompt("Test prompt")
@@ -2151,8 +2156,8 @@ describe("AwsBedrockHandler", () => {
 			expect(mockConverseCommand).toHaveBeenCalled()
 			const commandArg = mockConverseCommand.mock.calls[0][0] as any
 
-			// 4.6 must still receive temperature.
-			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
+			// 4.6 must still receive the explicit custom temperature.
+			expect(commandArg.inferenceConfig?.temperature).toBe(0.5)
 		})
 
 		describe("custom ARN base model", () => {
@@ -2215,11 +2220,13 @@ describe("AwsBedrockHandler", () => {
 					createCustomArnHandler({
 						awsCustomArnBaseModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
 						enableReasoningEffort: true,
+						// #242: only an explicit custom temperature reaches the request.
+						modelTemperature: 0.5,
 					}),
 				)
 
 				expect(input).toMatchObject({ additionalModelRequestFields: { thinking: { type: "enabled" } } })
-				expect(input.inferenceConfig?.temperature).toBeDefined()
+				expect(input.inferenceConfig?.temperature).toBe(0.5)
 			})
 
 			it("sends no Anthropic fields for a non-Anthropic base model", async () => {
@@ -2234,7 +2241,8 @@ describe("AwsBedrockHandler", () => {
 				const input = await sendFirstRequest(handler)
 				expect(input.modelId).toBe(appProfileArn)
 				expect(input.additionalModelRequestFields).toBeUndefined()
-				expect(input.inferenceConfig?.temperature).toBeDefined()
+				// #242: no custom temperature set, so the key is omitted.
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
 			})
 
 			it("uses the generic fallback with user limits when the model is not listed", () => {
@@ -2304,7 +2312,8 @@ describe("AwsBedrockHandler", () => {
 				const input = await sendFirstRequest(handler)
 				expect(input.modelId).toBe(profileArn)
 				expect(input.additionalModelRequestFields).toBeUndefined()
-				expect(input.inferenceConfig?.temperature).toBeDefined()
+				// #242: no custom temperature set, so the key is omitted.
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
 			})
 
 			it("keeps the named model for a foundation-model ARN even with an explicit Other choice", () => {
