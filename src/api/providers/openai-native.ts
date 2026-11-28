@@ -1,6 +1,5 @@
 import * as os from "os"
 import { createHash } from "crypto"
-import { v7 as uuidv7 } from "uuid"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
@@ -59,8 +58,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	protected options: ApiHandlerOptions
 	private client: OpenAI
 	private readonly providerName = "OpenAI Native"
-	// Session ID for request tracking (persists for the lifetime of the handler)
-	private readonly sessionId: string
 	/**
 	 * Some Responses streams emit tool-call argument deltas without stable call id/name.
 	 * Track the last observed tool identity from output_item events so we can still
@@ -109,8 +106,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	constructor(options: ApiHandlerOptions) {
 		super()
 		this.options = options
-		// Generate a session ID for request tracking
-		this.sessionId = uuidv7()
 		// Default to including reasoning.summary: "auto" for models that support Responses API
 		// reasoning summaries unless explicitly disabled.
 		if (this.options.enableResponsesReasoningSummary === undefined) {
@@ -1705,8 +1700,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * machine) and differ between tasks (so unrelated prefixes do not compete for one
 	 * routing bucket). `metadata.taskId` is the longest-lived identifier the handler
 	 * receives: it is the persisted task id, stable across turns, restarts and
-	 * rehydration, whereas `this.sessionId` is regenerated per handler instance.
-	 * The handler session id is the fallback for callers that send no task id.
+	 * rehydration.
+	 *
+	 * The key is sent ONLY when a task-scoped identity exists. With no task id there is
+	 * no conversation whose prefix could accumulate, so a per-call random key would buy
+	 * no affinity while replacing whatever routing OpenAI applies by default. The
+	 * fail-safe is therefore to omit the field and leave default routing untouched.
 	 */
 	private getPromptCacheKey(
 		model: OpenAiNativeModel,
@@ -1714,13 +1713,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	): string | undefined {
 		if (!model.info.supportsPromptCache) return undefined
 
-		const key = metadata?.taskId || this.sessionId
-		if (!key) return undefined
+		const taskId = metadata?.taskId
+		if (!taskId) return undefined
 
 		// Hash rather than slice: a 64-char prefix drops the distinguishing tail, so two
 		// distinct task ids that share a long prefix would land in one routing bucket.
 		// sha256 hex is 64 characters, so the result fits the cap without truncation.
-		return key.length > PROMPT_CACHE_KEY_MAX_LENGTH ? createHash("sha256").update(key).digest("hex") : key
+		return taskId.length > PROMPT_CACHE_KEY_MAX_LENGTH ? createHash("sha256").update(taskId).digest("hex") : taskId
 	}
 
 	/**
@@ -1863,9 +1862,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				requestBody[SERVICE_TIER_KEY] = serviceTier
 			}
 
-			// Cache routing affinity key. A caller that knows the task passes it, so repeated
-			// completions for one task share a bucket across handler instances; otherwise the
-			// handler session id scopes the key to this instance.
+			// Cache routing affinity key, sent only when a task-scoped identity exists: a
+			// caller that knows the task passes it, so repeated completions for one task
+			// share a bucket across handler instances. With no task id there is no
+			// conversation whose prefix could accumulate, so the field is omitted and
+			// OpenAI's default routing applies.
 			const promptCacheKey = this.getPromptCacheKey(
 				model,
 				options?.taskId ? { taskId: options.taskId } : undefined,
