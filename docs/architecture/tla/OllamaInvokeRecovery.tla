@@ -124,6 +124,13 @@
 \* line-level rule, pinned by scanner unit tests (a closer line whose
 \* suffix holds U+00A0 stays fence content; trailing spaces, a
 \* trailing tab, and a bare CRLF line end still close).
+\* Review round on 510275c2b: the CRLF-closure unit fixture sat the
+\* example behind unprefixed blank lines, so the container-end rule
+\* recovered it and the suffix check was not load-bearing there.
+\* Fixed test-only: the example now sits on the next quote-prefixed
+\* line, so only an accepted closer recovers it. Covered: this
+\* header's closer-suffix note above; Added: no new invariant.
+\* Gap: none left for this rule - the scanner unit test now pins it.
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode

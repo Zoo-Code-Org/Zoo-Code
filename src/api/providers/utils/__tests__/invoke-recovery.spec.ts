@@ -443,12 +443,14 @@ ${bareWeatherCall("Rome")}`,
 	])("closes a quoted fence on a CRLF closer with %s behind the run", (_label, closerBody) => {
 		// feedContext splits lines on LF and leaves the CR of a CRLF
 		// pair on the line, so a closer's suffix can end in CR. Spaces
-		// and a CR stay allowed after the run; only the three closers
-		// end the fence and the call below recovers.
-		const fixture = `> ~~~\r\n> example\r\n> ${closerBody}\r\n\r\n${bareWeatherCall("Rome")}`
+		// and a CR stay allowed after the run. The call sits on the next
+		// quote-prefixed line, so an accepted closer is the only path to
+		// recovery: a rejected closer keeps the fence open and the call
+		// stays quoted fence text.
+		const fixture = `> ~~~\r\n> example\r\n> ${closerBody}> ${bareWeatherCall("Rome")}\r\n`
 		const events = scanChunked(fixture, [6, 30, 30])
 		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
-		expect(text(events)).toBe(`> ~~~\r\n> example\r\n> ${closerBody}\r\n\r\n`)
+		expect(text(events)).toBe(`> ~~~\r\n> example\r\n> ${closerBody}> \r\n`)
 	})
 
 	it("opens a quoted fence whose opener pads the marker with a tab", () => {
