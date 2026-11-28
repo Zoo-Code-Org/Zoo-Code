@@ -67,6 +67,24 @@ const DEFAULT_MODEL_CATALOG = vitest.hoisted(() => ({
 		cacheReadsPrice: 0.1,
 		description: "Claude 3.5 Haiku",
 	},
+	// The runtime gateway catalog never sets `promptCacheTtlSupport`, so this row
+	// exists only to inject the capability the accept path needs. It is kept
+	// separate from the shared haiku row so the reject-path tests keep a model
+	// with no TTL capability.
+	"anthropic/claude-3.5-sonnet": {
+		maxTokens: 8192,
+		contextWindow: 200000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		// `as const` keeps the literal a "1h" tuple; a plain ["1h"] widens to
+		// string[] and fails the ModelRecord index signature.
+		promptCacheTtlSupport: ["1h" as const],
+		inputPrice: 3,
+		outputPrice: 15,
+		cacheWritesPrice: 3.75,
+		cacheReadsPrice: 0.3,
+		description: "Claude 3.5 Sonnet",
+	},
 }))
 
 vitest.mock("../fetchers/modelCache", () => ({
@@ -419,6 +437,40 @@ describe("ZooGatewayHandler", () => {
 			await handler.createMessage("prompt", [{ role: "user", content: "Hi" }]).next()
 
 			expect(addCacheBreakpoints).toHaveBeenCalled()
+		})
+
+		it("does not emit a ttl for a gateway model with no TTL capability", async () => {
+			// The runtime gateway catalog carries no TTL capability, so a 1h knob must
+			// fail closed (ADR-0006 I2) even though the model is prompt-cache capable.
+			const { addCacheBreakpoints } = await import("../../transform/caching/vercel-ai-gateway")
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "anthropic/claude-3.5-haiku",
+				promptCacheTtl: "1h",
+			})
+
+			await handler.createMessage("prompt", [{ role: "user", content: "Hi" }]).next()
+
+			expect(addCacheBreakpoints).toHaveBeenCalled()
+			const lastCall = vitest.mocked(addCacheBreakpoints).mock.calls.at(-1)
+			expect(lastCall).toBeDefined()
+			expect(lastCall![2]).toBeUndefined()
+		})
+
+		it("passes the resolved ttl for a gateway model with 1h TTL capability", async () => {
+			// The runtime catalog never sets `promptCacheTtlSupport`, so the accept path is
+			// only reachable with an injected capability. The dedicated catalog row keeps
+			// the reject-path model capability-free.
+			const { addCacheBreakpoints } = await import("../../transform/caching/vercel-ai-gateway")
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "anthropic/claude-3.5-sonnet",
+				promptCacheTtl: "1h",
+			})
+
+			await handler.createMessage("prompt", [{ role: "user", content: "Hi" }]).next()
+
+			expect(vitest.mocked(addCacheBreakpoints).mock.calls.at(-1)![2]).toBe("1h")
 		})
 
 		it("yields tool_call_partial chunks when streaming tool calls", async () => {
