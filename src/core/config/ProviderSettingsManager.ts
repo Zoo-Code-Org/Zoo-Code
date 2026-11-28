@@ -521,7 +521,8 @@ export class ProviderSettingsManager {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
 
-				if (!providerProfiles.apiConfigs[name]) {
+				// Inherited members such as toString must not pass as a stored profile.
+				if (!Object.hasOwn(providerProfiles.apiConfigs, name)) {
 					throw new ProviderSettingsNotFoundError(`Config '${name}' not found`)
 				}
 

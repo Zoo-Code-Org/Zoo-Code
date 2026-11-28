@@ -3150,9 +3150,10 @@ describe("webviewMessageHandler - non-portable settings keys", () => {
 			},
 		})
 
-		const writtenKeys = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map((call) => String(call[0]))
-		expect(writtenKeys).not.toContain("viewStates")
-		expect(writtenKeys).toContain("customInstructions")
+		// The filter's full output is the contract: exactly one write, the portable pair intact.
+		expect(vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls).toEqual([
+			["customInstructions", "carry on"],
+		])
 		expect(mockClineProvider.log).toHaveBeenCalledWith(
 			expect.stringContaining("Ignoring non-portable settings key viewStates"),
 		)
