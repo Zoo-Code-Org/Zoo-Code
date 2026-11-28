@@ -75,6 +75,8 @@ export interface SingleCompletionHandler {
 }
 
 export interface ApiHandlerCreateMessageMetadata {
+	/** Positive per-request SDK deadline override, in milliseconds. */
+	timeoutMs?: number
 	/**
 	 * Task ID used for tracking and provider-specific features:
 	 * - Roo: Sent as X-Roo-Task-ID header
