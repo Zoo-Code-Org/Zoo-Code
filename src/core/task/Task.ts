@@ -111,8 +111,10 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { DispatchState, type PendingWork } from "./dispatchState"
-import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
+import { resolveToolAlias, type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
+import { salvageXmlToolCalls } from "../assistant-message/xml-tool-salvage"
+import { getNativeTools } from "../prompts/tools/native-tools"
 import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -291,6 +293,123 @@ export class PendingActionSettlementError extends Error {
 		super(message, options)
 		this.name = "PendingActionSettlementError"
 	}
+}
+
+function isSalvagePlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Describes a parsed JSON value's shape for the invalid-argument error.
+ */
+function describeSalvageShape(parsed: unknown): string {
+	if (Array.isArray(parsed)) {
+		return "an array"
+	}
+	if (isSalvagePlainObject(parsed)) {
+		return "an object"
+	}
+	if (parsed === null) {
+		return "null"
+	}
+	return `of type ${typeof parsed}`
+}
+
+/**
+ * Converts salvaged XML argument values to their declared structured types
+ * (issue #547 review 4712438429). The salvage scanner captures every
+ * parameter value as a string and the native parser forwards values
+ * unchanged, so a stringified array (ask_followup_question's follow_up)
+ * reached the tool's shape validation as a string and the call was rejected.
+ * Values whose declared type is array or object are parsed back to
+ * structures before promotion, and values declared number or integer are
+ * converted from their XML text the same way (issue #547 review
+ * 4716476981): a stringified <timeout>5</timeout> otherwise reaches
+ * resolveAgentTimeoutMs as a string, converts to zero, and the command
+ * never enters the background at the requested timeout. A conversion
+ * failure or a parsed shape that
+ * conflicts with the declared type throws: the promotion loop treats the
+ * whole salvage as invalid and keeps the response as plain text, because the
+ * native parser deliberately accepts present-but-wrong-shaped values to
+ * give the streaming path a precise execution-time error (issue #547 review
+ * 4713747404). Ordinary string parameters stay untouched.
+ */
+function structureDeclaredParamsForSalvage(
+	args: Record<string, string>,
+	toolName: string,
+	nativeTools: ReturnType<typeof getNativeTools>,
+): Record<string, unknown> {
+	const resolvedName = resolveToolAlias(toolName)
+	type NativeToolDef = ReturnType<typeof getNativeTools>[number]
+	const schema = nativeTools.find(
+		(tool): tool is Extract<NativeToolDef, { function: { name: string } }> =>
+			tool.type === "function" && tool.function?.name === resolvedName,
+	)
+	const declaredStructured = new Map<string, { declared: string[] }>()
+	if (schema?.function && typeof schema.function.parameters === "object" && schema.function.parameters !== null) {
+		const properties = (schema.function.parameters as unknown as Record<string, unknown>).properties
+		if (typeof properties === "object" && properties !== null) {
+			for (const [param, paramSchema] of Object.entries(properties as Record<string, unknown>)) {
+				const type = (paramSchema as unknown as Record<string, unknown>)?.type
+				const types = Array.isArray(type) ? type : [type]
+				if (
+					types.includes("array") ||
+					types.includes("object") ||
+					types.includes("number") ||
+					types.includes("integer")
+				) {
+					declaredStructured.set(param, {
+						declared: types.filter((entry): entry is string => typeof entry === "string"),
+					})
+				}
+			}
+		}
+	}
+
+	const structured: Record<string, unknown> = {}
+	for (const [key, value] of Object.entries(args)) {
+		const declared = declaredStructured.get(key)
+		if (declared) {
+			let parsed: unknown
+			try {
+				parsed = JSON.parse(value)
+			} catch {
+				// Declared structured but not JSON: forwarding the string
+				// would ride the parser's presence-only checks and promote
+				// an invalid call. Reject the salvage; the response stays
+				// plain text.
+				throw new Error(
+					`Invalid salvaged argument '${key}' for tool '${resolvedName}': declared ${declared.declared.join(" or ")} but the value is not JSON`,
+				)
+			}
+			let shape: string
+			if (Array.isArray(parsed)) {
+				shape = "array"
+			} else if (isSalvagePlainObject(parsed)) {
+				shape = "object"
+			} else if (parsed === null) {
+				shape = "null"
+			} else {
+				shape = typeof parsed
+			}
+			if (shape === "number" && Number.isInteger(parsed) && declared.declared.includes("integer")) {
+				shape = "integer"
+			}
+			if (!declared.declared.includes(shape)) {
+				// The parsed shape conflicts with the declared type: the
+				// tool would reject the call during execution, after the
+				// response text was already cleared. Reject the salvage
+				// instead and keep the response as plain text.
+				throw new Error(
+					`Invalid salvaged argument '${key}' for tool '${resolvedName}': declared ${declared.declared.join(" or ")} but the parsed value is ${describeSalvageShape(parsed)}`,
+				)
+			}
+			structured[key] = parsed
+			continue
+		}
+		structured[key] = value
+	}
+	return structured
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -5066,6 +5185,59 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This ensures that when new_task triggers delegation and calls flushPendingToolResultsToHistory(),
 				// the assistant message is already in history. Otherwise, tool_result blocks would appear
 				// BEFORE their corresponding tool_use blocks, causing API errors.
+
+				// Issue #547 defect 4: XML tool-call fallback. Under load some models
+				// answer with tool-shaped XML in plain text instead of native
+				// tool_calls, and the turn deadlocks on MODEL_NO_TOOLS_USED. When the
+				// completed response produced no native tool call and its text is
+				// exclusively well-formed tool XML, promote each block to a native
+				// ToolUse through the standard parser. Anything else stays text.
+				if (
+					!this.assistantMessageContent.some(
+						(block) => block.type === "tool_use" || block.type === "mcp_tool_use",
+					)
+				) {
+					const salvaged = salvageXmlToolCalls(assistantMessage)
+					if (salvaged) {
+						const nativeTools = getNativeTools()
+						const promoted: ToolUse[] = []
+						for (const [index, call] of salvaged.entries()) {
+							const id = `salvage-${Date.now()}-${index}`
+							try {
+								const toolUse = NativeToolCallParser.parseToolCall({
+									id,
+									name: call.name as ToolName,
+									arguments: JSON.stringify(
+										structureDeclaredParamsForSalvage(call.args, call.name, nativeTools),
+									),
+								})
+								if (toolUse && toolUse.type === "tool_use") {
+									toolUse.id = id
+									promoted.push(toolUse)
+								} else {
+									// Unknown tool name: not salvageable, keep the text.
+									promoted.length = 0
+									break
+								}
+							} catch {
+								// Invalid arguments for the named tool: not salvageable.
+								promoted.length = 0
+								break
+							}
+						}
+						if (promoted.length > 0) {
+							this.assistantMessageContent.push(...promoted)
+							// The response text was fully consumed by the salvage: the
+							// assistant message becomes its native tool calls.
+							assistantMessage = ""
+							this.userMessageContentReady = false
+							console.warn(
+								`[Task#${this.taskId}] Salvaged ${promoted.length} XML tool call(s) from a text-only response`,
+							)
+							this.presentAssistantMessageSafe()
+						}
+					}
+				}
 
 				// Check if we have any content to process (text or tool uses)
 				const hasTextContent = assistantMessage.length > 0

@@ -89,6 +89,36 @@ export abstract class BaseTool<TName extends ToolName> {
 	}
 
 	/**
+	 * Convert null sentinels to omitted values before execution.
+	 *
+	 * Strict-mode tool schemas make originally-optional parameters accept
+	 * null so the model may still omit them; a model that sends the null
+	 * sentinel instead would otherwise reach execution and break tools that
+	 * default only on `undefined` — e.g. a null `limit` producing a
+	 * zero-byte read instead of the default (issue #547 review 4674816417).
+	 * A declared-nullable required parameter never sends null in the strict
+	 * pipeline (its null is stripped from the wire schema), so a top-level
+	 * null here is always an omission sentinel. Nested values are left
+	 * untouched.
+	 */
+	protected normalizeNullSentinels(params: ToolParams<TName>): ToolParams<TName> {
+		// Stryker disable next-line ConditionalExpression: only the typeof-operand mutant is equivalent - a non-object, non-null params value cannot hold a top-level null, so both paths return it unchanged; the !params operand is killed by the null-block test
+		if (!params || typeof params !== "object") {
+			return params
+		}
+		let hasNull = false
+		const cleaned: Record<string, unknown> = {}
+		for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+			if (value === null) {
+				hasNull = true
+				continue
+			}
+			cleaned[key] = value
+		}
+		return hasNull ? (cleaned as ToolParams<TName>) : params
+	}
+
+	/**
 	 * Reset the partial state tracking.
 	 *
 	 * Should be called at the end of execute() (both success and error paths)
@@ -137,7 +167,7 @@ export abstract class BaseTool<TName extends ToolName> {
 		try {
 			if (block.nativeArgs !== undefined) {
 				// Native: typed args provided by NativeToolCallParser.
-				params = block.nativeArgs as ToolParams<TName>
+				params = this.normalizeNullSentinels(block.nativeArgs as ToolParams<TName>)
 			} else {
 				// If legacy/XML markup was provided via params, surface a clear error.
 				const paramsText = (() => {

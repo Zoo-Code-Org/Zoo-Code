@@ -1,0 +1,324 @@
+---- MODULE DeepSeekToolDialect ----
+\* Models compileToolParametersForDeepSeek (src/api/transform/deepseek-tool-dialect.ts)
+\* as applied by DeepSeekHandler.convertToolsForOpenAI (src/api/providers/deepseek.ts).
+\* Source: a tool parameters schema entering the handler. Sink: the request tools array.
+\* Failure 1: a declared optional parameter becomes required, the model is forced
+\*            to emit values for it, and omitting it retries forever (issue 547 defect 1).
+\* Failure 2: a gateway-rejected keyword such as pattern survives into the
+\*            request and strict compilation answers HTTP 422 (issue 547 defect 2).
+\* Failure 3: a removed constraint leaves no description hint and the model
+\*            silently loses the requirement.
+\* Failure 4: removing patternProperties while keeping additionalProperties: false
+\*            leaves the object without any valid instance (review 4712438380).
+\* Failure 5: a oneOf whose branches lost their distinguishing constraints
+\*            accepts nothing under exactly-one semantics (review 4712438393).
+\* Failure 6: a not whose predicate lost its constraint rejects every value
+\*            (review 4712438405).
+\* Failure 7: a conditional whose if predicate compilation changes keeps
+\*            then: false and rejects values the original schema accepted
+\*            (review 4713747391).
+\* Failure 8: a relaxed oneOf absorbs a sibling anyOf, so the sibling stops
+\*            applying as its own constraint (review 4713747398).
+\* Failure 9: a constraint inside a dependentSchemas entry survives uncompiled
+\*            and the gateway answers HTTP 422 (review 4716476931).
+\* Failure 10: a predicate whose object is only a $ref is retained although a
+\*             referenced target lost its constraint; the applied target then
+\*             rejects every value the original accepted (review 4716476940).
+\* Failure 11: removing patternProperties strands a retained
+\*             unevaluatedProperties: false - the removed rules were what
+\*             evaluated those keys, so a required property becomes forbidden
+\*             (review 4716476950).
+\* Failure 12: removing contains strands a retained unevaluatedItems: false -
+\*             contains evaluated the array items it matched, so every item
+\*             the original accepted becomes forbidden (review 4719419428).
+\* Failure 13: a retained prefixItems is no complete evaluator - the
+\*             contains-evaluated trailing indices stay stranded behind
+\*             unevaluatedItems: false (review 4719935091). A retained
+\*             items beside it evaluates every index (review 4725679660).
+\* Failure 14: removing patternProperties strands a retained schema-valued
+\*             additionalProperties or unevaluatedProperties rule, and the
+\*             retained rule then rejects values the original accepted
+\*             (review 4719336022).
+\* Failure 15: an applicator branch that only references a schema compiles
+\*             to itself although the referenced target lost its contains
+\*             or patternProperties rule - the stranded unevaluatedItems:
+\*             false or unevaluatedProperties: false then rejects values
+\*             the original accepted (review 4728045839).
+\* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
+\*             SatPreserved, SiblingConjunctKept, ArraySatKept,
+\*             CondEvalRelaxed. The reference-relocation invariants live
+\*             in DeepSeekRefRelocation.tla.
+\* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern
+\* fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
+\* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate, KeepUnevaluated
+\* and KeepUepSchema fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept.
+\* KeepDependent fails ForbiddenAbsent. KeepContainsUneval and
+\* KeepPrefixEvaluator fail ArraySatKept. KeepCondEvalLost fails
+\* CondEvalRelaxed. Relocation sabotage expectations live in
+\* DeepSeekRefRelocation.tla.
+\* Before this change the handler ran the strict sanitizer plus the
+\* all-required rewrite, so RequiredPreserved failed on every optional
+\* parameter. Replay: DeepSeek answered 400 missing required parameter on
+\* read_file without limit or offset, and 422 on a pattern keyword the
+\* in-tree sanitizer does not strip. Not modeled: per-node recursion (the
+\* depth-32 stop is pinned by the deep-schema test), work counts
+\* (4714821172, 4719419419 - not expressible here; timing tests), surrogate
+\* sanitization, strict-flag plumbing, MCP name checks, prototype-key
+\* fidelity (4712438384, JSON.parse regression test). The
+\* reference-relocation subsystem is modeled in DeepSeekRefRelocation.tla.
+\* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).
+\* Result: Fixed holds in 8388608 states (R16 inputs). ForceRequired fails RequiredPreserved. KeepPattern
+\* fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
+\* KeepOneOf, KeepClosed and KeepConditional each fail SatPreserved.
+\* AbsorbAnyOf fails SiblingConjunctKept. TLC found no state outside the
+\* sabotages. Relocation verdicts live in DeepSeekRefRelocation.tla.
+\* Cost: the base run takes minutes. Agent time is not measured.
+\* Review ratchet: R2 1 added (4712438380, 4712438393, 4712438405), 1 gap
+\* (4712438384 JS __proto__, JSON.parse regression test). R3 2 added
+\* (4713747391, 4713747398). R5 3 added (4716476931, 4716476940,
+\* 4716476950). R6 2 added (4719419428; 4719419419 gap: work count,
+\* timing test). R7 2 added (4719935091, 4719336022). R8 1 added
+\* (6089521528). R9 3 added (4723722021, 4723722028, 4723722038).
+\* R10 2 added (4724111350, 4724111355). R11 1 added (4724550474).
+\* R12 relocation moved to DeepSeekRefRelocation.tla, 1 added there
+\* (4725327182, 4725307765). R13 1 added (4725679660, ArraySatKept
+\* R14 (4726104161, 4726104165) 2 added: a dropped or evaluation-losing
+\* conditional branch relaxes the stranded unevaluatedProperties rule
+\* (CondEvalRelaxed); a changed child branch carrying contains relaxes the
+\* stranded unevaluatedItems rule (ArraySatKept). 0 covered, 0 gap.
+\* R15 (4726390999) 1 covered: childContains2 already admits a contains
+\* carried behind a $ref, so the walk's reference following is a code
+\* conformance fix pinned by the referenced-case unit regression.
+\* R16 (4728045839) 2 added: childRefContains2 - an UNCHANGED child
+\* applicator branch whose referenced target lost contains relaxes the
+\* stranded unevaluatedItems rule (ArraySatKept); childRefPat2 - the
+\* patternProperties counterpart relaxes the stranded
+\* unevaluatedProperties rule (SatPreserved). 1 gap (4728045838): the
+\* boundedness of the evaluation-loss walks is a work count, not
+\* expressible here - the iterative worklist is pinned by the
+\* 120000-alias regression test. 2 added, 1 gap.
+
+CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
+                                  \* "DropSilently", "NotTighten", "KeepOneOf",
+                                  \* "KeepClosed", "KeepConditional", "AbsorbAnyOf",
+                                  \* "KeepDependent", "KeepRefPredicate",
+                                  \* "KeepUnevaluated", "KeepContainsUneval",
+                                  \* "KeepPrefixEvaluator", "KeepUepSchema",
+                                  \* "KeepCondEvalLost"
+
+VARIABLE in
+
+REJECTED == {"pattern", "minLength", "minItems"}
+
+\* One optional property (2) next to a required one (1). The optional property
+\* may carry rejected keywords (kw2) and may be composed: a not whose child
+\* carries a rejected keyword (not2, childKw), a oneOf of two
+\* pattern-distinguished branches (oneOf2, branchKw), a closed object whose
+\* extra key is legal only through patternProperties (closed2), a conditional
+\* whose if predicate carries a rejected keyword (cond2, ifKw), an unchanged
+\* anyOf sibling (anyOf2), the keyword inside a dependentSchemas entry (dep2),
+\* a predicate whose child is only a $ref to a kw2-carrying target (ref2), the
+\* closed-object rule shaped as unevaluatedProperties: false (uneval2), the
+\* closed-array rule with contains beside unevaluatedItems: false
+\* (containsClosed2), a second complete items evaluator (arrEvaluator2), a
+\* partial prefixItems that evaluates only its listed positions
+\* (partialPrefix2), and the closed rule shaped as a schema-valued
+\* unevaluatedProperties restriction that must re-admit the removed pattern
+\* rules (uepSchema2). condEvalLost2: the changed conditional dropped a
+\* branch (or stripped a predicate) that itself evaluated keys. childContains2:
+\* a changed child applicator branch carried a contains rule.
+\* childRefContains2: an UNCHANGED child applicator branch references a
+\* target that carried contains and lost it. childRefPat2: the same
+\* route for a target whose patternProperties evaluations are gone.
+Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
+           childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
+           closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
+           anyOf2 : BOOLEAN, dep2 : BOOLEAN, ref2 : BOOLEAN,
+           uneval2 : BOOLEAN, containsClosed2 : BOOLEAN,
+           arrEvaluator2 : BOOLEAN, partialPrefix2 : BOOLEAN,
+           uepSchema2 : BOOLEAN, condEvalLost2 : BOOLEAN,
+           childContains2 : BOOLEAN, childRefContains2 : BOOLEAN,
+           childRefPat2 : BOOLEAN]
+
+Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
+
+\* The compiled output for this input: the required set, the rejected keywords
+\* still present, the removed keywords re-encoded in the description, and the
+\* satisfiability decisions. Fixed drops a negation only when its child lost
+\* a constraint or a referenced target changed, moves a oneOf only when a
+\* branch (or a referenced branch target) changed, relaxes
+\* additionalProperties and unevaluatedProperties only under removed
+\* patternProperties (a false rule becomes true; a schema-valued rule
+\* re-admits the removed pattern rules as alternatives), relaxes a retained
+\* unevaluatedItems restriction only under a removed contains or a changed
+\* child branch that carried contains, with no retained items (a retained
+\* items evaluates every index whether or not a prefixItems sits beside it -
+\* review 4725679660 - and only a lone partial prefixItems is incomplete;
+\* review 4726104165), drops the branches of a conditional whose if
+\* predicate (or a referenced predicate target) changed while the bare
+\* predicate stays as an annotation (review 4725679712), relaxes the
+\* stranded closed rule when the dropped branch or the stripped predicate
+\* evaluated keys (review 4726104161),
+\* and always keeps an anyOf sibling as its own constraint.
+\* ForceRequired is the all-required rewrite the strict path used before.
+\* KeepPattern leaves every keyword in place. DropSilently removes without a
+\* note. NotTighten, KeepOneOf, KeepClosed, KeepConditional and AbsorbAnyOf
+\* each retain exactly one tightened construct. KeepDependent skips the
+\* dependentSchemas traversal. KeepRefPredicate keeps the reference-blind
+\* retention decisions. KeepUnevaluated keeps the stranded
+\* unevaluatedProperties: false rule. KeepContainsUneval keeps the stranded
+\* array restriction. KeepPrefixEvaluator keeps treating a lone partial
+\* prefixItems as a complete evaluator. KeepUepSchema keeps a schema-valued
+\* closed rule unmerged. KeepCondEvalLost skips only the conditional-route
+\* relaxation of the stranded closed rule.
+Decisions(i) ==
+    LET refChanged == i.ref2 /\ i.kw2 # {}
+    IN LET fixed ==
+        [required |-> Required(i), kept |-> {}, noted |-> i.kw2,
+         notDropped |-> i.not2 /\ (i.childKw \/ refChanged),
+         overlapSafe |-> i.oneOf2 /\ (i.branchKw \/ refChanged),
+         apRelaxed |-> i.closed2 /\ ~i.uneval2 /\ ~i.uepSchema2,
+         uepRelaxed |-> (i.closed2 /\ i.uneval2 /\ ~i.uepSchema2)
+                        \/ (i.cond2 /\ i.condEvalLost2)
+                        \/ i.childRefPat2,
+         uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
+         condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
+         siblingKept |-> TRUE,
+         uiRelaxed |-> (i.containsClosed2 \/ i.childContains2 \/ i.childRefContains2)
+                        /\ ~i.arrEvaluator2]
+    IN CASE Variant = "ForceRequired" ->
+        [fixed EXCEPT !["required"] = {1, 2}]
+    [] Variant = "KeepPattern" ->
+        [fixed EXCEPT !["kept"] = i.kw2, !["notDropped"] = FALSE,
+         !["overlapSafe"] = FALSE, !["apRelaxed"] = FALSE,
+         !["uepRelaxed"] = FALSE]
+    [] Variant = "DropSilently" ->
+        [fixed EXCEPT !["noted"] = {}]
+    [] Variant = "NotTighten" ->
+        [fixed EXCEPT !["notDropped"] = FALSE]
+    [] Variant = "KeepOneOf" ->
+        [fixed EXCEPT !["overlapSafe"] = FALSE]
+    [] Variant = "KeepClosed" ->
+        [fixed EXCEPT !["apRelaxed"] = FALSE, !["uepRelaxed"] = FALSE,
+                      !["uepSchemaKept"] = FALSE]
+    [] Variant = "KeepConditional" ->
+        [fixed EXCEPT !["condRelaxed"] = FALSE]
+    [] Variant = "AbsorbAnyOf" ->
+        [fixed EXCEPT !["siblingKept"] = FALSE]
+    [] Variant = "KeepDependent" ->
+        [fixed EXCEPT !["kept"] = IF i.dep2 THEN i.kw2 ELSE {}]
+    [] Variant = "KeepRefPredicate" ->
+        [fixed EXCEPT !["notDropped"] = i.not2 /\ i.childKw,
+                      !["overlapSafe"] = i.oneOf2 /\ i.branchKw,
+                      !["condRelaxed"] = i.cond2 /\ i.ifKw]
+    [] Variant = "KeepUnevaluated" ->
+        [fixed EXCEPT !["uepRelaxed"] = FALSE]
+    [] Variant = "KeepContainsUneval" ->
+        [fixed EXCEPT !["uiRelaxed"] = FALSE]
+    [] Variant = "KeepPrefixEvaluator" ->
+        [fixed EXCEPT !["uiRelaxed"] = (i.containsClosed2 \/ i.childContains2) /\ ~i.arrEvaluator2 /\ ~i.partialPrefix2]
+    [] Variant = "KeepUepSchema" ->
+        [fixed EXCEPT !["uepSchemaKept"] = FALSE]
+    [] Variant = "KeepCondEvalLost" ->
+        [fixed EXCEPT !["uepRelaxed"] = i.closed2 /\ i.uneval2 /\ ~i.uepSchema2]
+    [] OTHER -> fixed
+
+TypeOK ==
+    /\ Decisions(in).required \subseteq {1, 2}
+    /\ Decisions(in).kept \subseteq REJECTED
+    /\ Decisions(in).noted \subseteq REJECTED
+    /\ Decisions(in).notDropped \in BOOLEAN
+    /\ Decisions(in).overlapSafe \in BOOLEAN
+    /\ Decisions(in).apRelaxed \in BOOLEAN
+    /\ Decisions(in).uepRelaxed \in BOOLEAN
+    /\ Decisions(in).uepSchemaKept \in BOOLEAN
+    /\ Decisions(in).condRelaxed \in BOOLEAN
+    /\ Decisions(in).siblingKept \in BOOLEAN
+    /\ Decisions(in).uiRelaxed \in BOOLEAN
+
+Init == in \in Inputs
+Next == UNCHANGED in
+Spec == Init /\ [][Next]_in
+
+\* Safety: optionality survives compilation.
+RequiredPreserved == Decisions(in).required = Required(in)
+
+\* Safety: no gateway-rejected keyword reaches the request.
+ForbiddenAbsent == Decisions(in).kept = {}
+
+\* Safety: every removed constraint stays visible to the model.
+ConstraintsRecorded == Decisions(in).noted = in.kw2
+
+\* v2 is a valid instance of the input schema: it satisfies the string
+\* constraints (including any kept keyword), it is not excluded by the
+\* not-child's original predicate, it matches exactly one input oneOf branch,
+\* and its object key is legal through patternProperties. SatPreserved says
+\* compilation keeps v2 valid: the compiler may relax, never tighten.
+NotPart(i) ==
+    IF ~i.not2 THEN TRUE
+    ELSE IF Decisions(i).notDropped THEN TRUE
+    ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.ref2 /\ i.kw2 # {} THEN FALSE
+    ELSE i.childKw = FALSE
+
+OneOfPart(i) ==
+    IF ~i.oneOf2 THEN TRUE
+    ELSE IF Decisions(i).overlapSafe THEN TRUE
+    ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.ref2 /\ i.kw2 # {} THEN FALSE
+    ELSE i.branchKw = FALSE
+
+ClosedPart(i) ==
+    IF ~i.closed2 THEN TRUE
+    ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.cond2 /\ i.condEvalLost2 THEN Decisions(i).uepRelaxed
+    ELSE IF i.closed2 /\ i.childRefPat2 THEN Decisions(i).uepRelaxed
+    ELSE IF i.uepSchema2 THEN Decisions(i).uepSchemaKept
+    ELSE IF i.uneval2 THEN Decisions(i).uepRelaxed
+    ELSE Decisions(i).apRelaxed
+
+\* v2 does not match the original if predicate when ifKw holds: the
+\* conditional keeps accepting it only when compilation relaxed it or the
+\* predicate never lost a keyword.
+CondPart(i) ==
+    IF ~i.cond2 THEN TRUE
+    ELSE IF Decisions(i).condRelaxed THEN TRUE
+    ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.ref2 /\ i.kw2 # {} THEN FALSE
+    ELSE i.ifKw = FALSE
+
+SatPreserved == NotPart(in) /\ OneOfPart(in) /\ ClosedPart(in) /\ CondPart(in)
+
+\* Safety: relaxed oneOf alternatives stay one separate conjunct, so an
+\* unchanged anyOf sibling keeps applying on its own (a value it rejects
+\* stays rejected).
+SiblingConjunctKept ==
+    IF Decisions(in).overlapSafe /\ in.anyOf2 THEN Decisions(in).siblingKept
+    ELSE TRUE
+
+\* Safety (review 4719419428): a removed contains with no retained items
+\* evaluator relaxes the stranded unevaluatedItems: false, so the array
+\* keeps accepting the items the original accepted. A retained items
+\* evaluates every index, so with one the restriction is ordinary and
+\* stays (review 4725679660); a lone partial prefixItems evaluates only
+\* its listed positions, so the contains-evaluated trailing indices stay
+\* unevaluated and the restriction relaxes (review 4719935091). A changed
+\* child applicator branch that carried contains loses its item
+\* evaluations too, so the relaxation applies through childContains2 even
+\* though this node's removed record holds no contains (4726104165). The
+\* same loss arrives through an UNCHANGED branch that only references a
+\* target which lost its contains rule (childRefContains2, review
+\* 4728045839).
+ArraySatKept ==
+    ((in.containsClosed2 \/ in.childContains2 \/ in.childRefContains2) /\ ~in.arrEvaluator2) => Decisions(in).uiRelaxed
+
+\* Safety (review 4726104161): a changed conditional whose dropped branch
+\* or stripped predicate evaluated keys strands a retained
+\* unevaluatedProperties rule just like a removed patternProperties rule
+\* does - the evaluations the rule relied on leave with the change, so a
+\* required key would become forbidden. The rule relaxes; a closed object
+\* with no changed conditional keeps it.
+CondEvalRelaxed ==
+    (in.cond2 /\ in.condEvalLost2) => Decisions(in).uepRelaxed
+
+====

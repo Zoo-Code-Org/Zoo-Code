@@ -7,6 +7,67 @@ import type { ApiStream } from "../../transform/stream"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import { flushMacrotasks } from "../../../test-utils/timers"
 
+// A minimal JSON Schema acceptance oracle for the constructs the strict
+// conversion emits (type, enum, anyOf/oneOf). It answers "does this property
+// schema accept the value", the same question a Draft 2020-12 validator asks.
+// Mock evidence only: no live API request.
+const isSchemaNode = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+// The JSON Schema type of a value: an array is "array", not the typeof
+// "object" (#2653 review 4680624688), an integer is distinct from other
+// numbers, and null is its own type.
+const schemaTypeOf = (value: unknown): string => {
+	if (value === null) {
+		return "null"
+	}
+	if (Array.isArray(value)) {
+		return "array"
+	}
+	if (typeof value === "number") {
+		return Number.isInteger(value) ? "integer" : "number"
+	}
+	return typeof value
+}
+
+const acceptsValue = (schema: unknown, value: unknown): boolean => {
+	if (schema === true) {
+		return true
+	}
+	if (!isSchemaNode(schema)) {
+		return false
+	}
+	// Draft 2020-12: sibling constraints apply together, and oneOf requires
+	// exactly one matching alternative (#547 review). Evaluate every
+	// applicable keyword instead of returning early on the first.
+	let accepts = true
+	if (Array.isArray(schema.anyOf)) {
+		accepts = accepts && schema.anyOf.some((alternative) => acceptsValue(alternative, value))
+	}
+	if (accepts && Array.isArray(schema.oneOf)) {
+		const matching = schema.oneOf.filter((alternative) => acceptsValue(alternative, value))
+		accepts = accepts && matching.length === 1
+	}
+	if (accepts && schema.type !== undefined) {
+		const types: unknown[] = Array.isArray(schema.type) ? schema.type : [schema.type]
+		const jsType = schemaTypeOf(value)
+		// Draft 2020-12: an integer is also a number (#2653 review
+		// 4682419243), so a "number" constraint accepts integer values too.
+		const matches = types.includes(jsType) || (jsType === "integer" && types.includes("number"))
+		if (!matches) {
+			accepts = false
+		}
+	}
+	if (accepts && Array.isArray(schema.allOf)) {
+		// Sibling conjuncts apply together (Draft 2020-12): every allOf
+		// branch must accept the value (review 4726390986).
+		accepts = accepts && schema.allOf.every((conjunct) => acceptsValue(conjunct, value))
+	}
+	if (accepts && Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+		accepts = false
+	}
+	return accepts
+}
+
 // Create a concrete implementation for testing
 class TestProvider extends BaseProvider {
 	createMessage(_systemPrompt: string, _messages: Anthropic.Messages.MessageParam[]): ApiStream {
@@ -150,6 +211,7 @@ describe("BaseProvider", () => {
 		it("should convert nullable types to non-nullable", () => {
 			const schema = {
 				type: "object",
+				required: ["name"],
 				properties: {
 					name: { type: ["string", "null"] },
 				},
@@ -207,6 +269,7 @@ describe("BaseProvider", () => {
 	it("keeps a nullable type with more than one non-null type as an array", () => {
 		const schema = {
 			type: "object",
+			required: ["value"],
 			properties: {
 				value: { type: ["string", "null", "number"] },
 			},
@@ -275,6 +338,798 @@ describe("BaseProvider", () => {
 		// list to filter.
 		expect(result.properties.only.type).toBe("null")
 	})
+
+	describe("strict optional parameters (#547)", () => {
+		it("recurses into nested combinator wrappers before appending a null alternative (#2653 review 4674816413)", () => {
+			// The outer alternative is a bare nested-anyOf wrapper: it has no
+			// type or enum of its own, so only recursion can see that neither
+			// inner alternative accepts null.
+			const schema = {
+				type: "object",
+				properties: {
+					format: { anyOf: [{ anyOf: [{ type: "string" }, { type: "integer" }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.format
+			// The nested wrapper rejected null, so the outer anyOf gains a
+			// null alternative — the only null match under exactly-one.
+			expect(prop.anyOf).toEqual([{ anyOf: [{ type: "string" }, { type: "integer" }] }, { type: "null" }])
+			expect(acceptsValue(prop, null)).toBe(true)
+			expect(acceptsValue(prop, "docx")).toBe(true)
+			expect(acceptsValue(prop, 7)).toBe(true)
+		})
+
+		it("does not add a null alternative when a nested combinator already accepts null (#2653 review 4674816413)", () => {
+			const schema = {
+				type: "object",
+				properties: {
+					format: { anyOf: [{ anyOf: [{ type: "string" }, { type: "null" }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.format
+			// The inner alternative accepts null, so the outer wrapper does
+			// too — appending would make null match twice under exactly-one.
+			expect(prop.anyOf).toEqual([{ anyOf: [{ type: "string" }, { type: "null" }] }])
+			expect(acceptsValue(prop, null)).toBe(true)
+			expect(acceptsValue(prop, "docx")).toBe(true)
+		})
+
+		it("appends a null alternative when a nested oneOf matches null twice (#2653 review 4675120035)", () => {
+			// The nested oneOf rejects null under exactly-one semantics (both
+			// inner alternatives match), so the wrapper must NOT report
+			// acceptance and the outer anyOf must gain a null alternative.
+			const schema = {
+				type: "object",
+				properties: {
+					format: { anyOf: [{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.format
+			expect(prop.anyOf).toEqual([
+				{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+				{ type: "null" },
+			])
+			expect(acceptsValue(prop, null)).toBe(true)
+			// Valid non-null values are unchanged.
+			expect(acceptsValue(prop, "docx")).toBe(true)
+			expect(acceptsValue(prop, 7)).toBe(true)
+		})
+
+		it("normalizes the original object before wrapping a multi-match oneOf (#2653 review 4675158952)", () => {
+			// A wrapped object-typed original leaves no effective type for the
+			// recursion below, so its inner object must be normalized before
+			// the wrap.
+			const schema = {
+				type: "object",
+				properties: {
+					value: {
+						type: "object",
+						properties: { limit: { type: "integer" } },
+						oneOf: [{ type: ["object", "null"] }, { type: ["string", "null"] }],
+					},
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.value
+			expect(prop.anyOf).toHaveLength(2)
+			const original = prop.anyOf[0]
+			// The original carries the strict object constraints.
+			expect(original.additionalProperties).toBe(false)
+			expect(original.required).toEqual(["limit"])
+			// Its inner optional property is nullable.
+			expect(original.properties.limit.type).toEqual(["integer", "null"])
+			// The original keeps its declared (nullable) type; null is
+			// accepted through the outer alternative.
+			expect(original.type).toEqual(["object", "null"])
+			expect(prop.anyOf[1]).toEqual({ type: "null" })
+			expect(acceptsValue(prop, null)).toBe(true)
+		})
+
+		it("normalizes array-item objects before wrapping a multi-match oneOf (#2653 review 4675584064)", () => {
+			// The wrapper leaves no effective type, so the recursion below
+			// never reaches the items object — it must be normalized before
+			// the wrap, while the declared (nullable) array type and the
+			// outer null alternative are preserved.
+			const schema = {
+				type: "object",
+				properties: {
+					value: {
+						type: "array",
+						items: { type: "object", properties: { limit: { type: "integer" } } },
+						oneOf: [{ type: ["array", "null"] }, { type: ["string", "null"] }],
+					},
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.value
+			expect(prop.anyOf).toHaveLength(2)
+			const original = prop.anyOf[0]
+			// The array original keeps its declared (nullable) type.
+			expect(original.type).toEqual(["array", "null"])
+			// Its items object carries the strict constraints.
+			expect(original.items.additionalProperties).toBe(false)
+			expect(original.items.required).toEqual(["limit"])
+			expect(original.items.properties.limit.type).toEqual(["integer", "null"])
+			// Null stays accepted through the outer alternative only.
+			expect(prop.anyOf[1]).toEqual({ type: "null" })
+			expect(acceptsValue(prop, null)).toBe(true)
+			// Non-null arrays still validate against the wrapped original:
+			// its array type and inner oneOf admit them (#2653 review
+			// 4680624688). The array-aware oracle classifies [] as
+			// "array", not "object".
+			expect(acceptsValue(prop, [])).toBe(true)
+			expect(acceptsValue(prop, [{ limit: 1 }])).toBe(true)
+			// A non-array, non-null value matches only the inner string
+			// alternative, and the original's array type rejects it.
+			expect(acceptsValue(prop, "read")).toBe(false)
+		})
+
+		it.each([
+			{
+				// The boolean `true` schema accepts every value, null
+				// included (JSON Schema core, appendix A).
+				name: "a boolean true alternative accepts null",
+				prop: { oneOf: [true, { type: "string" }] },
+				expected: { oneOf: [true, { type: "string" }] },
+			},
+			{
+				// The boolean `false` schema accepts nothing, so only the
+				// string alternative matches null.
+				name: "a boolean false alternative rejects null",
+				prop: { oneOf: [false, { type: ["string", "null"] }] },
+				expected: { oneOf: [false, { type: ["string", "null"] }] },
+			},
+			{
+				// A null entry is not a schema: it must not be counted as
+				// a null-accepting alternative, and it must not crash the
+				// converter.
+				name: "a null alternative entry rejects null",
+				prop: { oneOf: [null, { type: ["string", "null"] }] },
+				expected: { oneOf: [null, { type: ["string", "null"] }] },
+			},
+		])(
+			"$name: exactly one alternative accepts null, so the combinator stays untouched (#2653 mutation round)",
+			({ prop, expected }) => {
+				const schema = { type: "object", properties: { value: prop } }
+				const result = provider.testConvertToolSchemaForOpenAI(schema)
+				const converted = result.properties.value
+				// Neither an appended null alternative nor an anyOf wrap.
+				expect(converted).toStrictEqual(expected)
+				expect(acceptsValue(converted, null)).toBe(true)
+			},
+		)
+
+		it.each([
+			{
+				// Nested anyOf: both inner alternatives accept null and
+				// anyOf needs only one match, so the wrapper accepts null
+				// and the outer combinator is left alone.
+				name: "nested anyOf accepts null through any inner match",
+				prop: { anyOf: [{ anyOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }] },
+				outerLength: 1,
+			},
+			{
+				// Nested oneOf: both inner alternatives match null, so the
+				// exactly-one rule rejects the wrapper and the outer
+				// combinator gains a null alternative.
+				name: "nested oneOf rejects null when two inner alternatives match",
+				prop: { anyOf: [{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }] },
+				outerLength: 2,
+			},
+		])("$name (#2653 mutation round)", ({ prop, outerLength }) => {
+			const schema = { type: "object", properties: { value: prop } }
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const converted = result.properties.value
+			expect(converted.anyOf).toHaveLength(outerLength)
+			if (outerLength === 1) {
+				expect(converted.anyOf).toStrictEqual(prop.anyOf)
+			} else {
+				expect(converted.anyOf[1]).toStrictEqual({ type: "null" })
+			}
+		})
+
+		it("classifies every property as optional when the schema declares no required list (#2653 mutation round)", () => {
+			// The property name is the ArrayDeclaration mutant's
+			// replacement literal: a mutated declared-required fallback
+			// would treat THIS key as declared required and strip the
+			// null-accepting type optional keys must gain.
+			const schema = {
+				type: "object",
+				properties: {
+					"Stryker was here": { type: "integer" },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties["Stryker was here"].type).toStrictEqual(["integer", "null"])
+		})
+
+		it.each([
+			{
+				name: "an optional type list without null gains null",
+				type: ["integer"],
+				expected: ["integer", "null"],
+			},
+			{
+				name: "an optional type list of only null stays unchanged",
+				type: ["null"],
+				expected: ["null"],
+			},
+			{
+				name: "an empty optional type list stays empty",
+				type: [],
+				expected: [],
+			},
+		])("normalizes optional type lists: $name (#2653 mutation round)", ({ type, expected }) => {
+			const schema = { type: "object", properties: { value: { type } } }
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			expect(result.properties.value.type).toStrictEqual(expected)
+		})
+
+		it.each([
+			{
+				// One null match under anyOf semantics: nothing to do.
+				name: "a single null-accepting anyOf alternative",
+				prop: { anyOf: [{ type: ["string", "null"] }] },
+			},
+			{
+				// One null match under exactly-one semantics: appending a
+				// second null alternative would make null match twice.
+				name: "a single null-accepting oneOf alternative",
+				prop: { oneOf: [{ type: ["string", "null"] }, { type: "integer" }] },
+			},
+		])("leaves $name untouched: no append, no wrap (#2653 mutation round)", ({ prop }) => {
+			const schema = { type: "object", properties: { value: prop } }
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			expect(result.properties.value).toStrictEqual(prop)
+		})
+
+		it("normalizes an object-typed original without properties before wrapping (review 6084531532)", () => {
+			// No properties: the wrapper's object branch must still fire. Strict
+			// mode requires additionalProperties: false on every object schema,
+			// so the wrapped original carries it even with no declared properties
+			// (the round-6 correction applied to the property-less shape).
+			const prop = {
+				type: "object",
+				oneOf: [{ type: ["object", "null"] }, { type: ["string", "null"] }],
+			}
+			const schema = { type: "object", properties: { value: prop } }
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties.value.anyOf).toStrictEqual([
+				{
+					type: ["object", "null"],
+					oneOf: prop.oneOf,
+					additionalProperties: false,
+				},
+				{ type: "null" },
+			])
+		})
+
+		it("wraps an array-typed original without items unchanged (#2653 mutation round)", () => {
+			const prop = {
+				type: "array",
+				oneOf: [{ type: ["array", "null"] }, { type: ["string", "null"] }],
+			}
+			const schema = { type: "object", properties: { value: prop } }
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// No items: the wrapper's array branch must not fire.
+			// toStrictEqual also rejects an `items: undefined` key that a
+			// mutated branch would add.
+			expect(result.properties.value.anyOf).toStrictEqual([
+				{ type: ["array", "null"], oneOf: prop.oneOf },
+				{ type: "null" },
+			])
+		})
+
+		it("converts items only for array-typed originals (#2653 mutation round)", () => {
+			// Object-typed items on an original with NO array type: the
+			// wrap keeps the original as declared instead of converting
+			// its items.
+			const prop = {
+				items: { type: "object", properties: { limit: { type: "integer" } } },
+				oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }],
+			}
+			const schema = { type: "object", properties: { value: prop } }
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const original = result.properties.value.anyOf[0]
+			expect(original.items).toStrictEqual(prop.items)
+		})
+
+		it("keeps a single-element non-null type list of a declared required property as a list (#2653 mutation round)", () => {
+			const schema = {
+				type: "object",
+				required: ["value"],
+				properties: {
+					value: { type: ["integer"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// Declared required with a type list that holds no "null":
+			// the nullable-strip branch must not fire, and the list is not
+			// collapsed to a bare type.
+			expect(result.properties.value.type).toStrictEqual(["integer"])
+		})
+
+		it("normalizes the nested schema of a declared required object property (#2653 mutation round)", () => {
+			const schema = {
+				type: "object",
+				required: ["value"],
+				properties: {
+					value: { type: "object", properties: { limit: { type: "integer" } } },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const value = result.properties.value
+			// The declared type is kept while the object recursion adds
+			// the strict constraints and nullable inner properties.
+			expect(value.type).toBe("object")
+			expect(value.additionalProperties).toBe(false)
+			expect(value.required).toStrictEqual(["limit"])
+			expect(value.properties.limit.type).toStrictEqual(["integer", "null"])
+		})
+
+		it("wraps an optional oneOf whose alternatives all accept null in an outer anyOf (#2653 review 4674816421)", () => {
+			// null matches TWO inner alternatives; appending nothing leaves
+			// oneOf rejecting null (exactly-one), so the property must be
+			// wrapped instead.
+			const schema = {
+				type: "object",
+				properties: {
+					value: { oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.value
+			expect(prop.anyOf).toEqual([
+				{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+				{ type: "null" },
+			])
+			// null matches only the outer alternative; non-null values match
+			// only the original — exactly-one holds for every value.
+			expect(acceptsValue(prop, null)).toBe(true)
+			expect(acceptsValue(prop, "docx")).toBe(true)
+			expect(acceptsValue(prop, 7)).toBe(true)
+		})
+
+		it("keeps an optional parameter nullable while a required one stays a value", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					offset: { type: "integer" },
+					limit: { type: "integer" },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// Strict mode lists every key in required. A key the schema did not
+			// declare required must then accept null, or the model cannot omit
+			// it and the call fails with "Missing required parameter".
+			expect(result.required).toEqual(["path", "offset", "limit"])
+			expect(result.properties.path.type).toBe("string")
+			expect(result.properties.offset.type).toEqual(["integer", "null"])
+			expect(result.properties.limit.type).toEqual(["integer", "null"])
+		})
+
+		it("keeps a declared nullable optional parameter nullable", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					limit: { type: ["integer", "null"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties.limit.type).toEqual(["integer", "null"])
+		})
+
+		it("keeps a declared required parameter non-nullable", () => {
+			const schema = {
+				type: "object",
+				required: ["regex"],
+				properties: {
+					regex: { type: ["string", "null"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties.regex.type).toBe("string")
+		})
+
+		it("marks every parameter nullable when the schema declares no required", () => {
+			const schema = {
+				type: "object",
+				properties: {
+					query: { type: "string" },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// No declared required means every key is optional in JSON Schema,
+			// so every key must accept null under strict mode.
+			expect(result.properties.query.type).toEqual(["string", "null"])
+		})
+
+		it("normalizes the nested schema of a nullable optional object", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					indentation: {
+						type: ["object", "null"],
+						properties: { anchor_line: { type: "integer" } },
+						required: [],
+					},
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const indentation = result.properties.indentation
+
+			expect(indentation.type).toEqual(["object", "null"])
+			expect(indentation.additionalProperties).toBe(false)
+			expect(indentation.required).toEqual(["anchor_line"])
+			expect(indentation.properties.anchor_line.type).toEqual(["integer", "null"])
+		})
+
+		it("emits a strict schema a Draft 2020-12 endpoint accepts (mock, #547)", () => {
+			// Mock evidence only: no live DeepSeek request. The parameters copy
+			// the read_file shape from the issue report.
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "Read a file",
+						parameters: {
+							type: "object",
+							required: ["path"],
+							properties: {
+								path: { type: "string" },
+								file_pattern: { type: "string", pattern: "[a-zA-Z0-9_]+$" },
+								limit: { type: "integer" },
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			expect(result?.[0].function.strict).toBe(true)
+			expect(parameters.properties.path.type).toBe("string")
+			expect(parameters.properties.limit.type).toEqual(["integer", "null"])
+			expect(parameters.properties.file_pattern.type).toEqual(["string", "null"])
+			expect(parameters.properties.file_pattern.pattern).toBeUndefined()
+			expect(parameters.properties.file_pattern.description).toContain("pattern")
+		})
+
+		it("adds a null alternative to an optional composed schema without a top-level type (mock, #547)", () => {
+			// Mock evidence only: no live API request. Neither type branch
+			// applies to a composed schema, so the property must gain a
+			// null alternative or the model cannot omit it.
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					target: { anyOf: [{ type: "string" }, { type: "integer" }] },
+					mode: { oneOf: [{ type: "string" }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const target = result.properties.target
+			const mode = result.properties.mode
+
+			expect(result.required).toEqual(["path", "target", "mode"])
+			// Every declared alternative survives; only a null one is added.
+			expect(target.anyOf).toEqual([{ type: "string" }, { type: "integer" }, { type: "null" }])
+			expect(mode.oneOf).toEqual([{ type: "string" }, { type: "null" }])
+			expect(acceptsValue(target, null)).toBe(true)
+			expect(acceptsValue(target, "docs")).toBe(true)
+			expect(acceptsValue(target, 7)).toBe(true)
+			expect(acceptsValue(target, true)).toBe(false)
+			expect(acceptsValue(mode, null)).toBe(true)
+			expect(acceptsValue(mode, "read")).toBe(true)
+		})
+
+		it("applies sibling constraints together when making composed optional properties nullable (mock, #547 review)", () => {
+			// Mock evidence only: no live API request. A combinator applies
+			// alongside a top-level type (Draft 2020-12 sibling constraints),
+			// and null acceptance is decided by evaluating null against each
+			// alternative, never by inspecting an alternative's type alone.
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					// Sibling constraints: the anyOf must also admit null.
+					label: { type: "string", anyOf: [{ type: "string" }] },
+					// The alternative's type admits null but its enum does
+					// not: null acceptance must not be inferred from the type.
+					access: { anyOf: [{ type: ["string", "null"], enum: ["read"] }] },
+					// Already null-accepting through the enum: no second null
+					// alternative may be appended (oneOf is exactly-one).
+					channel: { oneOf: [{ enum: ["read", null] }] },
+					// Both combinators present: each must accept null on its
+					// own, so both gain a null alternative. The fixture stays
+					// satisfiable — a value must satisfy both siblings.
+					format: { anyOf: [{ type: "string" }], oneOf: [{ type: "string" }, { type: "integer" }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const label = result.properties.label
+			const access = result.properties.access
+			const channel = result.properties.channel
+			const format = result.properties.format
+
+			// label: the type widened AND the anyOf gained a null alternative,
+			// so both siblings accept null and string values still validate.
+			expect(label.type).toEqual(["string", "null"])
+			expect(label.anyOf).toEqual([{ type: "string" }, { type: "null" }])
+			expect(acceptsValue(label, null)).toBe(true)
+			expect(acceptsValue(label, "main")).toBe(true)
+
+			// access: the enum-rejecting alternative does not count as
+			// null-accepting, so exactly one null alternative is appended.
+			expect(access.anyOf).toEqual([{ type: ["string", "null"], enum: ["read"] }, { type: "null" }])
+			expect(acceptsValue(access, null)).toBe(true)
+			expect(acceptsValue(access, "read")).toBe(true)
+
+			// channel: the enum alternative already accepts null; appending
+			// another null alternative would make null match twice under oneOf.
+			expect(channel.oneOf).toEqual([{ enum: ["read", null] }])
+			expect(acceptsValue(channel, null)).toBe(true)
+			expect(acceptsValue(channel, "read")).toBe(true)
+
+			// format: both combinators gain a null alternative — normalizing
+			// only anyOf would leave oneOf rejecting null (sibling AND). The
+			// fixture is satisfiable: strings satisfy both siblings.
+			expect(format.anyOf).toEqual([{ type: "string" }, { type: "null" }])
+			expect(format.oneOf).toEqual([{ type: "string" }, { type: "integer" }, { type: "null" }])
+			expect(acceptsValue(format, null)).toBe(true)
+			expect(acceptsValue(format, "docx")).toBe(true)
+			// Sibling rejection: no anyOf alternative accepts a number, so the
+			// string-or-null union rejects 7 even though the oneOf sibling
+			// accepts it (#2653 review 4682419243).
+			expect(acceptsValue(format, 7)).toBe(false)
+		})
+
+		it("evaluates a nested allOf conjunct before deciding on a null alternative (#2653 review 4726390986)", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					// The sole alternative carries no type of its own, but its
+					// allOf conjunct rejects null: the evaluator must not
+					// report acceptance from the bare wrapper alone, or the
+					// parent makes the key required and the model can neither
+					// omit it nor send null.
+					verify: { anyOf: [{ allOf: [{ type: "string" }] }] },
+					// Control: a conjunct that admits null keeps the
+					// alternative null-accepting, so no second null
+					// alternative is appended (oneOf-safe count is untouched
+					// for anyOf with one accepting alternative).
+					nullable: { anyOf: [{ allOf: [{ type: ["string", "null"] }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const verify = result.properties.verify
+			const nullable = result.properties.nullable
+
+			// verify: the conjunct rejects null, so the parent anyOf gains a
+			// null alternative and both siblings accept null again; a string
+			// value still passes the conjunct.
+			expect(verify.anyOf).toEqual([{ allOf: [{ type: "string" }] }, { type: "null" }])
+			expect(acceptsValue(verify, null)).toBe(true)
+			expect(acceptsValue(verify, "read")).toBe(true)
+			expect(acceptsValue(verify, 7)).toBe(false)
+
+			// nullable: the conjunct admits null, so nothing is appended.
+			expect(nullable.anyOf).toEqual([{ allOf: [{ type: ["string", "null"] }] }])
+			expect(acceptsValue(nullable, null)).toBe(true)
+			expect(acceptsValue(nullable, "read")).toBe(true)
+		})
+
+		it("rewrites sibling references into a scalar-wrapped oneOf property (#2653 review 4726390989)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "wrapped_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								// Both alternatives accept null: the wrap takes
+								// the scalar route (no object or array shape),
+								// and the property relocates under anyOf/0.
+								value: { oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+								mirror: { $ref: "#/properties/value/oneOf/0" },
+							},
+							required: [],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// The scalar wrap records the move at the shared point: the
+			// sibling reference follows the branch to its new location
+			// instead of dangling on the removed oneOf position.
+			expect(parameters.properties.value).toStrictEqual({
+				anyOf: [{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }, { type: "null" }],
+			})
+			expect(parameters.properties.mirror).toStrictEqual({ $ref: "#/properties/value/anyOf/0/oneOf/0" })
+		})
+
+		it("keeps a sibling's own __proto__ property through the wrap-reference walk (#2653 review 4728045833)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "wrapped_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								// Optional multi-null oneOf: the wrap takes
+								// the scalar route and every sibling schema
+								// passes through the wrap-reference walker.
+								value: { oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+								// The computed key makes "__proto__" an OWN
+								// data property of the map, the way a
+								// caller's JSON.parse'd schema arrives - a
+								// plain literal key would set the prototype
+								// instead.
+								sibling: {
+									type: "object",
+									properties: { ["__proto__"]: { type: "string" } },
+									required: ["__proto__"],
+								},
+							},
+							required: [],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// Rebuilding the map with plain assignments invokes the
+			// inherited accessor: the entry silently disappears while the
+			// required list still names it. Own-property creation keeps the
+			// entry beside its declared schema.
+			const siblingProperties = parameters.properties.sibling.properties as Record<string, unknown>
+			expect(Object.prototype.hasOwnProperty.call(siblingProperties, "__proto__")).toBe(true)
+			expect(siblingProperties["__proto__"]).toStrictEqual({ type: "string" })
+			expect(Object.getPrototypeOf(siblingProperties)).toBe(Object.prototype)
+			expect(parameters.properties.sibling.required).toStrictEqual(["__proto__"])
+		})
+
+		it("treats integers as numbers in the oracle while keeping oneOf exclusive (mock, #547)", () => {
+			// Mock evidence only: the oracle mirrors Draft 2020-12 numeric
+			// types (#2653 review 4682419243). An integer is also a number; a
+			// fractional value is not an integer.
+			expect(acceptsValue({ type: "number" }, 7)).toBe(true)
+			expect(acceptsValue({ type: "number" }, 1.5)).toBe(true)
+			expect(acceptsValue({ type: "integer" }, 7)).toBe(true)
+			expect(acceptsValue({ type: "integer" }, 1.5)).toBe(false)
+			// The integer now matches both alternatives, so the exactly-one
+			// rule of oneOf rejects it.
+			expect(acceptsValue({ oneOf: [{ type: "integer" }, { type: "number" }] }, 7)).toBe(false)
+			// A value neither alternative accepts stays rejected.
+			expect(acceptsValue({ oneOf: [{ type: "integer" }, { type: "number" }] }, "read")).toBe(false)
+		})
+
+		it("makes an optional enum property accept null while a declared required enum stays unchanged (mock, #547)", () => {
+			// Mock evidence only: no live API request. The enum rejects
+			// every value outside its list, so an optional enum property
+			// needs null in the enum as well as in the type.
+			const schema = {
+				type: "object",
+				required: ["speed"],
+				properties: {
+					speed: { type: "string", enum: ["fast", "safe"] },
+					mode: { type: "string", enum: ["read", "write"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const speed = result.properties.speed
+			const mode = result.properties.mode
+
+			// The complete converted property, per the review thread.
+			expect(result.required).toEqual(["speed", "mode"])
+			expect(speed).toEqual({ type: "string", enum: ["fast", "safe"] })
+			expect(mode).toEqual({ type: ["string", "null"], enum: ["read", "write", null] })
+			expect(acceptsValue(mode, null)).toBe(true)
+			expect(acceptsValue(mode, "read")).toBe(true)
+			expect(acceptsValue(mode, "bogus")).toBe(false)
+			expect(acceptsValue(speed, null)).toBe(false)
+		})
+
+		it("replays the enum-constrained optional property through the converter and a validator (mock, #547)", () => {
+			// Mock evidence only: no live API request. Replay of the
+			// review case: a type-only oracle passes the emitted schema,
+			// but only a validator that also checks enum membership
+			// accepts null for an enum-constrained optional property.
+			// The unconstrained optional string is the passing control.
+			const tools = [
+				{
+					type: "function" as const,
+					function: {
+						name: "search",
+						description: "Search files",
+						parameters: {
+							type: "object",
+							required: ["path"],
+							properties: {
+								path: { type: "string" },
+								style: { type: "string", enum: ["fast", "safe"] },
+								query: { type: "string" },
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// The schema-acceptance oracle answers the question a Draft
+			// 2020-12 validator asks about the emitted property.
+			expect(acceptsValue(parameters.properties.style, null)).toBe(true)
+			expect(acceptsValue(parameters.properties.style, "fast")).toBe(true)
+			expect(acceptsValue(parameters.properties.style, "other")).toBe(false)
+			// Passing control: the unconstrained optional string.
+			expect(acceptsValue(parameters.properties.query, null)).toBe(true)
+			expect(acceptsValue(parameters.properties.query, "text")).toBe(true)
+			// The declared required property stays a value property.
+			expect(acceptsValue(parameters.properties.path, null)).toBe(false)
+		})
+	})
+
 	describe("convertToolsForOpenAI", () => {
 		it("should return undefined for undefined input", () => {
 			const result = provider.testConvertToolsForOpenAI(undefined)
@@ -407,10 +1262,16 @@ describe("BaseProvider", () => {
 			const parameters = result?.[0].function.parameters
 
 			expect(parameters.properties.count).toEqual({
-				type: "number",
+				type: ["number", "null"],
 				description: 'Constraints: {"minimum":1,"maximum":9,"multipleOf":1}',
 			})
-			expect(parameters.properties.name).toMatchObject({ type: "string", pattern: "^a", format: "email" })
+			expect(parameters.properties.name).toMatchObject({ type: ["string", "null"], format: "email" })
+			expect(parameters.properties.name.pattern).toBeUndefined()
+			expect(parameters.properties.name.minLength).toBeUndefined()
+			expect(parameters.properties.name.maxLength).toBeUndefined()
+			expect(parameters.properties.name.description).toBe(
+				'Constraints: {"minLength":1,"maxLength":5,"pattern":"^a"}',
+			)
 			expect(parameters.properties.unsupportedFormat.format).toBeUndefined()
 			expect(parameters.properties.list.minItems).toBeUndefined()
 			expect(parameters.properties.list.uniqueItems).toBeUndefined()
@@ -472,10 +1333,25 @@ describe("BaseProvider", () => {
 			expect(parameters.properties.values.items[0].maxLength).toBeUndefined()
 			expect(parameters.properties.values.items[1].minimum).toBeUndefined()
 			expect(parameters.additionalProperties).toBe(false)
-			expect(parameters.not.maximum).toBeUndefined()
-			expect(parameters.if.minimum).toBeUndefined()
-			expect(parameters.then.maxLength).toBeUndefined()
-			expect(parameters.else.minLength).toBeUndefined()
+			// The negation's subtree lost a keyword: a retained not would
+			// reject values the original accepted, so the negation drops
+			// into the hint (review 4725679664).
+			expect(parameters).not.toHaveProperty("not")
+			// The stripped predicate stays as a bare annotation applicator
+			// and the branches travel into the hint (review 4725679729): a
+			// stripped predicate selects then for values the original
+			// routed to else.
+			expect(parameters.if).toStrictEqual({
+				type: "number",
+				description: 'Constraints: {"minimum":1}',
+			})
+			expect(parameters).not.toHaveProperty("then")
+			expect(parameters).not.toHaveProperty("else")
+			const description = String(parameters.description)
+			expect(description).toContain("maximum")
+			expect(description).toContain("minimum")
+			expect(description).toContain("maxLength")
+			expect(description).toContain("minLength")
 		})
 
 		it("replaces additionalProperties values other than false in nested schemas", () => {
@@ -553,9 +1429,12 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 			const options = result?.[0].function.parameters.properties.options
 
-			expect(options.type).toBe("object")
+			// The schema declares no required key, so the property stays
+			// nullable while its nested schema is still normalized (#547).
+			expect(options.type).toEqual(["object", "null"])
 			expect(options.required).toEqual(["limit"])
 			expect(options.additionalProperties).toBe(false)
+			expect(options.properties.limit.type).toEqual(["integer", "null"])
 			expect(options.properties.limit.minimum).toBeUndefined()
 		})
 
@@ -758,6 +1637,150 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 
 			expect(result?.[0]).toEqual(tools[0])
+		})
+
+		it("makes an optional string property with an allOf conjunct nullable across the whole property (review 4725679687)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "all_of_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								label: { type: "string", allOf: [{ type: "string" }] },
+							},
+							required: [],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const label = result?.[0].function.parameters.properties.label
+
+			// Sibling constraints apply together: a nullable type beside a
+			// string-only allOf still rejects null. The complete normalized
+			// property wraps with an outer null alternative, so the optional
+			// property accepts null again; the declared optionality stays.
+			expect(label).toStrictEqual({
+				anyOf: [{ type: ["string", "null"], allOf: [{ type: "string" }] }, { type: "null" }],
+			})
+		})
+
+		it("keeps a declared-required allOf property a value property (review 4725679687)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "all_of_required_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								label: { type: "string", allOf: [{ type: "string" }] },
+							},
+							required: ["label"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// A declared required key keeps its value type: no null
+			// alternative, no wrap.
+			expect(parameters.required).toStrictEqual(["label"])
+			expect(parameters.properties.label).toStrictEqual({ type: "string", allOf: [{ type: "string" }] })
+		})
+
+		it("rewrites sibling references into a wrapped property (review 4725679688)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "wrapped_ref_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								value: {
+									type: ["object", "null"],
+									oneOf: [
+										{ type: ["object", "null"], properties: { limit: { type: "number" } } },
+										{ type: ["object", "null"] },
+									],
+									properties: { limit: { type: "number" } },
+								},
+								other: { $ref: "#/properties/value/properties/limit" },
+							},
+							required: ["other"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// The multi-null-match wrap moves value's subtree under
+			// anyOf/0: the sibling pointer that names the pre-wrap location
+			// follows it, or it would name a location the emitted schema
+			// does not have.
+			expect(parameters.properties.other.$ref).toBe("#/properties/value/anyOf/0/properties/limit")
+			// The wrapped property keeps both original alternatives under
+			// anyOf/0 beside the null alternative.
+			const value = parameters.properties.value
+			expect(value.anyOf).toHaveLength(2)
+			// The inner conversion makes the nested optional property
+			// nullable, exactly like a top-level one.
+			expect(value.anyOf[0].properties.limit.type).toStrictEqual(["number", "null"])
+			expect(value.anyOf[1]).toStrictEqual({ type: "null" })
+		})
+
+		it("keeps a reference to an unwrapped root property beside a nested wrap (review 4726104157)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "nested_wrap_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								value: { type: "string" },
+								settings: {
+									type: "object",
+									properties: {
+										value: {
+											type: ["string", "null"],
+											allOf: [{ type: "string" }],
+										},
+										alias: { $ref: "#/properties/value" },
+										inner: { $ref: "#/properties/settings/properties/value" },
+									},
+									required: ["alias", "inner"],
+								},
+							},
+							required: ["value", "settings"],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			const settings = parameters.properties.settings
+			// The optional nested settings.value carries an allOf conjunct,
+			// so the conversion wraps it under anyOf/0. The recorded wrap
+			// path is document-root-relative: a sibling reference to the
+			// nested property follows the wrap...
+			expect(settings.properties.inner.$ref).toBe("#/properties/settings/properties/value/anyOf/0")
+			// ...while a reference to the unwrapped ROOT value stays
+			// verbatim - the pre-fix recording wrote "#/properties/value",
+			// and the rewrite bent the root reference to a nonexistent
+			// "#/properties/value/anyOf/0".
+			expect(settings.properties.alias.$ref).toBe("#/properties/value")
+			expect(parameters.properties.value).toStrictEqual({ type: "string" })
 		})
 	})
 

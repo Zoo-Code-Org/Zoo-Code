@@ -190,6 +190,21 @@ describe("executeCommandTool", () => {
 		})
 	})
 
+	describe("agent timeout conversion (review 4716476981)", () => {
+		it("converts a numeric timeout to background milliseconds and ignores a string", () => {
+			// A salvaged <timeout>5</timeout> used to arrive at the tool as
+			// the string "5": resolveAgentTimeoutMs maps that to 0, so the
+			// command never transitions to background after the requested 5
+			// seconds. The salvage converts number-declared arguments before
+			// promotion; this pins the conversion the number feeds.
+			delete process.env.ROO_CLI_RUNTIME
+			expect(executeCommandModule.resolveAgentTimeoutMs(5)).toBe(5000)
+			expect(executeCommandModule.resolveAgentTimeoutMs("5" as unknown as number)).toBe(0)
+			expect(executeCommandModule.resolveAgentTimeoutMs(null)).toBe(0)
+			expect(executeCommandModule.resolveAgentTimeoutMs(undefined)).toBe(0)
+		})
+	})
+
 	// Now we can run these tests
 	describe("Basic functionality", () => {
 		it("should execute a command normally", async () => {

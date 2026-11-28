@@ -15,6 +15,7 @@ import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { convertToR1Format } from "../transform/r1-format"
+import { compileToolParametersForDeepSeek } from "../transform/deepseek-tool-dialect"
 import { normalizeChatUsage } from "../transform/chat-usage-normalization"
 
 import { OpenAiHandler } from "./openai"
@@ -131,6 +132,39 @@ export class DeepSeekHandler extends OpenAiHandler {
 		}
 	}
 
+	// Issue #547: DeepSeek rejects strict-mode tool compilation (the
+	// DeepSeek strict-mode guide does not support minLength, and the forced
+	// all-required rule makes the model emit values for optional
+	// parameters; pattern is listed as supported in that guide, and the
+	// schema-compilation rejections in the field (HTTP 422) come from the
+	// gateways in front of the API - the issue names OpenRouter and
+	// Cerebras proxies - not from the JSON Schema standard, which defines
+	// both keywords). Send strict: false for every
+	// function tool and compile parameters through the DeepSeek dialect, which
+	// re-encodes gateway-rejected keywords as description hints while
+	// preserving the declared required arrays. Applies to MCP tools too: their
+	// server-provided schemas are the main source of pattern/minLength.
+	protected override convertToolsForOpenAI(tools: unknown[] | undefined): unknown[] | undefined {
+		const converted = super.convertToolsForOpenAI(tools, false)
+
+		if (!converted) {
+			return converted
+		}
+
+		return converted.map((tool) =>
+			tool.type === "function"
+				? {
+						...tool,
+						function: {
+							...tool.function,
+							strict: false,
+							parameters: compileToolParametersForDeepSeek(tool.function.parameters),
+						},
+					}
+				: tool,
+		)
+	}
+
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
@@ -165,7 +199,9 @@ export class DeepSeekHandler extends OpenAiHandler {
 			stream_options: { include_usage: true },
 			...(thinking && { thinking }),
 			...(deepSeekReasoningEffort && { reasoning_effort: deepSeekReasoningEffort }),
-			tools: this.convertToolsForOpenAI(metadata?.tools),
+			// The dialect compiler widens schemas to unknown; the request shape is
+			// restored here (the tools leave through the OpenAI chat params).
+			tools: this.convertToolsForOpenAI(metadata?.tools) as DeepSeekChatCompletionParams["tools"],
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}

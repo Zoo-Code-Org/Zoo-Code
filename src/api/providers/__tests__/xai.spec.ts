@@ -255,6 +255,43 @@ describe("XAIHandler", () => {
 		)
 	})
 
+	it("should keep optional tool parameters nullable through the Responses request path (mock, #547)", async () => {
+		// Mock evidence only: no live xAI request. Regression for the
+		// double conversion: the second pass read the rewritten required
+		// list as declared, and removed the nullability the first pass
+		// had added to an optional parameter.
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "read_file",
+					description: "Read a file",
+					parameters: {
+						type: "object",
+						required: ["path"],
+						properties: {
+							path: { type: "string" },
+							offset: { type: "integer" },
+						},
+					},
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+		})
+		await stream.next()
+
+		const parameters = mockResponsesCreate.mock.calls[0]?.[0].tools[0].parameters
+		expect(parameters.required).toEqual(["path", "offset"])
+		expect(parameters.properties.path.type).toBe("string")
+		expect(parameters.properties.offset.type).toEqual(["integer", "null"])
+	})
+
 	it("createMessage should honor an explicit parallelToolCalls false", async () => {
 		const testTools = [
 			{
