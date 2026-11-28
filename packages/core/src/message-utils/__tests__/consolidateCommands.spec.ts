@@ -5,6 +5,73 @@ import type { ClineMessage } from "@roo-code/types"
 import { consolidateCommands, COMMAND_OUTPUT_STRING } from "../consolidateCommands.js"
 
 describe("consolidateCommands", () => {
+	it("reuses unchanged MCP text across streaming updates but invalidates changed content and metadata", () => {
+		const request: ClineMessage = { ts: 1, type: "ask", ask: "use_mcp_server", text: '{"server":"test"}' }
+		const response: ClineMessage = {
+			ts: 2,
+			type: "say",
+			say: "mcp_server_response",
+			text: "large data".repeat(10_000),
+		}
+		const serialize = vi.spyOn(JSON, "stringify")
+		try {
+			consolidateCommands([request, response])
+			const count = serialize.mock.calls.length
+			request.isAnswered = true
+			const unchanged = consolidateCommands([
+				request,
+				response,
+				{ ts: 3, type: "say", say: "reasoning", text: "new chunk" },
+			])
+			expect(serialize.mock.calls.length).toBe(count)
+			expect(unchanged[0]?.isAnswered).toBe(true)
+			response.text = "updated"
+			const changed = consolidateCommands([request, response])
+			expect(serialize.mock.calls.length).toBe(count + 1)
+			expect(JSON.parse(changed[0]?.text ?? "{}").response).toBe("updated")
+		} finally {
+			serialize.mockRestore()
+		}
+	})
+	it("does not replace unrelated rows sharing a command timestamp", () => {
+		const messages: ClineMessage[] = [
+			{ ts: 1, type: "ask", ask: "command", text: "echo hello" },
+			{ ts: 1, type: "say", say: "text", text: "assistant text" },
+			{ ts: 1, type: "say", say: "command_output", text: "hello" },
+		]
+		expect(consolidateCommands(messages)).toEqual([
+			{ ...messages[0], text: "echo hello\nOutput:hello" },
+			messages[1],
+		])
+	})
+
+	it("preserves independently interleaved command and MCP responses", () => {
+		const messages: ClineMessage[] = [
+			{ ts: 1, type: "ask", ask: "command", text: "echo hello" },
+			{ ts: 2, type: "ask", ask: "use_mcp_server", text: '{"server":"test"}' },
+			{ ts: 3, type: "say", say: "command_output", text: "hello" },
+			{ ts: 4, type: "say", say: "mcp_server_response", text: "MCP data" },
+		]
+		const result = consolidateCommands(messages)
+		expect(result).toHaveLength(2)
+		expect(result[0]?.text).toBe("echo hello\nOutput:hello")
+		expect(JSON.parse(result[1]?.text ?? "{}")).toEqual({ server: "test", response: "MCP data" })
+	})
+
+	it("assembles large output sequences once without losing chunks", () => {
+		const messages: ClineMessage[] = [{ ts: 0, type: "ask", ask: "command", text: "run" }]
+		for (let i = 1; i <= 5_000; i++)
+			messages.push({ ts: i, type: "say", say: "command_output", text: `${i}:` + "x".repeat(1000) })
+		const result = consolidateCommands(messages)
+		expect(result).toHaveLength(1)
+		expect(result[0]?.text).toBe(
+			"run\nOutput:" +
+				messages
+					.slice(1)
+					.map((message) => message.text)
+					.join("\n"),
+		)
+	})
 	describe("command sequences", () => {
 		it("should consolidate command and command_output messages", () => {
 			const messages: ClineMessage[] = [
