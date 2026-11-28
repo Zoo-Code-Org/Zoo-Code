@@ -14,9 +14,16 @@ vi.mock("@roo-code/telemetry", () => ({
 
 vi.mock("fs/promises", () => ({
 	default: {
-		readFile: vi.fn().mockResolvedValue(""),
+		readFile: vi.fn().mockResolvedValue(Buffer.alloc(0)),
 	},
 }))
+
+// ApplyDiffTool reads the file with no encoding, so the call the double stands in for is the
+// byte-returning one: fs.readFile returns Buffer unless an encoding is passed. vi.mocked resolves
+// the encoding overload, so the mock is typed against the signature the tool actually calls.
+// readFile returns string or Buffer across its overloads; the tool calls the byte overload and the
+// double answers both, so the double is typed against the union rather than against one overload.
+const mockedReadFile = vi.mocked(fs.readFile as (path: string) => Promise<string | Buffer>)
 
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(true),
@@ -63,7 +70,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		vi.clearAllMocks()
 		pushedResult = undefined
 		vi.mocked(fileExistsAtPath).mockResolvedValue(true)
-		vi.mocked(fs.readFile).mockResolvedValue("line one\nline two\nline three\n")
+		mockedReadFile.mockResolvedValue(Buffer.from("line one\nline two\nline three\n", "utf8"))
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
@@ -149,6 +156,133 @@ describe("ApplyDiffTool failure reporting", () => {
 		}
 		return failures
 	}
+
+	describe("bytes the decoder cannot read", () => {
+		async function runOnBytes(bytes: string | Buffer): Promise<{ output: string; appliedTo: unknown }> {
+			mockedReadFile.mockResolvedValue(bytes)
+			const applyDiff = vi.fn().mockResolvedValue({ success: true, content: "unused" })
+			mockTask.diffStrategy = { getName: () => "test", applyDiff }
+			await applyDiffTool.execute({ path: testFilePath, diff: buildDiffContent(1) }, mockTask, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				toolCallId: "tool-call-1",
+				pushToolResult: vi.fn((result: ToolResponse) => {
+					pushedResult = result
+				}),
+			})
+			return {
+				output: String(pushedResult ?? ""),
+				appliedTo: applyDiff.mock.calls[0] ? applyDiff.mock.calls[0][0] : undefined,
+			}
+		}
+
+		// A byte the UTF-8 decoder rejects sits at index 3; everything around it is plain ASCII, so the
+		// offset the tool reports has to be that index and nothing else.
+		const UNDECODABLE = Buffer.from([0x68, 0x69, 0x20, 0xff, 0x61, 0x0a])
+
+		it("refuses the edit and names the file and the first undecodable byte", async () => {
+			const { output } = await runOnBytes(UNDECODABLE)
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 3).")
+			expect(mockTask.say).toHaveBeenCalledWith("error", output)
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_diff")
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("refuses before the diff is computed, approved, or written", async () => {
+			await runOnBytes(UNDECODABLE)
+
+			expect(mockedReadFile).toHaveBeenCalledWith(path.resolve("/workspace", testFilePath))
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("still edits a file whose bytes are valid multi-byte UTF-8", async () => {
+			const { output } = await runOnBytes(Buffer.from("héllo 中文 ✅\n", "utf8"))
+
+			expect(output).not.toContain("is not valid UTF-8")
+			expect(output).toContain("Changes successfully applied.")
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+		})
+
+		// The tolerance above is not free: it means a caller that pre-decoded the file keeps the lossy
+		// behaviour. It exists because CI runs main's applyDiffTool.outsideWorkspace.spec.ts against this
+		// file (the merge ref of 1910 onto main failed 9 of its rows under the strict read), and that spec
+		// is main's, so this branch cannot edit it. This row is the pin: it says which side gives way.
+		it("edits a file a caller already decoded, which is what the encoding overload hands back", async () => {
+			const { output } = await runOnBytes("line one\nline two\nline three\n")
+
+			expect(output).toContain("Changes successfully applied.")
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+		})
+
+		it("reports the first undecodable byte when invalid bytes repeat", async () => {
+			const { output } = await runOnBytes(Buffer.from([0x41, 0xc3, 0x28, 0x42, 0xfe, 0x43, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 1).")
+			expect(output).not.toContain("offset 4")
+		})
+
+		// A byte-order mark is three bytes that decode to one character, and a U+FFFD written in the file is
+		// indistinguishable in the decoded output from a replacement the decoder produced. Both make a
+		// count through the decoded string report the wrong byte, so the offsets below are asserted
+		// against the byte positions a hex dump shows, not against anything derived from the string.
+		it("counts a byte-order mark as the three bytes it is", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xef, 0xbb, 0xbf, 0x41, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 4).")
+			expect(output).not.toContain("offset 1")
+		})
+
+		it("does not mistake a literal replacement character for an undecodable byte", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xef, 0xbf, 0xbd, 0x41, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 4).")
+			expect(output).not.toContain("offset 0")
+		})
+
+		it("counts past a byte-order mark and a literal replacement character together", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xef, 0xbb, 0xbf, 0xef, 0xbf, 0xbd, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 6).")
+		})
+
+		// The BOM survives into the text the diff is applied to and the approval baseline is built from,
+		// which is what fs.readFile with a utf-8 encoding used to hand over: the decoded string plus the
+		// BOM character, and re-encoding it reproduces the file's bytes exactly.
+		it("keeps a byte-order mark in the content the diff and the approval are built from", async () => {
+			const bomFile = Buffer.from("\uFEFFhi\r\nthere\r\n", "utf8")
+			const { output, appliedTo } = await runOnBytes(bomFile)
+
+			expect(output).toContain("Changes successfully applied.")
+			expect(typeof appliedTo).toBe("string")
+			expect(String(appliedTo).startsWith("\uFEFF")).toBe(true)
+			expect(Buffer.from(String(appliedTo), "utf8").equals(bomFile)).toBe(true)
+		})
+		// The row above shows a BOM or a file-written U+FFFD shifting a later failure; these two put a
+		// truncated sequence next to a literal U+FFFD in both orders, and every offset below is asserted
+		// against the position a hex dump shows. The closing `).` is included because a substring check on
+		// "offset 1" is also satisfied by "offset 10", which would let a wrong offset pass.
+		it("reports the truncated sequence itself when a literal replacement character follows it", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xe2, 0x82, 0xef, 0xbf, 0xbd]))
+
+			expect(output).toContain("first undecodable byte at offset 0).")
+		})
+
+		it("counts past a literal replacement character into a truncated sequence", async () => {
+			const { output } = await runOnBytes(Buffer.from([0x61, 0xef, 0xbf, 0xbd, 0xe2, 0x82]))
+
+			expect(output).toContain("first undecodable byte at offset 4).")
+			expect(output).not.toContain("first undecodable byte at offset 3).")
+		})
+	})
 
 	describe("failure accumulation and rendering", () => {
 		it("reports every failed block, not just the last one", async () => {
@@ -330,7 +464,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		const applyingBlock = "<<<<<<< SEARCH\nconst header = 1\n=======\nconst header = 3\n>>>>>>> REPLACE"
 
 		async function runRealStrategy(diff: string): Promise<string> {
-			vi.mocked(fs.readFile).mockResolvedValue(fileText)
+			mockedReadFile.mockResolvedValue(Buffer.from(fileText, "utf8"))
 			const strategy = new MultiSearchReplaceDiffStrategy()
 			const realResult = await strategy.applyDiff(fileText, diff)
 			// Synthetic details exercise the tool's own guard against forwarding strategy detail objects.
@@ -516,6 +650,148 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).toContain("Applied 2 of 3")
 			expect(output).toContain("FAILURE-MARKER-1")
 			expect(output).not.toContain("--- Diff block")
+		})
+	})
+
+	// The guard below decides, from the bytes, whether a replacement character already in the file is
+	// stepped over or reported as the failure position: it steps over only when the three bytes at the
+	// current offset really are the encoded form of U+FFFD. Each byte sequence below was run through
+	// the tool and the offset it prints is asserted here. The offsets each case must not print are the
+	// offsets a mutant that stops stepping over, or steps by the wrong width, prints instead, so the
+	// bytes and the printed offset are the anchors and no report line number is relied on. The mutant
+	// each case kills is named above it. The 0x41 and 0x3f cases are the shape where the replacement
+	// character is not at the start of the file, so the reported offset is one.
+	describe("the guard that steps past an encoded replacement character", () => {
+		async function runBytesFor(bytes: Buffer): Promise<string> {
+			mockedReadFile.mockResolvedValue(bytes)
+			const applyDiff = vi.fn().mockResolvedValue({ success: true, content: "unused" })
+			mockTask.diffStrategy = { getName: () => "test", applyDiff }
+			await applyDiffTool.execute({ path: testFilePath, diff: buildDiffContent(1) }, mockTask, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				toolCallId: "tool-call-1",
+				pushToolResult: vi.fn((result: ToolResponse) => {
+					pushedResult = result
+				}),
+			})
+			return String(pushedResult ?? "")
+		}
+
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
+		it("reports offset 0 for the bytes 0xef 0xef 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xef, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills first comparison outer_or_and, third comparison clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0xef", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0xef]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills first comparison outer_or_and, third comparison clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0xff", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0xff]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills first comparison outer_or_and, third comparison clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0x41", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0x41]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills first comparison outer_or_and, third comparison clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0x3f", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0x3f]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
+		it("reports offset 0 for the bytes 0xef 0xff 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xff, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
+		it("reports offset 0 for the bytes 0xef 0x41 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0x41, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
+		it("reports offset 0 for the bytes 0xef 0x3f 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0x3f, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills first comparison outer_or_and, third comparison clauseC_false
+		it("reports offset 1 for the bytes 0x41 0xef 0xbf", async () => {
+			const output = await runBytesFor(Buffer.from([0x41, 0xef, 0xbf]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 1).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills first comparison outer_or_and, third comparison clauseC_false
+		it("reports offset 1 for the bytes 0x3f 0xef 0xbf", async () => {
+			const output = await runBytesFor(Buffer.from([0x3f, 0xef, 0xbf]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 1).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills first comparison inner_or_and, first comparison clauseA_false
+		it("reports offset 0 for the bytes 0xbf 0xbf 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xbf, 0xbf, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills first comparison inner_or_and, first comparison clauseA_false
+		it("reports offset 0 for the bytes 0xbd 0xbf 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xbd, 0xbf, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills first comparison inner_or_and, first comparison clauseA_false
+		it("reports offset 0 for the bytes 0xff 0xbf 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xff, 0xbf, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
 		})
 	})
 })
