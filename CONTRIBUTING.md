@@ -127,9 +127,20 @@ This installs the shared templates from `contrib/roo/` into `.roomodes` and `.ro
 - One focused PR per feature or fix.
 - Follow the ESLint and TypeScript best practices.
 - Write clear, descriptive commits that reference issues (for example, `Fixes #123`). Follow the [Writing Style](#writing-style).
-- Test your change fully (`npm test`).
+- Run focused tests from the package directory, for example `pnpm --dir src exec vitest run __tests__/extension.spec.ts`.
+- Use `pnpm test:local` for full local and Docker test runs.
 - Run both dead-code checks: `pnpm knip` and `pnpm knip:production`. See [Dead-code checks before review](docs/development-quality-checks.md) for findings, exceptions, and verification.
 - Rebase onto the latest `main` branch before you submit.
+
+`pnpm test:local` bundles assets first, then uses four workers per package and two concurrent test tasks.
+`--vitest-workers` and `--turbo-concurrency` are optional. Invalid values use the defaults and print a warning.
+The test step replaces a shell `VITEST_MAX_WORKERS` value with the selected worker limit.
+Extra arguments go only to the test step. A forwarded `--concurrency` sets its Turbo task limit.
+For smaller limits, use:
+
+```sh
+pnpm test:local -- --vitest-workers=2 --turbo-concurrency=1
+```
 
 ### Submitting a Pull Request
 

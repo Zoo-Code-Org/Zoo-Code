@@ -227,6 +227,12 @@ vi.mock("../api/providers/fetchers/modelCache", () => ({
 }))
 
 describe("extension.ts", () => {
+	// These tests re-evaluate the extension module graph after vi.resetModules.
+	// Under parallel local test runs (see issue #2720) that evaluation can
+	// approach the 20 second default before activate() even starts. The extra
+	// budget covers module evaluation, not product latency.
+	const activationTestTimeout = 90_000
+
 	let mockContext: vscode.ExtensionContext
 	let settingsUpdatedHandler: ((data: Record<string, never>) => void | Promise<void>) | undefined
 
@@ -245,73 +251,88 @@ describe("extension.ts", () => {
 		settingsUpdatedHandler = undefined
 	})
 
-	test("shares the extension-owned focus tracker with the sidebar and code actions and disposes its listeners", async () => {
-		vi.resetModules()
-		const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
-		const { ClineProvider } = await import("../core/webview/ClineProvider")
-		const { ContextProxy } = await import("../core/config/ContextProxy")
-		const { registerCodeActions } = await import("../activate")
-		const vscode = await import("vscode")
-		const { activate } = await import("../extension")
+	test(
+		"shares the extension-owned focus tracker with the sidebar and code actions and disposes its listeners",
+		{ timeout: activationTestTimeout },
+		async () => {
+			vi.resetModules()
+			const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const { ContextProxy } = await import("../core/config/ContextProxy")
+			const { registerCodeActions } = await import("../activate")
+			const vscode = await import("vscode")
+			const { activate } = await import("../extension")
 
-		await activate(mockContext)
+			await activate(mockContext)
 
-		const trackers = mockContext.subscriptions.filter((entry) => entry instanceof WebviewFocusTracker)
-		expect(trackers).toHaveLength(1)
-		const tracker = trackers[0]
-		const outputChannel = vi.mocked(vscode.window.createOutputChannel).mock.results[0].value
-		expect(ClineProvider).toHaveBeenCalledExactlyOnceWith(
-			mockContext,
-			outputChannel,
-			"sidebar",
-			await ContextProxy.getInstance(mockContext),
-			tracker,
-			null,
-		)
-		expect(registerCodeActions).toHaveBeenCalledExactlyOnceWith(mockContext, tracker)
+			const trackers = mockContext.subscriptions.filter((entry) => entry instanceof WebviewFocusTracker)
+			expect(trackers).toHaveLength(1)
+			const tracker = trackers[0]
+			const outputChannel = vi.mocked(vscode.window.createOutputChannel).mock.results[0].value
+			expect(ClineProvider).toHaveBeenCalledExactlyOnceWith(
+				mockContext,
+				outputChannel,
+				"sidebar",
+				await ContextProxy.getInstance(mockContext),
+				tracker,
+				null,
+			)
+			expect(registerCodeActions).toHaveBeenCalledExactlyOnceWith(mockContext, tracker)
 
-		const messages = makeEventEmitter<WebviewMessage>()
-		const disposed = makeEventEmitter<void>()
-		const provider = ClineProvider.getVisibleInstance()!
-		tracker.init(provider, { webview: { onDidReceiveMessage: messages.event }, onDidDispose: disposed.event })
-		messages.fire({ type: "webviewDidFocus" })
-		expect(tracker.getLastActiveProvider()).toBe(provider)
+			const messages = makeEventEmitter<WebviewMessage>()
+			const disposed = makeEventEmitter<void>()
+			const provider = ClineProvider.getVisibleInstance()!
+			tracker.init(provider, { webview: { onDidReceiveMessage: messages.event }, onDidDispose: disposed.event })
+			messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBe(provider)
 
-		// Dispose the exact instance owned by the extension, rather than a separate test tracker.
-		tracker.dispose()
-		messages.fire({ type: "webviewDidFocus" })
-		expect(tracker.getLastActiveProvider()).toBeUndefined()
-	})
+			// Dispose the exact instance owned by the extension, rather than a separate test tracker.
+			tracker.dispose()
+			messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+		},
+	)
 
-	test("keeps focus trackers independent across extension activations", async () => {
-		vi.resetModules()
-		const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
-		const { registerCodeActions } = await import("../activate")
-		const { activate } = await import("../extension")
-		const secretChanges = makeEventEmitter<vscode.SecretStorageChangeEvent>()
-		const secondContext = makeExtensionContext({
-			secrets: {
-				get: vi.fn().mockResolvedValue(undefined),
-				store: vi.fn().mockResolvedValue(undefined),
-				delete: vi.fn().mockResolvedValue(undefined),
-				onDidChange: secretChanges.event,
-			},
-		})
+	test(
+		"keeps focus trackers independent across extension activations",
+		{ timeout: activationTestTimeout },
+		async () => {
+			vi.resetModules()
+			const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
+			const { registerCodeActions } = await import("../activate")
+			const { activate } = await import("../extension")
+			const secretChanges = makeEventEmitter<vscode.SecretStorageChangeEvent>()
+			const secondContext = makeExtensionContext({
+				secrets: {
+					get: vi.fn().mockResolvedValue(undefined),
+					store: vi.fn().mockResolvedValue(undefined),
+					delete: vi.fn().mockResolvedValue(undefined),
+					onDidChange: secretChanges.event,
+				},
+			})
 
-		await activate(mockContext)
-		await activate(secondContext)
+			await activate(mockContext)
+			await activate(secondContext)
 
-		const firstTracker = mockContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
-		const secondTracker = secondContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
-		expect(firstTracker).toBeInstanceOf(WebviewFocusTracker)
-		expect(secondTracker).toBeInstanceOf(WebviewFocusTracker)
-		expect(secondTracker).not.toBe(firstTracker)
-		expect(registerCodeActions).toHaveBeenNthCalledWith(1, mockContext, firstTracker)
-		expect(registerCodeActions).toHaveBeenNthCalledWith(2, secondContext, secondTracker)
-		firstTracker?.dispose()
-		secondTracker?.dispose()
-		secretChanges.dispose()
-	})
+			const firstTracker = mockContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
+			const secondTracker = secondContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
+			expect(firstTracker).toBeInstanceOf(WebviewFocusTracker)
+			expect(secondTracker).toBeInstanceOf(WebviewFocusTracker)
+			expect(secondTracker).not.toBe(firstTracker)
+			// A timed-out test leaves its activation running in this worker. Scope
+			// the assertion to the contexts of this test so a leaked call from that
+			// orphan cannot fail it. The order and identity contract is unchanged.
+			const ownCalls = vi
+				.mocked(registerCodeActions)
+				.mock.calls.filter(([context]) => context === mockContext || context === secondContext)
+			expect(ownCalls).toHaveLength(2)
+			expect(ownCalls[0]).toEqual([mockContext, firstTracker])
+			expect(ownCalls[1]).toEqual([secondContext, secondTracker])
+			firstTracker?.dispose()
+			secondTracker?.dispose()
+			secretChanges.dispose()
+		},
+	)
 
 	test("injects a factory instance with this activation's dependencies without reading the sidebar tracker", async () => {
 		vi.resetModules()

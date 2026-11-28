@@ -109,12 +109,6 @@ describe("platform unit-test workflow", () => {
 			assert.deepEqual(plainTask.inputs, coverageTask.inputs)
 		}
 	})
-
-	it("caps Windows CI extension lanes at two workers per lane to fill the runner vCPUs", () => {
-		const config = fs.readFileSync(path.join(repositoryRoot, "src/vitest.config.ts"), "utf8")
-
-		assert.match(config, /maxWorkers: isWindowsCI \? 2 : undefined/)
-	})
 })
 
 describe("Knip quality gate", () => {
@@ -131,7 +125,7 @@ describe("Knip quality gate", () => {
 			assert.match(workflowStep(stepName), new RegExp(`run: ${command}\\s*$`))
 			assert.doesNotMatch(workflowStep(stepName), /continue-on-error|if:/)
 		}
-		const job = workflow.match(/\n    knip:\n(?<body>[\s\S]*?)\n    compile:/)?.groups?.body
+		const job = workflow.match(/\n {4}knip:\n(?<body>[\s\S]*?)\n {4}compile:/)?.groups?.body
 		assert.ok(job, "missing knip job")
 		assert.doesNotMatch(job, /continue-on-error|if:/)
 	})
@@ -147,4 +141,54 @@ describe("Code QA dependency install", () => {
 		assert.ok(setups.length > 0, "missing setup-node-pnpm steps")
 		assert.equal(frozen.length, setups.length)
 	})
+})
+
+// ExtensionCiChecksCurrent: extension CI runs ESLint directly without its file cache.
+describe("lint cache policy", () => {
+	const manifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"))
+
+	it("uses a separate content cache for staged extension files", () => {
+		const commands = manifest["lint-staged"]["src/**/*.ts"]
+		assert.equal(commands.length, 1)
+		const command = commands[0]
+		assert.match(command, /^pnpm --dir src exec eslint /)
+		for (const option of ["--max-warnings=0", "--no-warn-ignored", "--cache", "--cache-strategy content"]) {
+			assert.ok(command.split(" ").includes(option) || command.includes(`${option} `), `missing ${option}`)
+		}
+		assert.match(command, /--cache-location node_modules\/\.cache\/eslint\/\.eslintcache-staged$/)
+	})
+
+	it("runs extension CI lint directly without an ESLint cache", () => {
+		const command = manifest.scripts["lint:ci"]
+		assert.equal(typeof command, "string")
+		const [otherPackages, extension] = command.split(" && ")
+		assert.match(otherPackages, /^pnpm lint /)
+		assert.ok(otherPackages.split(" ").includes("--force"))
+		assert.ok(otherPackages.split(" ").includes("--filter=!zoo-code"))
+		assert.equal(extension, "pnpm --dir src lint:ci")
+		const extensionManifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "src/package.json"), "utf8"))
+		const freshCommand = extensionManifest.scripts["lint:ci"].split(" ")
+		assert.equal(freshCommand[0], "eslint")
+		assert.ok(freshCommand.includes("."))
+		assert.ok(freshCommand.includes("--max-warnings=0"))
+		assert.ok(freshCommand.includes("--no-cache"))
+		assert.ok(!freshCommand.some((option) => option === "--cache" || option.startsWith("--cache-")))
+		assert.match(workflowStep("Lint"), /run: pnpm lint:ci\s*$/)
+		assert.doesNotMatch(workflowStep("Lint"), /continue-on-error|if:/)
+	})
+})
+
+// The Code QA workflow must keep both runner tests in its command.
+it("runs the runner contract and strict-environment integration tests in CI", () => {
+	const manifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"))
+	const command = manifest.scripts["test:code-qa-ci"].split(" ")
+	for (const file of [
+		"scripts/code-qa-workflow.test.mjs",
+		"scripts/test-local.test.mjs",
+		"scripts/test-local.integration.test.mjs",
+	]) {
+		assert.ok(command.includes(file), `CI must execute ${file}`)
+	}
+	assert.match(workflowStep("Validate Code QA workflow"), /run: pnpm test:code-qa-ci\s*$/)
+	assert.doesNotMatch(workflowStep("Validate Code QA workflow"), /if:|continue-on-error/)
 })

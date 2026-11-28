@@ -10,9 +10,11 @@
 		"install": "node scripts/bootstrap.mjs",
 		"install:all": "node scripts/bootstrap.mjs",
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
+		"lint:ci": "pnpm lint --force --filter=!zoo-code && pnpm --dir src lint:ci",
 		"check-types": "tsc -p tsconfig.json --noEmit && turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
-		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs",
+		"test:local": "node scripts/test-local.mjs",
+		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs scripts/test-local.test.mjs scripts/test-local.integration.test.mjs",
 		"solheim:smoke": "node --import tsx scripts/solheim-smoke/driver.mts",
 		"test:solheim-smoke-ci": "node --test scripts/solheim-smoke-workflow.test.mjs",
 		"test:solheim-smoke:unit": "node --import tsx --test scripts/solheim-smoke/*.test.ts",
@@ -69,7 +71,7 @@
 	},
 	"lint-staged": {
 		"src/**/*.ts": [
-			"pnpm --dir src exec eslint --max-warnings=0 --no-warn-ignored"
+			"pnpm --dir src exec eslint --max-warnings=0 --no-warn-ignored --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache-staged"
 		],
 		"webview-ui/src/**/*.{ts,tsx}": [
 			"pnpm --dir webview-ui exec eslint --max-warnings=0 --no-warn-ignored"
