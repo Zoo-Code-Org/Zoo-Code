@@ -130,9 +130,14 @@ export function sanitizeMcpName(name: string): string {
  *
  * @param serverName - The MCP server name
  * @param toolName - The tool name
+ * @param scopeId - Optional scope of the build (createMcpToolAliasScope).
+ * The caller's ledger records are released together when the scope ends,
+ * so a replaced server's pair stops conflicting with its replacement.
+ * Builds without a scope record for the whole process.
+ *
  * @returns A sanitized function name in the format mcp--serverName--toolName
  */
-export function buildMcpToolName(serverName: string, toolName: string): string {
+export function buildMcpToolName(serverName: string, toolName: string, scopeId?: string): string {
 	const sanitizedServer = sanitizeMcpName(serverName)
 	const sanitizedTool = sanitizeMcpName(toolName)
 
@@ -145,7 +150,7 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
 	// The sanitized name may have lost characters (dots, spaces) or length.
 	// Record the original pair under the exact name the model will call, so
 	// parseMcpToolName can hand them back (issue #2338).
-	recordMcpToolAlias(functionName, serverName, toolName)
+	recordMcpToolAlias(functionName, serverName, toolName, scopeId)
 
 	return functionName
 }

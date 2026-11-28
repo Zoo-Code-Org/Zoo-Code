@@ -44,6 +44,7 @@ import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { injectVariables } from "../../utils/config"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { sanitizeMcpName, toolNamesMatch } from "../../utils/mcp-name"
+import { createMcpToolAliasScope, endMcpToolAliasScope } from "../../utils/mcp-name-ledger"
 import { ToolRouter } from "../tools/ToolRouter"
 
 // Discriminated union for connection states
@@ -167,6 +168,21 @@ const McpSettingsSchema = z.object({
 export class McpHub {
 	private readonly serverListEvents = new EventEmitter()
 	private serverListKey?: string
+	/**
+	 * The ledger scope of this hub's current server-list generation. Tool
+	 * names built from this hub advertise under it (getMcpServerTools), and
+	 * a server-list change ends it, so a replaced server's pair stops
+	 * conflicting with its replacement (CR thread 4727751392).
+	 */
+	private aliasScopeId = createMcpToolAliasScope()
+
+	/**
+	 * The ledger scope tool-list builds advertise under. End-of-scope is
+	 * owned by the hub: it rotates the scope on every server-list change.
+	 */
+	public getToolAliasScopeId(): string {
+		return this.aliasScopeId
+	}
 
 	public onServerListChanged(listener: () => void): { dispose(): void } {
 		const safeListener = () => {
@@ -1891,6 +1907,14 @@ export class McpHub {
 			})),
 		)
 		if (key !== this.serverListKey) {
+			// The old server list's advertisements end here: rotate the
+			// ledger scope first, then end the previous one, so a build
+			// racing into the window records under the live scope. A
+			// renamed or removed server's pair stops being advertised and
+			// no longer conflicts with its replacement.
+			const previousScope = this.aliasScopeId
+			this.aliasScopeId = createMcpToolAliasScope()
+			endMcpToolAliasScope(previousScope)
 			this.serverListKey = key
 			this.serverListEvents.emit("changed")
 		}
@@ -2541,6 +2565,10 @@ export class McpHub {
 		}
 
 		this.isDisposed = true
+
+		// Release this hub's ledger records: its server list is gone, so no
+		// pair it advertised stays active to conflict with another hub's.
+		endMcpToolAliasScope(this.aliasScopeId)
 
 		// Clear all debounce timers
 		for (const timer of this.configChangeDebounceTimers.values()) {

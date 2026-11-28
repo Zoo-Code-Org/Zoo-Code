@@ -39,7 +39,11 @@ export function getMcpServerTools(mcpHub?: McpHub, allowedServers?: string[]): O
 
 			// Build sanitized tool name for API compliance
 			// The name is sanitized to conform to API requirements (e.g., Gemini's function name restrictions)
-			const toolName = buildMcpToolName(server.name, tool.name)
+			// The build advertises under the hub's current scope, so the
+			// records end when the hub's server list changes and a replaced
+			// server's pair stops conflicting with its replacement (CR
+			// thread 4727751392).
+			const toolName = buildMcpToolName(server.name, tool.name, mcpHub.getToolAliasScopeId?.())
 
 			// Skip duplicate tool names - first occurrence wins (project servers come before global servers)
 			if (seenToolNames.has(toolName)) {

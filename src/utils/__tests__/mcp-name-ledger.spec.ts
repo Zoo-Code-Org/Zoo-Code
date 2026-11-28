@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { clearMcpToolAliases } from "../mcp-name-ledger"
+import { clearMcpToolAliases, createMcpToolAliasScope, endMcpToolAliasScope } from "../mcp-name-ledger"
 import { buildMcpToolName, normalizeMcpToolName, parseMcpToolName } from "../mcp-name"
 
 /**
@@ -119,6 +119,85 @@ describe("mcp tool name ledger", () => {
 				serverName: "one.server",
 				toolName: "tool",
 			})
+		})
+	})
+
+	describe("scoped records", () => {
+		it("restores resolution once the conflicting scope ends", () => {
+			// CR thread 4727751392 (PR 2669): "one.server"/"tool" and
+			// "oneserver"/"tool" both build mcp--oneserver--tool. While both
+			// scopes are live the name is ambiguous and stays unresolved.
+			// Once the first scope ends (McpHub replaces the server), the
+			// surviving pair must resolve again, through the raw name, the
+			// normalized form, and the model's underscore echo.
+			const first = createMcpToolAliasScope()
+			buildMcpToolName("one.server", "tool", first)
+			expect(parseMcpToolName("mcp--oneserver--tool")).toStrictEqual({
+				serverName: "one.server",
+				toolName: "tool",
+			})
+
+			const second = createMcpToolAliasScope()
+			expect(buildMcpToolName("oneserver", "tool", second)).toBe("mcp--oneserver--tool")
+			expect(parseMcpToolName("mcp--oneserver--tool")).toBeNull()
+			expect(parseMcpToolName("mcp__oneserver__tool")).toBeNull()
+
+			endMcpToolAliasScope(first)
+
+			expect(parseMcpToolName("mcp--oneserver--tool")).toStrictEqual({
+				serverName: "oneserver",
+				toolName: "tool",
+			})
+			expect(parseMcpToolName(normalizeMcpToolName("mcp__oneserver__tool"))).toStrictEqual({
+				serverName: "oneserver",
+				toolName: "tool",
+			})
+			expect(parseMcpToolName("mcp__oneserver__tool")).toStrictEqual({
+				serverName: "oneserver",
+				toolName: "tool",
+			})
+		})
+
+		it("keeps a single record resolvable after its scope ends", () => {
+			// A name whose pair was advertised by one scope only keeps
+			// resolving across scope ends: the exact pair is still the only
+			// pair ever recorded for the name, so handing it back stays safe.
+			const scope = createMcpToolAliasScope()
+			const functionName = buildMcpToolName("a.b", "c.d", scope)
+			endMcpToolAliasScope(scope)
+			expect(parseMcpToolName(functionName)).toStrictEqual({
+				serverName: "a.b",
+				toolName: "c.d",
+			})
+		})
+
+		it("resolves a fresh scope's pair after the older scopes end", () => {
+			// Two live scopes held two pairs. Both end; a new scope
+			// advertises a third pair. The live pair is the only active one,
+			// so it resolves even though two older pairs were recorded.
+			const first = createMcpToolAliasScope()
+			buildMcpToolName("one.server", "tool", first)
+			const second = createMcpToolAliasScope()
+			buildMcpToolName("oneserver", "tool", second)
+			endMcpToolAliasScope(first)
+			endMcpToolAliasScope(second)
+
+			const third = createMcpToolAliasScope()
+			buildMcpToolName("one.server.", "tool", third)
+			expect(parseMcpToolName("mcp--oneserver--tool")).toStrictEqual({
+				serverName: "one.server.",
+				toolName: "tool",
+			})
+		})
+
+		it("builds without a scope keep the process-wide behavior", () => {
+			// Records made without a scope (the ToolRouter ranking path and
+			// hub-less builds) live for the whole process, like every record
+			// did before scopes: a conflict between two unscoped builds never
+			// restores, because neither scope ever ends.
+			buildMcpToolName("one.server", "tool")
+			buildMcpToolName("oneserver", "tool")
+			expect(parseMcpToolName("mcp--oneserver--tool")).toBeNull()
 		})
 	})
 
