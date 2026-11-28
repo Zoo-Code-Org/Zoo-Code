@@ -15,6 +15,7 @@ import {
 // https://docs.z.ai/guides/llm/glm-4.6
 // https://docs.z.ai/guides/llm/glm-5.3
 // https://docs.z.ai/guides/vlm/glm-5.3-flash
+// https://docs.z.ai/guides/llm/glm-5.4
 // https://docs.z.ai/guides/llm/glm-5.1
 // https://docs.z.ai/guides/llm/glm-5-turbo
 // https://docs.z.ai/guides/overview/pricing
@@ -215,6 +216,18 @@ export const internationalZAiModels = {
 		outputPrice: 0.5,
 		cacheWritesPrice: 0,
 		cacheReadsPrice: 0.03,
+	},
+	"glm-5.4": {
+		...glm53ModelInfo,
+		// GLM-5.4 accepts image, video, text, and file input.
+		supportsImages: true,
+		// TODO: pricing is from GLM-5.3, should update later.
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.4 is Zhipu's flagship Loop Transformer coding and agent model with a 1M context window, 128k max output, multimodal input (image/video/text/file), and always-on reasoning with configurable effort (Low/High/Max).",
 	},
 	"glm-5-turbo": {
 		maxTokens: 131_072,
@@ -527,6 +540,19 @@ export const mainlandZAiCodingPlanOnlyModels = {
 		outputPrice: 2.28,
 		cacheWritesPrice: 0,
 		cacheReadsPrice: 0.13,
+	},
+	"glm-5.4": {
+		...glm53ModelInfo,
+		// GLM-5.4 accepts image, video, text, and file input.
+		supportsImages: true,
+		// GLM-5.4 is Coding Plan-only and has no published per-token pricing;
+		// use GLM-5.3 (mainland) pricing provisionally.
+		inputPrice: 0.68,
+		outputPrice: 2.28,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.13,
+		description:
+			"GLM-5.4 is Zhipu's flagship Loop Transformer coding and agent model with a 1M context window, 128k max output, multimodal input (image/video/text/file), and always-on reasoning with configurable effort (Low/High/Max).",
 	},
 	"glm-5.3-flash": {
 		...glm53FlashModelInfo,

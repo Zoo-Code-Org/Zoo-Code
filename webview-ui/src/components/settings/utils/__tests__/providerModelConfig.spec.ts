@@ -246,12 +246,17 @@ describe("providerModelConfig", () => {
 
 			expect(internationalCoding).toHaveProperty("glm-5.3")
 			expect(internationalCoding).toHaveProperty("glm-5.3-flash")
+			expect(internationalCoding).toHaveProperty("glm-5.4")
 			expect(chinaCoding).toHaveProperty("glm-5.3")
 			expect(chinaCoding).toHaveProperty("glm-5.3-flash")
+			expect(chinaCoding).toHaveProperty("glm-5.4")
 			expect(internationalApi).toHaveProperty("glm-5.3")
 			expect(internationalApi).toHaveProperty("glm-5.3-flash")
+			expect(internationalApi).toHaveProperty("glm-5.4")
 			expect(chinaApi).not.toHaveProperty("glm-5.3")
 			expect(chinaApi).not.toHaveProperty("glm-5.3-flash")
+			// GLM-5.4 is Coding Plan-only on the mainland endpoint (Model API pending).
+			expect(chinaApi).not.toHaveProperty("glm-5.4")
 		})
 	})
 

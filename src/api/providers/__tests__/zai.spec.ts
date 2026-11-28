@@ -167,6 +167,35 @@ describe("ZAiHandler", () => {
 			expect(model.info.cacheReadsPrice).toBe(0.26)
 		})
 
+		it("should expose GLM-5.4 for the international Coding Plan with a 1M context window", () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.4",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe("glm-5.4")
+			// Regression: an unknown GLM id fell back to openAiModelInfoSaneDefaults
+			// (128k), which made auto-condense fire at ~1/8 of the real window.
+			// GLM-5.4 overrides the GLM-5.3 profile's supportsImages: false.
+			expect(model.info).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["low", "high", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "max",
+				preserveReasoning: true,
+				defaultTemperature: 1,
+			})
+			// GLM-5.4 has no published per-token pricing; GLM-5.3 pricing is provisional.
+			expect(model.info.inputPrice).toBe(1.4)
+			expect(model.info.outputPrice).toBe(4.4)
+			expect(model.info.cacheReadsPrice).toBe(0.26)
+		})
+
 		it("should expose multimodal GLM-5.3-Flash for the international Coding Plan", () => {
 			const model = new ZAiHandler({
 				apiModelId: "glm-5.3-flash",
@@ -442,6 +471,17 @@ describe("ZAiHandler", () => {
 			})
 			expect(handlerWithModel.getModel().id).toBe("glm-5.3")
 		})
+
+		it("should expose GLM-5.4 on the international API with its full context window", () => {
+			expect(getZAiModels("international_api")).toHaveProperty("glm-5.4")
+			const model = new ZAiHandler({
+				apiModelId: "glm-5.4",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_api",
+			}).getModel()
+			expect(model.id).toBe("glm-5.4")
+			expect(model.info.contextWindow).toBe(1_000_000)
+		})
 	})
 
 	describe("China API", () => {
@@ -485,6 +525,7 @@ describe("ZAiHandler", () => {
 		it("should not expose Coding Plan-only models", () => {
 			expect(getZAiModels("china_api")).not.toHaveProperty("glm-5.3")
 			expect(getZAiModels("china_api")).not.toHaveProperty("glm-5.3-flash")
+			expect(getZAiModels("china_api")).not.toHaveProperty("glm-5.4")
 		})
 	})
 
@@ -728,6 +769,32 @@ describe("ZAiHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "glm-5.3",
+					thinking: { type: "enabled", clear_thinking: false },
+					reasoning_effort: "max",
+					temperature: 1,
+				}),
+			)
+		})
+
+		it("should use the GLM-5.3 thinking and sampling defaults for GLM-5.4", async () => {
+			// GLM-5.4 defaults clear_thinking to false on all endpoints
+			// (https://docs.z.ai/guides/capabilities/thinking-mode), so Zoo Code
+			// must keep sending it explicitly like it does for GLM-5.3.
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.4",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "disable",
+			})
+
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.4",
 					thinking: { type: "enabled", clear_thinking: false },
 					reasoning_effort: "max",
 					temperature: 1,

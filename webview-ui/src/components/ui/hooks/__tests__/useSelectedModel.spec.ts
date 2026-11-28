@@ -2259,6 +2259,36 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(getZAiModels("international_api")["glm-5.3"])
 		})
 
+		it("resolves GLM-5.4 to its 1M context window instead of the 128k sane defaults", () => {
+			// Regression: the context-window bar and the condense gate share this info;
+			// an unknown GLM id used to fall back to openAiModelInfoSaneDefaults (128k).
+			const internationalCoding = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.zai,
+						apiModelId: "glm-5.4",
+						zaiApiLine: "international_coding",
+					}),
+				{ wrapper: createWrapper() },
+			)
+			expect(internationalCoding.result.current.id).toBe("glm-5.4")
+			expect(internationalCoding.result.current.info).toEqual(getZAiModels("international_coding")["glm-5.4"])
+			expect(internationalCoding.result.current.info?.contextWindow).toBe(1_000_000)
+
+			const chinaCoding = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.zai,
+						apiModelId: "glm-5.4",
+						zaiApiLine: "china_coding",
+					}),
+				{ wrapper: createWrapper() },
+			)
+			expect(chinaCoding.result.current.id).toBe("glm-5.4")
+			expect(chinaCoding.result.current.info).toEqual(getZAiModels("china_coding")["glm-5.4"])
+			expect(chinaCoding.result.current.info?.inputPrice).toBe(0.68)
+		})
+
 		it("displays the configured model ID with sane defaults when it is not in the API line catalog", () => {
 			expect(getZAiModels("china_api")["glm-5.3"]).toBeUndefined()
 

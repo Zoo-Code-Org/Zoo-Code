@@ -27,7 +27,13 @@ type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParams, "rea
 	reasoning_effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 }
 
-const isGlm53Model = (model: string) => model === "glm-5.3" || model === "glm-5.3-flash"
+/**
+ * GLM-5.3+ models default `thinking.clear_thinking` to false (Preserved Thinking)
+ * on every endpoint starting with GLM-5.4, and on the Coding Plan endpoint for
+ * GLM-5.3. Zoo Code must send it explicitly so reasoning_content is kept in
+ * context; see https://docs.z.ai/guides/capabilities/thinking-mode
+ */
+const isGlm53Model = (model: string) => model === "glm-5.3" || model === "glm-5.3-flash" || model === "glm-5.4"
 
 export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 	constructor(options: ApiHandlerOptions) {
