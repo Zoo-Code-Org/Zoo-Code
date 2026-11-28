@@ -150,6 +150,26 @@ describe("ProviderPacer (CI-PP-02)", () => {
 		).rejects.toBe(failure)
 	})
 
+	it("makes a released waiter wait again when another waiter's 429 pauses the scope first", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const first = vi
+			.fn()
+			.mockRejectedValueOnce(rateLimit(1000))
+			.mockImplementationOnce(() => {
+				throw rateLimit(1000)
+			})
+			.mockResolvedValue("first")
+		const firstRun = pacer.run("a.ts", undefined, first)
+		await vi.advanceTimersByTimeAsync(0)
+		const second = vi.fn().mockResolvedValue("second")
+		const secondRun = pacer.run("b.ts", undefined, second)
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(first).toHaveBeenCalledTimes(2)
+		expect(second).not.toHaveBeenCalled()
+		await vi.advanceTimersByTimeAsync(1000)
+		await expect(Promise.all([firstRun, secondRun])).resolves.toEqual(["first", "second"])
+	})
+
 	it("keeps waits longer than the 32-bit timer limit", async () => {
 		const pacer = new ProviderPacer("openai:1")
 		const delay = 2 ** 31 + 10_000
@@ -173,24 +193,33 @@ describe("ProviderPacerRegistry", () => {
 		const paused = settle(
 			registry.get("openai:1").run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(5000))),
 		)
+		const pausedOther = settle(
+			registry.get("mistral:2").run("b.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(8000))),
+		)
 		await vi.advanceTimersByTimeAsync(0)
 		const sameRequest = vi.fn().mockResolvedValue("ok")
 		const same = settle(registry.get("openai:1").run("a.ts", undefined, sameRequest))
 		const other = vi.fn().mockResolvedValue("other")
-		const otherRun = registry.get("openai:2").run("b.ts", undefined, other)
+		const otherRun = registry.get("openai:3").run("c.ts", undefined, other)
 		await vi.advanceTimersByTimeAsync(0)
 		expect(sameRequest).not.toHaveBeenCalled()
 		expect(other).toHaveBeenCalledTimes(1)
 		await expect(otherRun).resolves.toBe("other")
-		expect(registry.get("openai:2").resumeAt).toBeUndefined()
+		expect(registry.get("openai:3").resumeAt).toBeUndefined()
 
-		expect(registry.providerWaits()).toEqual([{ service: "openai", resumeAt: 5000, waitingFiles: ["a.ts"] }])
-		expect(registry.waitingPaths()).toEqual(["a.ts"])
+		expect(registry.providerWaits()).toEqual([
+			{ service: "openai", resumeAt: 5000, waitingFiles: ["a.ts"] },
+			{ service: "mistral", resumeAt: 8000, waitingFiles: ["b.ts"] },
+		])
+		expect(registry.waitingPaths()).toEqual(["a.ts", "b.ts"])
 		expect(registry.hasWaitingRequests()).toBe(true)
 		expect(changed).toHaveBeenCalled()
 
 		await vi.advanceTimersByTimeAsync(5000)
 		await expect(Promise.all([paused, same])).resolves.toEqual([{ value: undefined }, { value: "ok" }])
+		expect(registry.providerWaits()).toEqual([{ service: "mistral", resumeAt: 8000, waitingFiles: ["b.ts"] }])
+		await vi.advanceTimersByTimeAsync(3000)
+		await expect(pausedOther).resolves.toEqual({ value: undefined })
 		expect(registry.providerWaits()).toEqual([])
 		expect(registry.hasWaitingRequests()).toBe(false)
 	})

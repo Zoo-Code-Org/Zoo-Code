@@ -76,7 +76,7 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		const result = await new FilePreparation(dependencies).prepareFile(filePath)
 		expect(result.status).toBe("processed_for_batching")
 		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledTimes(2)
-		expect(run).toHaveBeenCalledWith(filePath, undefined, expect.any(Function))
+		expect(run).toHaveBeenCalledWith(filePath, expect.any(AbortSignal), expect.any(Function))
 	})
 
 	it.each([".git/config", ".hidden/file.ts", "node_modules/pkg/file.ts", "dist/file.js"])(

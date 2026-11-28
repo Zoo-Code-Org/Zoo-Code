@@ -1,5 +1,6 @@
-import { ProviderPacer } from "../../provider-pacer"
-import { retryWithPolicy, type RetryFailure } from "../retry-policy"
+import { ProviderPacer, ProviderPacerRegistry } from "../../provider-pacer"
+import { PACED_EMBEDDING_TIMEOUT_MS } from "../../constants"
+import { createPacedEmbeddings, retryWithPolicy, type RetryFailure } from "../retry-policy"
 import { EmbeddingError, IndexingRetryError } from "../indexing-errors"
 import { APIUserAbortError } from "openai"
 
@@ -82,6 +83,41 @@ it.each([503, { code: "ECONNRESET" }])(
 		expect(request).toHaveBeenCalledTimes(3)
 	},
 )
+
+describe("createPacedEmbeddings", () => {
+	const limitedEmbedder = () => ({
+		rateLimitScope: "openai:paced",
+		createEmbeddings: vi.fn().mockRejectedValue(new EmbeddingError("limited", { status: 429 })),
+	})
+
+	it("ends a pacer wait when the caller's signal aborts", async () => {
+		const embedder = limitedEmbedder()
+		const controller = new AbortController()
+		const reason = new Error("stopped")
+		const pending = createPacedEmbeddings(embedder, new ProviderPacerRegistry(), ["x"], controller.signal, "a.ts")
+		const settled = pending.catch((error: unknown) => error)
+		await vi.advanceTimersByTimeAsync(0)
+		controller.abort(reason)
+		expect(await settled).toBe(reason)
+		await vi.advanceTimersByTimeAsync(600_000)
+		expect(embedder.createEmbeddings).toHaveBeenCalledOnce()
+	})
+
+	it("ends a pacer wait after the default time limit without a signal", async () => {
+		// AbortSignal.timeout runs on Node's internal timers, which fake timers do not control.
+		const controller = new AbortController()
+		const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal)
+		const settled = createPacedEmbeddings(limitedEmbedder(), new ProviderPacerRegistry(), ["x"]).catch(
+			(error: unknown) => error,
+		)
+		expect(timeout).toHaveBeenCalledWith(PACED_EMBEDDING_TIMEOUT_MS)
+		await vi.advanceTimersByTimeAsync(0)
+		const reason = new DOMException("timed out", "TimeoutError")
+		controller.abort(reason)
+		expect(await settled).toBe(reason)
+		timeout.mockRestore()
+	})
+})
 
 it("CI-RP-02: abort ends a wait at once without another request", async () => {
 	const controller = new AbortController()

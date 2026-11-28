@@ -1,5 +1,5 @@
 import { APIUserAbortError } from "openai"
-import { FILE_RETRY_ATTEMPTS, FILE_RETRY_BASE_DELAY_MS } from "../constants"
+import { FILE_RETRY_ATTEMPTS, FILE_RETRY_BASE_DELAY_MS, PACED_EMBEDDING_TIMEOUT_MS } from "../constants"
 import { waitForRetry } from "../embedders/cancellation"
 import { classifyIndexingError, IndexingRetryError, type IndexingErrorClassification } from "./indexing-errors"
 import type { FileFailureActivity } from "../file-failure-registry"
@@ -66,14 +66,19 @@ export async function retryWithPolicy<T>(
 	}
 }
 
-/** Embeds texts through the scope's pacer (429 waits) and the retry policy (other transient errors). */
+/**
+ * Embeds texts through the scope's pacer (429 waits) and the retry policy (other transient errors).
+ * Callers without a stop signal get a time limit, because the pacer waits on 429 with no attempt limit.
+ */
 export function createPacedEmbeddings(
 	embedder: Pick<IEmbedder, "createEmbeddings" | "rateLimitScope">,
 	pacers: Pick<ProviderPacerRegistry, "get">,
 	texts: string[],
+	signal: AbortSignal = AbortSignal.timeout(PACED_EMBEDDING_TIMEOUT_MS),
 	path?: string,
 ): Promise<EmbeddingResponse> {
-	return retryWithPolicy(() =>
-		pacers.get(embedder.rateLimitScope).run(path, undefined, () => embedder.createEmbeddings(texts)),
+	return retryWithPolicy(
+		() => pacers.get(embedder.rateLimitScope).run(path, signal, () => embedder.createEmbeddings(texts)),
+		{ signal },
 	)
 }

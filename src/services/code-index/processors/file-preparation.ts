@@ -38,6 +38,7 @@ export class FilePreparation {
 						dependencies.embedder,
 						dependencies.pacers,
 						blocks.map((block) => block.content),
+						undefined,
 						filePath,
 					)
 					embeddingOutcome = "success"

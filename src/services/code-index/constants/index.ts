@@ -22,6 +22,7 @@ export const INITIAL_RETRY_DELAY_MS = 500
 export const FILE_RETRY_ATTEMPTS = 3
 export const FILE_RETRY_BASE_DELAY_MS = 500
 export const PACER_MAX_BACKOFF_MS = 300_000
+export const PACED_EMBEDDING_TIMEOUT_MS = 60_000
 export const CIRCUIT_BREAKER_BATCH_THRESHOLD = 3 // Consecutive failed batches before the file watcher's circuit breaker opens
 export const PARSING_CONCURRENCY = 10
 export const MAX_PENDING_BATCHES = 20 // Maximum number of batches to accumulate before waiting

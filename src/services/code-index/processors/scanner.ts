@@ -214,6 +214,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 												scanWorkspace,
 												onError,
 												onBlocksIndexed,
+												signal,
 											),
 										)
 										activeBatchPromises.add(batchPromise)
@@ -305,7 +306,15 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 				// Queue final batch processing
 				const batchPromise = batchLimiter(() =>
-					this.processBatch(batchBlocks, batchTexts, batchFileInfos, scanWorkspace, onError, onBlocksIndexed),
+					this.processBatch(
+						batchBlocks,
+						batchTexts,
+						batchFileInfos,
+						scanWorkspace,
+						onError,
+						onBlocksIndexed,
+						signal,
+					),
 				)
 				activeBatchPromises.add(batchPromise)
 
@@ -396,6 +405,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		scanWorkspace: string,
 		onError?: (error: Error) => void,
 		onBlocksIndexed?: (indexedCount: number) => void,
+		signal?: AbortSignal,
 	): Promise<void> {
 		if (batchBlocks.length === 0) return
 
@@ -448,7 +458,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 				// --- End Deletion Step ---
 
 				// Create embeddings for batch
-				const { embeddings } = await createPacedEmbeddings(this.embedder, this.pacers, batchTexts)
+				const { embeddings } = await createPacedEmbeddings(this.embedder, this.pacers, batchTexts, signal)
 
 				// Prepare points for Qdrant
 				const points = batchBlocks.map((block, index) => {
