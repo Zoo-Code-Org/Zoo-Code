@@ -222,7 +222,8 @@ describe("DirectoryScanner", () => {
 			expect(mockVectorStore.upsertPoints).toHaveBeenCalled()
 		})
 
-		it("waits on the scope's pacer and retries a 429 in the batch", async () => {
+		it.each([1, 100])("passes the scan signal to the pacer and retries a 429 (threshold %s)", async (threshold) => {
+			const controller = new AbortController()
 			const pacers = new ProviderPacerRegistry()
 			const run = vi.spyOn(pacers.get("openai:1"), "run")
 			const pacedScanner = new DirectoryScanner(
@@ -231,7 +232,7 @@ describe("DirectoryScanner", () => {
 				mockCodeParser,
 				mockCacheManager,
 				mockIgnoreInstance,
-				1,
+				threshold,
 				pacers,
 			)
 			const { listFiles } = await import("../../../glob/list-files")
@@ -243,9 +244,9 @@ describe("DirectoryScanner", () => {
 				Object.assign(new Error("limited"), { status: 429, retryAfterMs: 1 }),
 			)
 
-			await pacedScanner.scanDirectory("/test")
+			await pacedScanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal)
 
-			expect(run).toHaveBeenCalled()
+			expect(run).toHaveBeenCalledWith(undefined, controller.signal, expect.any(Function))
 			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(2)
 			expect(mockVectorStore.upsertPoints).toHaveBeenCalledTimes(1)
 		})

@@ -5,7 +5,10 @@ import { EmbeddingError, IndexingRetryError } from "../indexing-errors"
 import { APIUserAbortError } from "openai"
 
 beforeEach(() => vi.useFakeTimers())
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+	vi.restoreAllMocks()
+	vi.useRealTimers()
+})
 
 it("paces repeated limits even after both retries were consumed, then preserves exhaustion", async () => {
 	const budget = { retriesUsed: 0 }
