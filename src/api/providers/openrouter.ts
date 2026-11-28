@@ -204,9 +204,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	 * @param error The error object (not wrapped - receives the error directly)
 	 */
 	private handleStreamingError(error: OpenRouterError, modelId: string, operation: string): never {
-		const rawString = error?.metadata?.raw
-		const parsedError = extractErrorFromMetadataRaw(rawString)
-		const rawErrorMessage = parsedError || error?.message || "Unknown error"
+		const rawErrorMessage = extractErrorFromMetadataRaw(error?.metadata?.raw) || error?.message || "Unknown error"
 
 		const apiError = Object.assign(
 			new ApiProviderError(

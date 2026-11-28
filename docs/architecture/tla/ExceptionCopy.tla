@@ -13,6 +13,11 @@
 \* Refactor result: all 109 telemetry tests pass. All three copy mutations fail the existing property tests. No new defect found.
 \* TLC checks the abstraction, not JavaScript descriptors or PostHog parsing.
 
+\* Review trace: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2330#discussion_r4486068932 added caller isolation.
+\* Review trace: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2330#discussion_r4638627894 added source shape.
+\* Earlier rounds: 0 covered, 2 added, 0 gaps; frozen-message follow-up 0 covered, 1 added, 0 gaps.
+\* Historical prototype fix cost about 2 minutes. Later costs were shared with ExceptionCapture.
+\* Current review: missing history and ambiguous review labels are gaps. Direct header checks restore their meaning.
 EXTENDS Naturals, Sequences
 CONSTANTS Inputs, Messages, Transform(_, _)
 VARIABLES source, raw, caller, delivered, attempted

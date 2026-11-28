@@ -13,6 +13,6 @@ Detached(error, message) == [sent |-> TRUE, caller |-> error, payload |-> Normal
 Mutating(error, message) == [sent |-> TRUE, caller |-> Normalized(error, message), payload |-> Normalized(error, message)]
 PlainCopy(error, message) == [sent |-> TRUE, caller |-> error, payload |-> [Normalized(error, message) EXCEPT !.proto = "Error"]]
 
-\* Review PR 2330 item 6: assignment to a frozen message drops the payload.
+\* PR #2330 frozen-message review: assignment to a frozen message drops the payload.
 Assignment(error, message) == [Detached(error, message) EXCEPT !.sent = error.own.writable]
 ====

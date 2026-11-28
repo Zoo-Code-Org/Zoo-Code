@@ -6,7 +6,7 @@ EXTENDS ExceptionCapture
 MCInstances == 1..4
 MCFields == [i \in MCInstances |->
     CASE i \in {1, 2} -> <<"a|b", "c">> [] i = 3 -> <<"a", "b|c">> [] OTHER -> <<"a", "c">>]
-\* Review PR 2330 items 3 and 7: each field must distinguish errors by itself.
+\* PR #2330 single-field fingerprint review: each field must distinguish errors by itself.
 BaseApi == <<"ApiProviderError", "provider", "model", "operation", "500", "failure">>
 SingleFieldCases == {BaseApi} \cup
     {[BaseApi EXCEPT ![n] = "other"] : n \in {2, 3, 4, 6}} \cup

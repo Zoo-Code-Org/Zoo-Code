@@ -470,10 +470,11 @@ export function shouldReportApiErrorToTelemetry(errorCode?: number, errorMessage
  */
 export class ApiProviderError extends Error {
 	/**
-	 * Set by TelemetryService#captureException once this instance has been sent
-	 * to the telemetry clients. Provider catch blocks re-throw the errors they
-	 * captured, so the same instance can reach captureException again (through
-	 * an enclosing catch or a retry loop). Checking this flag keeps one error
+	 * Set by TelemetryService#captureException on the first eligible capture,
+	 * including one that the dedupe window suppresses. Provider catch blocks
+	 * re-throw the errors they captured. The same instance can reach
+	 * captureException again through an enclosing catch or a retry loop.
+	 * Checking this flag keeps one error
 	 * occurrence at one $exception event instead of inflating the count.
 	 *
 	 * Optional: an instance that was never captured reads as `undefined`.

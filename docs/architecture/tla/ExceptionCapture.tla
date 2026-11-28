@@ -18,6 +18,18 @@
 \* Simplification: nextMarked is derived. The client gate is an input oracle, not a new persisted state variable.
 \* TLC checks this model, not implementation correctness.
 
+\* Review trace: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2330#discussion_r4486070563 covers the dedupe window.
+\* Earlier rounds: capture 1 covered, 0 added, 0 gaps; field inputs 0 covered, 2 added, 1 gap.
+\* Historical costs: first capture spec about 6 minutes; model split about 4 minutes; prior review about 10 minutes shared.
+\* Single-eviction follow-up cost about 1 minute. The earlier combined review counts remain above.
+\* Current six-finding review: 0 covered, 1 added, 5 gaps. Error-body preservation adds two OpenRouter invariants.
+\* Gaps: PR scope, duplicate test setup, missing header history, flag wording, and ambiguous review labels need direct checks.
+\* Expectation: these text and test changes reveal no new runtime defect. Existing capture and copy checks must still pass.
+\* Current result: all 24 selected configs give the expected result. Fixed states: capture 1,079; copy 64; provider 24.
+\* All 54 provider and 146 telemetry tests pass. Removing the body fails four provider body checks.
+\* With body assertions omitted, the same mutation fails both numeric-code message checks. Production code is restored.
+\* Current cost: one agent, about 6 minutes for models, tests, mutation replays, header history, and PR text. No delegates.
+\* Null result: no new runtime defect beyond the reported coverage gap. No runtime counterexample was rejected.
 EXTENDS Naturals, Sequences
 CONSTANTS Instances, Fields, FieldCases, Fingerprint(_), Window, Limit, Gaps,
           IdentityGuard, WindowGuard, SizeGuard, OptInGuard, MarkSuppressed, IdentityFirst
