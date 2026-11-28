@@ -162,7 +162,13 @@ jobs:
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               run: TEST_FILE=restart-persistence.test USE_MOCK=true xvfb-run -a pnpm --filter @roo-code/vscode-e2e exec node ./out/runTest.js
 
-            - name: Upload restart-persistence failure artifacts
+            - name: Run mocked provider-headers-restart E2E test
+              # Issue #2770: custom headers must survive a fresh extension host. Same runner
+              # reuse as the restart-persistence step above.
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              run: TEST_FILE=provider-headers-restart.test USE_MOCK=true xvfb-run -a pnpm --filter @roo-code/vscode-e2e exec node ./out/runTest.js
+
+            - name: Upload restart scenario failure artifacts
               # runTest.js preserves a failed scenario workspace (phase results,
               # VS Code logs, task files) under apps/vscode-e2e/test-failures/
               # instead of deleting it, so the interrupted-write state from

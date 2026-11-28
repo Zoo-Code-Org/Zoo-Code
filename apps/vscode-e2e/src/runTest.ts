@@ -58,6 +58,14 @@ function isRestartPersistenceTargetedRun(testFile?: string, testGrep?: string): 
 	return testGrep?.toLowerCase().includes("restart persistence") ?? false
 }
 
+function isProviderHeadersRestartTargetedRun(testFile?: string, testGrep?: string): boolean {
+	if (testFile?.toLowerCase().includes("provider-headers-restart")) {
+		return true
+	}
+
+	return testGrep?.toLowerCase().includes("provider headers restart") ?? false
+}
+
 async function main() {
 	const isRecord = process.env.AIMOCK_RECORD === "true"
 	const testGrep = getCliFlagValue("--grep") || process.env.TEST_GREP
@@ -66,6 +74,8 @@ async function main() {
 	const isGeminiTest = testFile?.toLowerCase().includes("gemini.test") ?? false
 	const isBedrockTest = isBedrockTargetedRun(testFile, testGrep)
 	const isRestartPersistenceTest = isRestartPersistenceTargetedRun(testFile, testGrep)
+	const isProviderHeadersRestartTest = isProviderHeadersRestartTargetedRun(testFile, testGrep)
+	const isRestartScenarioTest = isRestartPersistenceTest || isProviderHeadersRestartTest
 
 	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
@@ -106,7 +116,7 @@ async function main() {
 	try {
 		// Create a temporary workspace folder for regular tests. Restart scenarios own
 		// all of their paths under the dedicated scenario root below.
-		if (!isRestartPersistenceTest) {
+		if (!isRestartScenarioTest) {
 			testWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-workspace-"))
 		}
 
@@ -201,7 +211,7 @@ async function main() {
 		const pkg = JSON.parse(readFileSync(path.resolve(__dirname, "../package.json"), "utf-8"))
 		const vscodeVersion = process.env.VSCODE_VERSION || pkg.devDependencies["@types/vscode"]
 
-		if (isRestartPersistenceTest) {
+		if (isRestartScenarioTest) {
 			scenarioWorkspace = await createScenarioWorkspace()
 			const vscodeExecutablePath = await downloadAndUnzipVSCode({
 				version: vscodeVersion,
@@ -211,7 +221,7 @@ async function main() {
 				vscodeExecutablePath,
 				extensionDevelopmentPath,
 				extensionTestsPath,
-				scenario: "restart-persistence",
+				scenario: isProviderHeadersRestartTest ? "provider-headers-restart" : "restart-persistence",
 				workspace: scenarioWorkspace,
 				environment: extensionTestsEnv,
 				expectedExitPolicies: [

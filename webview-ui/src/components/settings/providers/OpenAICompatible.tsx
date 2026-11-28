@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { useEvent } from "react-use"
 import { Checkbox } from "vscrui"
 import { VSCodeButton, VSCodeTextArea, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
@@ -58,6 +58,40 @@ export const OpenAICompatible = ({
 		const headers = apiConfiguration.openAiHeaders || {}
 		return Object.entries(headers)
 	})
+
+	// The header object this editor last wrote to the cached state, as JSON, and the
+	// cached headers seen by the previous render. A write echo keeps the rows the user
+	// is typing in; any other change to `openAiHeaders` is a profile load or switch,
+	// so the rows must show the loaded headers. Resetting during render keeps the
+	// write effect below from running against rows the new profile replaces.
+	const lastWrittenHeadersRef = useRef<string | null>(null)
+	const [seenHeaders, setSeenHeaders] = useState(apiConfiguration.openAiHeaders)
+
+	if (apiConfiguration.openAiHeaders !== seenHeaders) {
+		setSeenHeaders(apiConfiguration.openAiHeaders)
+
+		const incoming = JSON.stringify(apiConfiguration.openAiHeaders || {})
+
+		if (incoming !== lastWrittenHeadersRef.current) {
+			const entries = Object.entries(apiConfiguration.openAiHeaders || {})
+			setCustomHeaders((prev) => (JSON.stringify(prev) === JSON.stringify(entries) ? prev : entries))
+		}
+	}
+
+	// Header edits reach the cached state immediately, so Save always sees the latest
+	// addition, edit, or removal. Non-header controls keep the cache-until-Save flow.
+	useEffect(() => {
+		const headerObject = convertHeadersToObject(customHeaders)
+		const currentHeaders = apiConfiguration.openAiHeaders || {}
+
+		if (JSON.stringify(headerObject) === JSON.stringify(currentHeaders)) {
+			return
+		}
+
+		lastWrittenHeadersRef.current = JSON.stringify(headerObject)
+		setApiConfigurationField("openAiHeaders", headerObject, false)
+	}, [customHeaders, apiConfiguration.openAiHeaders, setApiConfigurationField])
+
 	const extraBodyResult = parseOpenAiExtraBody(apiConfiguration.openAiExtraBody)
 	const extraBodyError = formatOpenAiExtraBodyValidationError(extraBodyResult, t)
 
@@ -94,18 +128,6 @@ export const OpenAICompatible = ({
 	const handleRemoveCustomHeader = useCallback((index: number) => {
 		setCustomHeaders((prev) => prev.filter((_, i) => i !== index))
 	}, [])
-
-	// Helper to convert array of tuples to object
-
-	// Add effect to update the parent component's state when local headers change
-	useEffect(() => {
-		const timer = setTimeout(() => {
-			const headerObject = convertHeadersToObject(customHeaders)
-			setApiConfigurationField("openAiHeaders", headerObject, false)
-		}, 300)
-
-		return () => clearTimeout(timer)
-	}, [customHeaders, setApiConfigurationField])
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
