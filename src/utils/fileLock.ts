@@ -2,6 +2,8 @@ import * as path from "path"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import * as lockfile from "proper-lockfile"
 
+import { resolveRealPath } from "./WorkspacePathResolver"
+
 /**
  * Shared staleness window for per-file advisory locks. This module owns the
  * single advisory lock protocol used by `safeWriteJson` and by callers that
@@ -20,6 +22,19 @@ export interface FileLockOptions {
 }
 
 /**
+ * Resolve the canonical path the advisory lock is keyed on.
+ *
+ * Locks must key on the referent, not the caller's alias: two writers reaching one file
+ * through a symlinked ancestor would otherwise serialize on different locks and lose each
+ * other's updates. resolveRealPath resolves the nearest existing ancestor, so a file that
+ * does not exist yet under a symlinked directory still locks under the real directory. Case
+ * folding is disabled because the result is used for filesystem operations, not comparisons.
+ */
+export async function resolveFileLockPath(filePath: string): Promise<string> {
+	return resolveRealPath(path.resolve(filePath), { caseFold: false })
+}
+
+/**
  * Acquire the advisory lock for one file path using the exact protocol
  * `safeWriteJson` uses, so operations that hold this lock serialize with
  * every `safeWriteJson` write to the same path. Callers must release the
@@ -27,7 +42,7 @@ export interface FileLockOptions {
  * while holding it.
  */
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
-	const absoluteFilePath = path.resolve(filePath)
+	const absoluteFilePath = await resolveFileLockPath(filePath)
 	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
 		return await lockfile.lock(absoluteFilePath, {
@@ -72,6 +87,12 @@ export async function withFileLock<T>(
 	operation: (absoluteFilePath: string) => Promise<T>,
 	options?: FileLockOptions,
 ): Promise<T> {
+	// The operation is handed the caller's own resolved spelling. Canonicalising here would give the
+	// delete path a different string for one file whenever an 8.3 alias or a junctioned ancestor
+	// is in play, and every comparison it makes against names it built from its own path - the
+	// backup guard and the leftover-prefix match in jsonFileRecovery - is a string comparison.
+	// The lock key and the artefact stay on resolveFileLockPath below, which is what makes an
+	// alias and its referent contend; only the path the operation sees changes.
 	const absoluteFilePath = path.resolve(filePath)
 	const releaseLock = await acquireFileLock(absoluteFilePath, options)
 

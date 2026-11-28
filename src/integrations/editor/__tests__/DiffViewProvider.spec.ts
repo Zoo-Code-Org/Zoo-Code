@@ -18,7 +18,22 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
+	mkdir: vi.fn().mockResolvedValue(undefined),
+	rename: vi.fn().mockResolvedValue(undefined),
+	unlink: vi.fn().mockResolvedValue(undefined),
 }))
+
+// Mock safeWriteText (used by saveDirectly). The real module's error classes stay
+// available through importOriginal, so a test can hand the caller an actual
+// DaclRestoreError instead of a look-alike.
+vi.mock("../../../services/file-safety/safeWriteText", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../services/file-safety/safeWriteText")>()
+	return {
+		...actual,
+		safeWriteText: vi.fn().mockResolvedValue(undefined),
+		assertPublishWithinAuthorizedRoot: vi.fn().mockResolvedValue(undefined),
+	}
+})
 
 // Mock utils
 vi.mock("../../../utils/fs", () => ({
@@ -29,6 +44,8 @@ vi.mock("../../../utils/fs", () => ({
 vi.mock("path", () => ({
 	resolve: vi.fn((cwd, relPath) => `${cwd}/${relPath}`),
 	basename: vi.fn((path) => path.split("/").pop()),
+	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
+	join: (...args: string[]) => args.join("/"),
 }))
 
 // Mock vscode
@@ -770,6 +787,201 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("saveDirectly method", () => {
+		it("rejects an escaped target before creating directories for it", async () => {
+			const { assertPublishWithinAuthorizedRoot, safeWriteText } =
+				await import("../../../services/file-safety/safeWriteText")
+			const { createDirectoriesForFile } = await import("../../../utils/fs")
+			vi.mocked(createDirectoriesForFile).mockClear()
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(assertPublishWithinAuthorizedRoot).mockClear()
+			const escape = new Error("safeWriteText: refusing to publish outside the authorized root")
+			vi.mocked(assertPublishWithinAuthorizedRoot).mockRejectedValueOnce(escape)
+
+			await expect(diffViewProvider.saveDirectly("linkdir/new/secret.txt", "x", false, false, 0)).rejects.toThrow(
+				"refusing to publish",
+			)
+
+			// The allow-list decision must precede the filesystem mutation:
+			// createDirectoriesForFile follows symlinks, so running it first would
+			// already have created the outside directory the check exists to protect.
+			expect(createDirectoriesForFile).not.toHaveBeenCalled()
+			expect(safeWriteText).not.toHaveBeenCalled()
+			// The stub rejects whatever it is handed, so without pinning the arguments this test
+			// would still pass if the guard were given the workspace root instead of the target.
+			expect(assertPublishWithinAuthorizedRoot).toHaveBeenCalledWith(
+				mockCwd,
+				`${mockCwd}/linkdir/new/secret.txt`,
+				`${mockCwd}/linkdir/new/secret.txt`,
+			)
+			vi.mocked(assertPublishWithinAuthorizedRoot).mockResolvedValue(undefined)
+		})
+		it("rejects a save over a read-only target instead of renaming onto it", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+			vi.mocked(fs.access).mockRejectedValueOnce(eacces)
+
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)).rejects.toThrow(
+				"EACCES",
+			)
+
+			// The old fs.writeFile path failed the same way; safeWriteText must not run.
+			expect(safeWriteText).not.toHaveBeenCalled()
+			vi.mocked(fs.access).mockResolvedValue(undefined)
+		})
+
+		it("still writes when the target does not exist yet", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(fs.access).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { authorizedRoot: mockCwd })
+			// Call counts alone would still pass if the publish ran but the caller reported
+			// nothing about the content it wrote.
+			expect(result.finalContent).toBe("new content")
+			expect(result.userEdits).toBeUndefined()
+			vi.mocked(fs.access).mockResolvedValue(undefined)
+		})
+
+		it("checks write permission on the absolute target before publishing", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(fs.access).mockClear()
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			// safeWriteText publishes with rename, which only needs write permission on the
+			// DIRECTORY. The contract this unit preserves requires it on the FILE, so the guard
+			// must be handed the absolute target - not the relative path the caller passed.
+			const calls = vi.mocked(fs.access).mock.calls
+			const accessIndex = calls.findIndex((call) => String(call[0]).endsWith("test.ts"))
+			expect(accessIndex).toBeGreaterThanOrEqual(0)
+			expect(calls[accessIndex][0]).toBe(`${mockCwd}/test.ts`)
+
+			// An existence-only check would not catch a read-only target: the guard has to be handed
+			// the write bit, otherwise the read-only contract this unit preserves is silently gone.
+			const { constants } = await import("fs")
+			expect(calls[accessIndex][1]).toBe(constants.W_OK)
+
+			// The check is only meaningful before the publish; after it, an EACCES target would
+			// already have been renamed over.
+			expect(vi.mocked(fs.access).mock.invocationCallOrder[accessIndex]).toBeLessThan(
+				vi.mocked(safeWriteText).mock.invocationCallOrder[0],
+			)
+		})
+
+		it("reports a post-commit DACL restore failure as a warning instead of a failed save", async () => {
+			const { DaclRestoreError, safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// The primitive reports a lost DACL after the commit rename as DaclRestoreError:
+			// the content is already on disk, so re-writing cannot change the access rights.
+			// The tool layer must still record the write as done, or it keeps stale state and
+			// retries content that is already published.
+			vi.mocked(safeWriteText).mockRejectedValueOnce(new DaclRestoreError(`${mockCwd}/test.ts`, null))
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			expect(result.finalContent).toBe("new content")
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			const publishCalls = vi.mocked(safeWriteText).mock.calls.filter(function (call) {
+				return call[0] === `${mockCwd}/test.ts`
+			})
+			expect(publishCalls).toHaveLength(1)
+			warn.mockRestore()
+		})
+
+		it("keeps the save successful when the editor cannot open the file after the publish landed", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// The commit rename already put the content on disk by the time this call fails, so a
+			// rejection here reports a save that cannot be undone as a save that never happened.
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValueOnce(new Error("cannot open the text editor"))
+
+			await expect(
+				diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200),
+			).resolves.toMatchObject({ finalContent: "new content" })
+
+			const publishCalls = vi.mocked(safeWriteText).mock.calls.filter(function (call) {
+				return call[0] === `${mockCwd}/test.ts`
+			})
+			expect(publishCalls).toHaveLength(1)
+			// The warning has to name which condition it is reporting: an editor that could not open
+			// a committed file is not the same condition as a lost DACL or an unconfirmed durability.
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("content committed, the editor could not open it"),
+			)
+			expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
+		})
+		it("keeps the save successful when the in-memory document cannot be prepared after the publish landed", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// openFile false is the PREVENT_FOCUS_DISRUPTION path: same publish, different open.
+			vi.mocked(vscode.workspace.openTextDocument).mockRejectedValueOnce(
+				new Error("cannot open the document in memory"),
+			)
+
+			await expect(
+				diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0),
+			).resolves.toMatchObject({ finalContent: "new content" })
+
+			const publishCalls = vi.mocked(safeWriteText).mock.calls.filter(function (call) {
+				return call[0] === `${mockCwd}/test.ts`
+			})
+			expect(publishCalls).toHaveLength(1)
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("content committed, the in-memory document could not be prepared"),
+			)
+			expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
+		})
+
+		it("reports an unconfirmed-durability publish as a warning instead of a failed save", async () => {
+			const { PublishNotDurableError, safeWriteText } =
+				await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// The rename landed before the durability failure was observed, so the content is
+			// committed: a re-write would duplicate the work and skip the save bookkeeping.
+			vi.mocked(safeWriteText).mockRejectedValueOnce(
+				new PublishNotDurableError(`${mockCwd}/test.ts`, "directory fsync failed"),
+			)
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			expect(result.finalContent).toBe("new content")
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
+		})
+
+		it("rethrows an ordinary publish failure instead of reporting a committed write", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(vscode.window.showTextDocument).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// Only the committed-publish classes are tolerated here. An ordinary failure means the
+			// bytes never landed, so the tool layer must reject rather than record the save, and
+			// must not open a document for content that was never published.
+			const ordinary = new Error("EACCES: ordinary publish failure")
+			vi.mocked(safeWriteText).mockRejectedValueOnce(ordinary)
+
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)).rejects.toBe(
+				ordinary,
+			)
+
+			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
+		})
+
 		beforeEach(() => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
@@ -782,9 +994,9 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { authorizedRoot: mockCwd })
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -805,9 +1017,9 @@ describe("DiffViewProvider", () => {
 		it("should not open file when openWithoutFocus is false", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { authorizedRoot: mockCwd })
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -820,9 +1032,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { authorizedRoot: mockCwd })
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
