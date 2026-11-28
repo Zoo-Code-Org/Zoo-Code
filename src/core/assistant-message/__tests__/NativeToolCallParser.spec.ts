@@ -1,4 +1,7 @@
 import { NativeToolCallParser, type ToolCallStreamEvent } from "../NativeToolCallParser"
+import { buildMcpToolName } from "../../../utils/mcp-name"
+import { clearMcpToolAliases } from "../../../utils/mcp-name-ledger"
+import type { ToolName } from "@roo-code/types"
 
 describe("NativeToolCallParser", () => {
 	describe("parseToolCall", () => {
@@ -285,6 +288,80 @@ describe("NativeToolCallParser", () => {
 					}
 				})
 			})
+		})
+	})
+
+	describe("dynamic MCP tools", () => {
+		// The ledger is process-wide: each test must start from an empty one,
+		// or a conflict recorded by an earlier test would persist and the
+		// ambiguity assertions below would not depend on their own records.
+		beforeEach(() => {
+			clearMcpToolAliases()
+		})
+
+		afterEach(() => {
+			clearMcpToolAliases()
+		})
+
+		it("resolves an echoed name whose server name carries double underscores", () => {
+			// buildMcpToolName("svc__prod", "read.file") records the ledger key
+			// mcp--svc__prod--readfile. A model that rewrites separators echoes
+			// mcp__svc__prod__readfile, where only the first and last "__" are
+			// separators. The raw echo must reach the ledger lookup: the old
+			// code normalized it to mcp--svc--prod--readfile first, missed the
+			// key, and the split returned server "svc" and tool "prod--readfile".
+			const functionName = buildMcpToolName("svc__prod", "read.file")
+			const result = NativeToolCallParser.parseToolCall({
+				id: "toolu_mcp_echo",
+				name: functionName.replace(/--/g, "__") as ToolName,
+				arguments: JSON.stringify({}),
+			})
+
+			expect(result?.type).toBe("mcp_tool_use")
+			if (result?.type === "mcp_tool_use") {
+				expect(result.serverName).toBe("svc__prod")
+				expect(result.toolName).toBe("read.file")
+			}
+		})
+
+		it("resolves an echo whose tool name carries double underscores", () => {
+			const functionName = buildMcpToolName("svc", "read__file")
+			const result = NativeToolCallParser.parseDynamicMcpTool({
+				id: "toolu_mcp_tool_echo",
+				name: functionName.replace(/--/g, "__"),
+				arguments: "{}",
+				rawName: functionName.replace(/--/g, "__"),
+			})
+
+			expect(result?.serverName).toBe("svc")
+			expect(result?.toolName).toBe("read__file")
+		})
+
+		it("an echoed name recorded for two different pairs parses to no tool call", () => {
+			// mcp--svc__prod--readfile (server svc__prod) and
+			// mcp--svc--prod__readfile (server svc) share one echo form. The
+			// parse must refuse it instead of picking one server.
+			buildMcpToolName("svc__prod", "readfile")
+			buildMcpToolName("svc", "prod__readfile")
+			const result = NativeToolCallParser.parseDynamicMcpTool({
+				id: "toolu_mcp_ambiguous",
+				name: "mcp__svc__prod__readfile",
+				arguments: "{}",
+			})
+
+			expect(result).toBeNull()
+		})
+
+		it("an ambiguous name is refused through parseToolCall too", () => {
+			buildMcpToolName("one.server", "tool")
+			buildMcpToolName("oneserver", "tool")
+			const result = NativeToolCallParser.parseToolCall({
+				id: "toolu_mcp_conflict",
+				name: "mcp__oneserver__tool" as ToolName,
+				arguments: JSON.stringify({}),
+			})
+
+			expect(result).toBeNull()
 		})
 	})
 
