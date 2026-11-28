@@ -98,6 +98,8 @@ describe.sequential("CustomToolRegistry integration", () => {
 					options.cacheDir,
 				])
 			},
+			// Allow cold compiler and native Node startup under CI coverage.
+			30_000,
 		)
 
 		it.each(["EACCES", "EIO"])("does not rebuild after a bundle lookup fails with %s", async (code) => {
