@@ -41,6 +41,17 @@ export interface SafeWriteJsonOptions {
 	merge?: (existing: unknown, incoming: unknown) => unknown
 
 	/**
+	 * Synchronous last-moment re-validation, invoked immediately before the
+	 * commit rename with no `await` in between. A caller whose decision depends
+	 * on state another actor can change during the temp-file writes (an
+	 * in-process ownership claim, for example) re-checks it here: throwing
+	 * aborts the write with nothing committed and the previous file restored.
+	 * Must stay synchronous so nothing can interleave between the check and the
+	 * rename it guards.
+	 */
+	preCommit?: () => void
+
+	/**
 	 * When provided, receives one event per replacement-protocol step (see
 	 * SafeWriteJsonTraceStage). Callers such as the task-message save use it
 	 * to emit diagnostic trace lines; it never influences the write itself.
@@ -143,7 +154,10 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// Step 2: Commit the replacement with a single atomic rename. The
 		// committed target stays in place until this rename lands, so a
 		// process exit before or during the commit can no longer leave the
-		// canonical path absent.
+		// canonical path absent. `preCommit` runs immediately before the
+		// commit rename with no await in between, so a caller can abort with
+		// nothing committed and the previous file restored.
+		options?.preCommit?.()
 		try {
 			options?.trace?.({ stage: "replacement-rename" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
@@ -220,7 +234,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		}
 
 		// A failed rollback leaves the backup as the only committed copy.
-		// Preserve it for recovery by a later writer.
+		// Preserve it for recovery by a later writer: never unlink it, report
+		// the path so the data is recoverable by hand instead of being
+		// destroyed by cleanup.
+		if (actualTempBackupFilePath) {
+			console.error(`[Catch] Keeping backup ${actualTempBackupFilePath}: rollback failed, original not restored`)
+		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
