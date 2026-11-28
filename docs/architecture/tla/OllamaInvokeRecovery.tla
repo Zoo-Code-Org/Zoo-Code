@@ -54,7 +54,7 @@
 \* property test covers it), the parameter schema typing, TagMatcher
 \* reasoning tags, abort paths, and token costs.
 \* Cost: each cfg checks in a few seconds on one TLC worker.
-\* Result: OllamaInvokeRecovery.cfg (Fixed) pass in 89 states. HoldAll fails
+\* Result: OllamaInvokeRecovery.cfg (Fixed) pass in 105 states. HoldAll fails
 \* LiveStream. Unfixed fails NoLostCall and NoBlockTextLeak. NoGuard fails
 \* NoPhantomCall and LiveStream (TLC reports LiveStream first). NoSuppress
 \* fails NoBlockTextLeak. NoFinishFlush fails NoLostText. EarlyEmit fails
@@ -174,6 +174,19 @@
 \* container chain, the container-exit line check, and the resumed close
 \* search with its overlap; the per-yield abort guard is a handler-loop
 \* property outside this machine, pinned by a handler test.
+\* Review round on 60a915973: the opening-container quote-marker limit (a
+\* strip tab's residual columns count toward the next level's three-column
+\* marker limit on the opener side too; past it the line is an indented-code
+\* opener and the fence it seemed to hold never opens) sits below the token
+\* abstraction like the other container rules - Tokens sees a fence line as
+\* one T_FENCE token with no byte or column structure. Quoted stays the run
+\* oracle. Added: the indentedCode run, whose fence line is such an
+\* indented-code opener - the whole example stays text, no call. Covered:
+\* the fence run's Quoted oracle already keeps a quoted example text. Gap:
+\* the line-level rule, pinned by scanner unit tests (an opener line four
+\* columns in through a tab residual plus two spaces opens no fence and the
+\* nested-looking example stays text; three columns in opens the nested
+\* fence).
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
@@ -193,7 +206,8 @@ T_NATIVE == "n"         \* a native tool_call arrival
 
 Runs == {"wrap", "wrapTwice", "split", "fence", "carry", "natAfter",
          "natMid", "natFirst", "natTail", "quotedNat", "unfin",
-         "unknown", "unknownWrap", "prose", "malformed", "bareEmpty"}
+         "unknown", "unknownWrap", "prose", "malformed", "bareEmpty",
+         "indentedCode"}
 
 \* ---- Per-run inputs (truth-table data, not rules) ----
 Tokens(r) ==
@@ -201,6 +215,7 @@ Tokens(r) ==
     []  r = "wrapTwice" -> <<T_WRPO, T_OPNK, T_PARAM, T_INVC, T_WRPC, T_WRPC>>
     []  r = "split"     -> <<T_OPNK, T_PARAM, T_INVC>>
     []  r = "fence"     -> <<T_FENCE, T_OPNK, T_PARAM, T_INVC, T_FENCE>>
+    []  r = "indentedCode" -> <<T_FENCE, T_OPNK, T_PARAM, T_INVC, T_FENCE>>
     []  r = "carry"     -> <<T_TICK, T_OPNK, T_PARAM, T_INVC, T_TICK>>
     []  r = "natAfter"  -> <<T_OPNK, T_PARAM, T_INVC, T_NATIVE>>
     []  r = "natMid"    -> <<T_OPNK, T_NATIVE, T_PARAM, T_INVC>>
@@ -222,11 +237,11 @@ RunLen(r) == Len(Tokens(r))
 HasCall(r) ==
     r \in {"wrap", "wrapTwice", "split", "fence", "carry",
            "natAfter", "natMid", "natFirst", "natTail", "quotedNat",
-           "malformed", "bareEmpty"}
+           "malformed", "bareEmpty", "indentedCode"}
 
 \* Oracle: the block sits inside a fence or an inline code span, so the
 \* guard keeps it as text.
-Quoted(r) == r \in {"fence", "carry", "quotedNat"}
+Quoted(r) == r \in {"fence", "carry", "quotedNat", "indentedCode"}
 
 \* Oracle: the block interior fails the complete parameter parse, so the
 \* fixed machine keeps the whole block, tags included, as text. An empty
@@ -248,7 +263,7 @@ EffRecov(r) ==
 KnownOpener(r) ==
     r \in {"wrap", "wrapTwice", "split", "fence", "carry", "natAfter",
            "natMid", "natFirst", "natTail", "quotedNat", "unfin",
-           "malformed", "bareEmpty"}
+           "malformed", "bareEmpty", "indentedCode"}
 
 \* The verdict the machine applies at the opener. HoldAll and Unfixed
 \* never consult a mid-stream verdict. NoGuard drops the quote part.
@@ -268,6 +283,7 @@ HoldStart(r) ==
     []  r = "wrapTwice" -> 1
     []  r = "split"     -> 1
     []  r = "fence"     -> 2
+    []  r = "indentedCode" -> 2
     []  r = "carry"     -> 2
     []  r = "natAfter"  -> 1
     []  r = "natMid"    -> 1
@@ -288,6 +304,7 @@ ResolvePos(r) ==
     []  r = "wrapTwice" -> 4
     []  r = "split"     -> 3
     []  r = "fence"     -> 4
+    []  r = "indentedCode" -> 4
     []  r = "carry"     -> 4
     []  r = "natAfter"  -> 3
     []  r = "natMid"    -> 4
@@ -338,6 +355,7 @@ SinkSeq(r) ==
     []  r = "wrapTwice"    -> << <<"call", 4>>, <<"txt", 6>> >>
     []  r = "split"        -> << <<"call", 3>> >>
     []  r = "fence"        -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>>, <<"txt", 4>>, <<"txt", 5>> >>
+    []  r = "indentedCode" -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>>, <<"txt", 4>>, <<"txt", 5>> >>
     []  r = "carry"        -> << <<"txt", 1>>, <<"txt", 2>>, <<"txt", 3>>, <<"txt", 4>>, <<"txt", 5>> >>
     []  r = "natAfter"     -> << <<"call", 3>>, <<"nat", 4>> >>
     []  r = "natMid"       -> << <<"nat", 2>>, <<"call", 4>> >>

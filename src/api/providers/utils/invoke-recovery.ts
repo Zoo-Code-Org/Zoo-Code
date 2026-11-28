@@ -186,7 +186,9 @@ const LIST_MARKER = /^ {0,3}(?:[-+*]|\d{1,9}[.)])( +)/
  * column the strip point reaches and `base` the column the content
  * region starts at, so the fenced-opener check can measure
  * indentation in columns. A tab partly consumed by the strip keeps
- * its residual columns in the content region. Quote and list
+ * its residual columns in the content region, and those columns count
+ * toward each quote marker's three-column limit: a deeper marker ends
+ * the chain, the line's rest is content. Quote and list
  * prefixes chain: `> - ~~~` opens its fence inside the quoted list
  * item, and continuation lines must carry the same chain.
  */
@@ -199,6 +201,16 @@ function lineContainer(line: string): { strip: number; container: FenceContainer
 	for (;;) {
 		const quote = QUOTE_PREFIX.exec(rest)
 		if (quote !== null) {
+			// CommonMark: a quote marker carries at most three columns of
+			// indentation inside the enclosing content region. The
+			// residual columns of a tab partly consumed at the previous
+			// level count toward that limit even though the match only
+			// sees the literal spaces behind it: a deeper marker is an
+			// indented-code opener, so the chain ends and the rest of
+			// the line stays content.
+			if (column + quote[0].indexOf(">") - base > 3) {
+				break
+			}
 			const depth = (quote[0].match(/>/g) ?? []).length
 			strip += quote[0].length
 			column += quote[0].length

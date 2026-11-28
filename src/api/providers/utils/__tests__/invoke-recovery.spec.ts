@@ -419,6 +419,24 @@ line2</parameter></invoke><invoke name="read_file"><parameter name="path">a.ts</
 		expect(text(events)).toBe(expectedText)
 	})
 
+	it.each([
+		["four columns in opens no fence", `>	  > ~~~\n> > ~~~\n> > <invoke name="get_weather"></invoke>\n> > ~~~`],
+		["three columns in opens the nested fence", `>	 > ~~~\n> > ${bareWeatherCall("Rome")}\n> > ~~~\nafter`],
+	])("counts residual tab columns at an opening quote marker: %s", (_label, fixture) => {
+		// CommonMark limits each opening quote marker to three columns
+		// inside the enclosing content region, counting the residual
+		// columns of a tab partly consumed as the previous marker's
+		// padding. With two more spaces the opener line's second marker
+		// sits four columns in: that line is an indented-code opener, so
+		// no fence opens there and the nested-looking example below stays
+		// text with no recovery. With one space the marker sits three
+		// columns in, the nested fence opens, and the example stays
+		// quoted text.
+		const events = scanChunked(fixture, [8, 40, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
 	it("keeps a quote-prefixed line inside a top-level fence as fence content", () => {
 		// CommonMark: fenced content is literal text. A top-level
 		// fence does not close on `> ~~~`, so the example stays text.
