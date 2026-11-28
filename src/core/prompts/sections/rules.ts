@@ -78,6 +78,7 @@ export function getRulesSection(
 	cwd: string,
 	settings: SystemPromptSettings | undefined,
 	policy: EffectiveToolPolicy,
+	workspaceRoots: string[] = [],
 ): string {
 	const chainOp = getCommandChainOperator()
 	const chainNote = getCommandChainNote()
@@ -95,10 +96,18 @@ export function getRulesSection(
 
 	rules.push(`The project base directory is: ${cwd.toPosix()}`)
 
+	const hasMultipleRoots = workspaceRoots.length > 1
+	if (hasMultipleRoots) {
+		rules.push(
+			`The open workspace has these roots: ${workspaceRoots.map((root) => root.toPosix()).join(", ")}. Files in any listed root are inside the workspace. Use paths relative to the project base for that root, or an absolute path for a file in another root.`,
+		)
+	}
 	rules.push(
-		hasExecuteCommand
-			? `All file paths must be relative to this directory. However, commands may change directories in terminals, so respect working directory specified by the response to execute_command.`
-			: "All file paths must be relative to this directory.",
+		hasMultipleRoots
+			? "Use a path relative to the project base or an absolute path within another listed workspace root."
+			: hasExecuteCommand
+				? `All file paths must be relative to this directory. However, commands may change directories in terminals, so respect working directory specified by the response to execute_command.`
+				: "All file paths must be relative to this directory.",
 	)
 
 	rules.push(

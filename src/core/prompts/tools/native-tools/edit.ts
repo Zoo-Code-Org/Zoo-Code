@@ -20,7 +20,8 @@ const edit = {
 			properties: {
 				file_path: {
 					type: "string",
-					description: "The path of the file to edit (relative to the working directory)",
+					description:
+						"File path relative to the task base, or an absolute path inside another open workspace root",
 				},
 				old_string: {
 					type: "string",

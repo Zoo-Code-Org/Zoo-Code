@@ -220,36 +220,38 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 	details += `<model>${modelId}</model>\n`
 
 	if (includeFileDetails) {
-		details += `\n\n# Current Workspace Directory (${cline.cwd.toPosix()}) Files\n`
-		const isDesktop = arePathsEqual(cline.cwd, path.join(os.homedir(), "Desktop"))
-
-		if (isDesktop) {
-			// Don't want to immediately access desktop since it would show
-			// permission popup.
-			details += "(Desktop files not shown automatically. Use list_files to explore if needed.)"
-		} else {
-			const maxFiles = maxWorkspaceFiles ?? 200
-
-			// Early return for limit of 0
-			if (maxFiles === 0) {
-				details += "(Workspace files context disabled. Use list_files to explore if needed.)"
-			} else {
-				try {
-					const [files, didHitLimit] = await listFiles(cline.cwd, true, maxFiles)
-					const { showRooIgnoredFiles = false } = state ?? {}
-
-					const result = formatResponse.formatFilesList(
-						cline.cwd,
-						files,
-						didHitLimit,
-						cline.rooIgnoreController,
-						showRooIgnoredFiles,
-					)
-
-					details += result
-				} catch (error) {
-					details += `(File listing unavailable: ${error instanceof Error ? error.message : String(error)})`
-				}
+		const roots = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? []
+		const workspaceRoots = roots.length > 0 ? roots : [cline.cwd]
+		const maxFiles = maxWorkspaceFiles ?? 200
+		const { showRooIgnoredFiles = false } = state ?? {}
+		for (const [index, root] of workspaceRoots.entries()) {
+			details +=
+				workspaceRoots.length === 1
+					? `\n\n# Current Workspace Directory (${root.toPosix()}) Files\n`
+					: `\n\n# Workspace Root ${index + 1} (${root.toPosix()}) Files\n`
+			if (arePathsEqual(root, path.join(os.homedir(), "Desktop"))) {
+				// Don't access Desktop automatically; it can trigger a permission popup.
+				details += "(Desktop files not shown automatically. Use list_files to explore if needed.)"
+				continue
+			}
+			const quota =
+				Math.floor(maxFiles / workspaceRoots.length) + (index < maxFiles % workspaceRoots.length ? 1 : 0)
+			if (quota === 0) {
+				details +=
+					"(Workspace files context disabled or omitted by the shared file budget. Use list_files to explore if needed.)"
+				continue
+			}
+			try {
+				const [files, didHitLimit] = await listFiles(root, true, quota)
+				details += formatResponse.formatFilesList(
+					root,
+					files,
+					didHitLimit,
+					cline.rooIgnoreController,
+					showRooIgnoredFiles,
+				)
+			} catch (error) {
+				details += `(File listing unavailable: ${error instanceof Error ? error.message : String(error)})`
 			}
 		}
 	}

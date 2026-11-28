@@ -15,15 +15,21 @@ export const LOCK_TEXT_SYMBOL = "\u{1F512}"
 export class RooIgnoreController {
 	private cwd: string
 	private ignoreInstance: Ignore
+	private readonly roots: string[]
+	private readonly otherRootIgnores = new Map<string, { content: string; instance: Ignore }>()
 	private disposables: vscode.Disposable[] = []
 	rooIgnoreContent: string | undefined
 
 	constructor(cwd: string) {
 		this.cwd = cwd
+		this.roots = [cwd, ...(vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [])].filter(
+			(root, index, roots) =>
+				roots.findIndex((candidate) => path.resolve(candidate) === path.resolve(root)) === index,
+		)
 		this.ignoreInstance = ignore()
 		this.rooIgnoreContent = undefined
 		// Set up file watcher for .rooignore
-		this.setupFileWatcher()
+		for (const root of this.roots) this.setupFileWatcher(root)
 	}
 
 	/**
@@ -31,26 +37,26 @@ export class RooIgnoreController {
 	 * Must be called after construction and before using the controller
 	 */
 	async initialize(): Promise<void> {
-		await this.loadRooIgnore()
+		await Promise.all(this.roots.map((root) => this.loadRooIgnore(root)))
 	}
 
 	/**
 	 * Set up the file watcher for .rooignore changes
 	 */
-	private setupFileWatcher(): void {
-		const rooignorePattern = new vscode.RelativePattern(this.cwd, ".rooignore")
+	private setupFileWatcher(root: string): void {
+		const rooignorePattern = new vscode.RelativePattern(root, ".rooignore")
 		const fileWatcher = vscode.workspace.createFileSystemWatcher(rooignorePattern)
 
 		// Watch for changes and updates
 		this.disposables.push(
 			fileWatcher.onDidChange(() => {
-				this.loadRooIgnore()
+				void this.loadRooIgnore(root)
 			}),
 			fileWatcher.onDidCreate(() => {
-				this.loadRooIgnore()
+				void this.loadRooIgnore(root)
 			}),
 			fileWatcher.onDidDelete(() => {
-				this.loadRooIgnore()
+				void this.loadRooIgnore(root)
 			}),
 		)
 
@@ -61,18 +67,23 @@ export class RooIgnoreController {
 	/**
 	 * Load custom patterns from .rooignore if it exists
 	 */
-	private async loadRooIgnore(): Promise<void> {
+	private async loadRooIgnore(root: string): Promise<void> {
 		try {
-			// Reset ignore instance to prevent duplicate patterns
-			this.ignoreInstance = ignore()
-			const ignorePath = path.join(this.cwd, ".rooignore")
+			const instance = ignore()
+			const ignorePath = path.join(root, ".rooignore")
 			if (await fileExistsAtPath(ignorePath)) {
 				const content = await fs.readFile(ignorePath, "utf8")
-				this.rooIgnoreContent = content
-				this.ignoreInstance.add(content)
-				this.ignoreInstance.add(".rooignore")
+				instance.add(content)
+				instance.add(".rooignore")
+				if (root === this.cwd) {
+					this.rooIgnoreContent = content
+					this.ignoreInstance = instance
+				} else this.otherRootIgnores.set(root, { content, instance })
 			} else {
-				this.rooIgnoreContent = undefined
+				if (root === this.cwd) {
+					this.rooIgnoreContent = undefined
+					this.ignoreInstance = instance
+				} else this.otherRootIgnores.delete(root)
 			}
 		} catch (error) {
 			// Should never happen: reading file failed even though it exists
@@ -88,7 +99,7 @@ export class RooIgnoreController {
 	 */
 	validateAccess(filePath: string): boolean {
 		// Always allow access if .rooignore does not exist
-		if (!this.rooIgnoreContent) {
+		if (!this.rooIgnoreContent && this.otherRootIgnores.size === 0) {
 			return true
 		}
 		try {
@@ -104,11 +115,30 @@ export class RooIgnoreController {
 				realPath = absolutePath
 			}
 
-			// Convert real path to relative for .rooignore checking
-			const relativePath = path.relative(this.cwd, realPath).toPosix()
-
-			// Check if the real path is ignored
-			return !this.ignoreInstance.ignores(relativePath)
+			// The target is canonical. Compare canonical roots too, or a workspace
+			// opened through a symlink would bypass its own ignore rules.
+			const root = this.roots
+				.map((root) => {
+					try {
+						return { root, canonical: fsSync.realpathSync(root) }
+					} catch {
+						return { root, canonical: root }
+					}
+				})
+				.sort((a, b) => b.canonical.length - a.canonical.length)
+				.find((candidate) => {
+					const relative = path.relative(candidate.canonical, realPath)
+					return (
+						relative === "" ||
+						(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+					)
+				})
+			if (!root) return true
+			const rule =
+				root.root === this.cwd
+					? this.rooIgnoreContent && this.ignoreInstance
+					: this.otherRootIgnores.get(root.root)?.instance
+			return rule ? !rule.ignores(path.relative(root.canonical, realPath).toPosix()) : true
 		} catch {
 			// Allow access to files outside cwd or on errors (backward compatibility)
 			return true
@@ -122,7 +152,7 @@ export class RooIgnoreController {
 	 */
 	validateCommand(command: string): string | undefined {
 		// Always allow if no .rooignore exists
-		if (!this.rooIgnoreContent) {
+		if (!this.rooIgnoreContent && this.otherRootIgnores.size === 0) {
 			return undefined
 		}
 
@@ -204,10 +234,14 @@ export class RooIgnoreController {
 	 * @returns Formatted instructions or undefined if .rooignore doesn't exist
 	 */
 	getInstructions(): string | undefined {
-		if (!this.rooIgnoreContent) {
+		if (!this.rooIgnoreContent && this.otherRootIgnores.size === 0) {
 			return undefined
 		}
 
-		return `# .rooignore\n\n(The following is provided by a root-level .rooignore file where the user has specified files and directories that should not be accessed. When using list_files, you'll notice a ${LOCK_TEXT_SYMBOL} next to files that are blocked. Attempting to access the file's contents e.g. through read_file will result in an error.)\n\n${this.rooIgnoreContent}\n.rooignore`
+		const rules = this.roots.flatMap((root) => {
+			const content = root === this.cwd ? this.rooIgnoreContent : this.otherRootIgnores.get(root)?.content
+			return content ? [`## ${root}/.rooignore\n${content}\n.rooignore`] : []
+		})
+		return `# .rooignore\n\n(The following root-level rules identify files and directories that should not be accessed. When using list_files, you'll notice a ${LOCK_TEXT_SYMBOL} next to files that are blocked. Attempting to read them will fail.)\n\n${rules.join("\n\n")}`
 	}
 }

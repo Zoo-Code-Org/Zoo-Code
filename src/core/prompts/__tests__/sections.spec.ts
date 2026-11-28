@@ -261,6 +261,13 @@ describe("getRulesSection", () => {
 		newTaskRequireTodos: false,
 	}
 
+	it("names every workspace root and permits paths into another root", () => {
+		const result = getRulesSection(cwd, settings, policyFor(["read", "edit"]), [cwd, "/other/project"])
+		expect(result).toContain("/other/project")
+		expect(result).toContain("absolute path")
+		expect(result).not.toContain("All file paths must be relative to this directory")
+	})
+
 	it("includes standard rules", () => {
 		const result = getRulesSection(cwd, settings, policyFor(["read", "edit", "command"]))
 

@@ -6,7 +6,7 @@ const CODEBASE_SEARCH_DESCRIPTION = `Find files most relevant to the search quer
 
 Parameters:
 - query: (required) The search query. Reuse the user's exact wording/question format unless there's a clear reason not to.
-- path: (optional) Limit search to specific subdirectory (relative to the current workspace directory). Leave empty for entire workspace.
+- path: (optional) Limit search to a subdirectory relative to the task base, or use an absolute path inside another open workspace root. Leave empty to search the task base.
 
 Example: Searching for user authentication code
 { "query": "User login and password hashing", "path": "src/auth" }
@@ -16,7 +16,7 @@ Example: Searching entire workspace
 
 const QUERY_PARAMETER_DESCRIPTION = `Meaning-based search query describing the information you need`
 
-const PATH_PARAMETER_DESCRIPTION = `Optional subdirectory (relative to the workspace) to limit the search scope`
+const PATH_PARAMETER_DESCRIPTION = `Optional subdirectory relative to the task base, or absolute path inside another open workspace root`
 
 export default {
 	type: "function",

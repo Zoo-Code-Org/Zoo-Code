@@ -111,7 +111,7 @@ export function createReadFileTool(options: ReadFileToolOptions = {}): OpenAI.Ch
 	const properties: Record<string, unknown> = {
 		path: {
 			type: "string",
-			description: "Path to the file to read, relative to the workspace",
+			description: "Path relative to the task base, or an absolute path inside another open workspace root",
 		},
 		mode: {
 			type: "string",

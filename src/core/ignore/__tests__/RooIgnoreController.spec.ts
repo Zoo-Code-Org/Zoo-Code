@@ -81,6 +81,55 @@ describe("RooIgnoreController", () => {
 	})
 
 	describe("initialization", () => {
+		it("keeps a symlinked sibling root's ignore rules for both root spellings", async () => {
+			const alias = path.resolve("/other/project")
+			const canonical = path.resolve("/real/project")
+			Object.defineProperty(vscode.workspace, "workspaceFolders", {
+				configurable: true,
+				value: [{ uri: { fsPath: alias } }],
+			})
+			vi.mocked(fsSync.realpathSync).mockImplementation((input) => {
+				const absolute = path.resolve(input.toString())
+				return absolute === alias || absolute.startsWith(alias + path.sep)
+					? canonical + absolute.slice(alias.length)
+					: absolute
+			})
+			mockFileExists.mockResolvedValue(true)
+			mockReadFile.mockResolvedValue("private/")
+			const multiRoot = new RooIgnoreController(TEST_CWD)
+			try {
+				await multiRoot.initialize()
+				for (const root of [alias, canonical]) {
+					expect(multiRoot.validateAccess(path.join(root, "private/key.txt"))).toBe(false)
+					expect(multiRoot.validateAccess(path.join(root, "public/readme.txt"))).toBe(true)
+				}
+			} finally {
+				multiRoot.dispose()
+				Reflect.deleteProperty(vscode.workspace, "workspaceFolders")
+			}
+		})
+
+		it("applies each open root's .rooignore to that root", async () => {
+			Object.defineProperty(vscode.workspace, "workspaceFolders", {
+				configurable: true,
+				value: [{ uri: { fsPath: "/other/project" } }],
+			})
+			const multiRoot = new RooIgnoreController(TEST_CWD)
+			mockFileExists.mockResolvedValue(true)
+			mockReadFile.mockImplementation(async (filePath) =>
+				String(filePath).includes("other") ? "private/" : "secrets/",
+			)
+			try {
+				await multiRoot.initialize()
+				expect(multiRoot.validateAccess("/other/project/private/key.txt")).toBe(false)
+				expect(multiRoot.validateAccess("/other/project/secrets/key.txt")).toBe(true)
+				expect(multiRoot.validateAccess("/test/path/secrets/key.txt")).toBe(false)
+				expect(multiRoot.getInstructions()).toContain("/other/project/.rooignore")
+			} finally {
+				multiRoot.dispose()
+				Reflect.deleteProperty(vscode.workspace, "workspaceFolders")
+			}
+		})
 		/**
 		 * Tests the controller initialization when .rooignore exists
 		 */
