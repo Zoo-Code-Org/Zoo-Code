@@ -2706,7 +2706,7 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 	)
 
 	const terminalCases = ["message", "completion"].flatMap((entry) =>
-		["failed", "incomplete", "cancelled"].map((status) => ({ entry, status })),
+		["failed", "cancelled"].map((status) => ({ entry, status })),
 	)
 	it.each(terminalCases)("rejects terminal $status from $entry", async ({ entry, status }) => {
 		const handler = new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: false })
@@ -2724,6 +2724,23 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 			message: expect.stringContaining("server rejected"),
 		})
 	})
+
+	it.each(["message", "completion"] as const)(
+		"rejects terminal incomplete from $s as a stream stop (#2769)",
+		async (entry) => {
+			const handler = new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: false })
+			mockResponsesCreate.mockResolvedValueOnce({
+				status: "incomplete",
+				output: [{ type: "message", content: [{ type: "output_text", text: "partial" }] }],
+				error: { message: "server rejected", code: "server_error" },
+			})
+			const request =
+				entry === "completion"
+					? handler.completePrompt("prompt")
+					: collectStream(handler.createMessage(systemPrompt, messages))
+			await expect(request).rejects.toMatchObject({ name: "StreamStopError", stopReason: "unknown" })
+		},
+	)
 
 	it.each(["message", "completion"])("preserves token-limit classification from $s", async (entry) => {
 		const handler = new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: false })

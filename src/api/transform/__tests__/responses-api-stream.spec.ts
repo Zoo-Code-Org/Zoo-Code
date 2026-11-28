@@ -487,6 +487,32 @@ describe("Responses terminal failure contract", () => {
 		).rejects.toMatchObject({ name: "OutputTokenLimitError" })
 	})
 
+	it.each([
+		{ reason: "content_filter", stopReason: "content_filter" },
+		{ reason: "other_provider_stop", stopReason: "other_provider_stop" },
+		{ reason: undefined, stopReason: "unknown" },
+	])("classifies an incomplete response as a stream stop ($reason)", async ({ reason, stopReason }) => {
+		const result = collectChunks(
+			processResponsesApiStream(
+				mockStream([{ type: "response.incomplete", response: { incomplete_details: { reason } } }]),
+				noopUsage,
+			),
+		)
+		await expect(result).rejects.toMatchObject({ name: "StreamStopError", stopReason })
+		if (reason === "content_filter") {
+			await expect(result).rejects.toThrow(/content filter/)
+		}
+	})
+
+	it.each([
+		{ type: "response.failed", response: { error: { message: "backend failed", code: "server_error" } } },
+		{ type: "response.cancelled", response: {} },
+	])("keeps $type on the generic error path", async (event) => {
+		await expect(collectChunks(processResponsesApiStream(mockStream([event]), noopUsage))).rejects.toMatchObject({
+			name: "Error",
+		})
+	})
+
 	it("reports output items on item and completion events", async () => {
 		const item = { type: "reasoning", id: "r1", encrypted_content: "opaque", summary: [] }
 		const capture = vi.fn()
