@@ -362,6 +362,130 @@ describe("LiteLLMHandler", () => {
 			}
 		})
 
+		it("sends max_completion_tokens for a catalog alias routed to an OpenAI backend (issue 1865)", async () => {
+			// The issue's repro: custom alias "gpt-6-sol" routed to
+			// openai/gpt-6-sol. The alias name is not gpt-5-shaped, so only the
+			// routed backend name can reveal the parameter requirement.
+			const provider = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-sol",
+			})
+			vi.mocked(getModels).mockResolvedValueOnce({
+				"gpt-6-sol": { ...litellmDefaultModelInfo, requiresMaxCompletionTokens: true },
+			})
+
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "what model are you?" }]
+
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Hello!" } }],
+					usage: { prompt_tokens: 10, completion_tokens: 5 },
+				},
+			])
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			await collectStream(provider.createMessage(systemPrompt, messages))
+
+			const createCall = mockCreate.mock.calls[0][0]
+			// The value must be the seeded record's maxTokens, not merely defined.
+			expect(createCall.max_completion_tokens).toBe(litellmDefaultModelInfo.maxTokens)
+			expect(createCall.max_tokens).toBeUndefined()
+		})
+
+		it("sends max_completion_tokens in completePrompt for a catalog alias routed to an OpenAI backend (issue 1865)", async () => {
+			const provider = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-sol",
+			})
+			vi.mocked(getModels).mockResolvedValueOnce({
+				"gpt-6-sol": { ...litellmDefaultModelInfo, requiresMaxCompletionTokens: true },
+			})
+
+			mockCreate.mockResolvedValue({
+				choices: [{ message: { content: "Test response" } }],
+			})
+
+			await provider.completePrompt("Test prompt")
+
+			const createCall = mockCreate.mock.calls[0][0]
+			expect(createCall.max_completion_tokens).toBe(litellmDefaultModelInfo.maxTokens)
+			expect(createCall.max_tokens).toBeUndefined()
+		})
+
+		it.each([false, true] as const)(
+			"treats an explicit false flag as max_tokens (issue 1865 review 4674944430, completePrompt=%s)",
+			async (useCompletePrompt) => {
+				// The selector's full domain includes explicit false: a catalog
+				// record can report the family check as false, and the request
+				// must not flip to the modern parameter.
+				const provider = new LiteLLMHandler({
+					...mockOptions,
+					litellmModelId: "gpt-6-sol",
+				})
+				vi.mocked(getModels).mockResolvedValueOnce({
+					"gpt-6-sol": { ...litellmDefaultModelInfo, requiresMaxCompletionTokens: false },
+				})
+
+				mockCreate.mockReturnValue({
+					withResponse: vi.fn().mockResolvedValue({
+						data: asyncStreamFrom([
+							{
+								choices: [{ delta: { content: "Hello!" } }],
+								usage: { prompt_tokens: 10, completion_tokens: 5 },
+							},
+						]),
+					}),
+				})
+
+				if (useCompletePrompt) {
+					mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "Test response" } }] })
+					await provider.completePrompt("Test prompt")
+				} else {
+					await collectStream(
+						provider.createMessage("You are a helpful assistant", [
+							{ role: "user", content: "what model are you?" } as Anthropic.Messages.MessageParam,
+						]),
+					)
+				}
+
+				const createCall = mockCreate.mock.calls[0][0]
+				expect(createCall.max_tokens).toBe(litellmDefaultModelInfo.maxTokens)
+				expect(createCall.max_completion_tokens).toBeUndefined()
+			},
+		)
+
+		it("keeps max_tokens for a catalog alias routed to a non-OpenAI backend (issue 1865)", async () => {
+			const provider = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "my-claude",
+			})
+			vi.mocked(getModels).mockResolvedValueOnce({
+				"my-claude": { ...litellmDefaultModelInfo, requiresMaxCompletionTokens: undefined },
+			})
+
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Hi" } }],
+					usage: { prompt_tokens: 10, completion_tokens: 5 },
+				},
+			])
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			await collectStream(provider.createMessage(systemPrompt, messages))
+
+			const createCall = mockCreate.mock.calls[0][0]
+			expect(createCall.max_tokens).toBeDefined()
+			expect(createCall.max_completion_tokens).toBeUndefined()
+		})
+
 		it("should use max_completion_tokens in completePrompt for GPT-5 models", async () => {
 			const optionsWithGPT5: ApiHandlerOptions = {
 				...mockOptions,

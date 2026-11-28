@@ -164,6 +164,17 @@ export abstract class BaseProvider implements ApiHandler {
 	}
 
 	/**
+	 * Default: no record-shape revision — the provider's cached records are
+	 * stable across releases. Providers that change the SHAPE of their
+	 * cached records override this; the revision token becomes part of the
+	 * cache key, so pre-revision cache files are unreachable and the next
+	 * fetch re-populates fresh records.
+	 */
+	getModelCacheKeyRevision(): string | undefined {
+		return undefined
+	}
+
+	/**
 	 * Single-flight the one-time catalog load behind ensureModelFetched().
 	 *
 	 * Semantics mirror RouterProvider.ensureModelFetched():

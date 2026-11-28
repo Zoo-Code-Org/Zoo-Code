@@ -76,6 +76,13 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		return { urlScoped: true, keyScoped: true, authScoped: false }
 	}
 
+	override getModelCacheKeyRevision(): string {
+		// The LiteLLM catalog records gained requiresMaxCompletionTokens;
+		// pre-revision cached catalogs would keep serving records without
+		// the flag and keep sending max_tokens (review 4674944449).
+		return "v2-requires-max-completion-tokens"
+	}
+
 	override getModel(): { id: string; info: ModelInfo } {
 		const model = super.getModel()
 		const preserveReasoningSetting = this.options.litellmPreserveReasoning
@@ -98,6 +105,17 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// Match gpt-5, gpt5, and variants like gpt-5o, gpt-5-turbo, gpt5-preview, gpt-5.1
 		// Avoid matching gpt-50, gpt-500, etc.
 		return /\bgpt-?5(?!\d)/i.test(modelId)
+	}
+
+	private usesMaxCompletionTokens(modelId: string, info: ModelInfo): boolean {
+		// Newer OpenAI models require max_completion_tokens instead of the
+		// deprecated max_tokens parameter. Beyond the gpt-5 naming and
+		// Responses-backed routes, a custom LiteLLM alias routed to an
+		// OpenAI-family backend needs the modern parameter too: the backend
+		// may reject max_tokens outright and the alias name alone cannot
+		// reveal the backend, so the fetcher derives the flag from
+		// litellm_params.model (issue 1865).
+		return this.isGpt5(modelId) || info.requiresResponsesApi === true || info.requiresMaxCompletionTokens === true
 	}
 
 	private getReasoningEffort(info: ModelInfo): ReasoningEffortExtended | undefined {
@@ -225,8 +243,9 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// Required by some providers; others default to max tokens allowed
 		const maxTokens: number | undefined = info.maxTokens ?? undefined
 
-		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
-		const usesMaxCompletionTokens = this.isGpt5(modelId) || info.requiresResponsesApi
+		// Newer OpenAI models require max_completion_tokens instead of the deprecated max_tokens
+		// parameter; a custom alias routed to an OpenAI-family backend needs it too (issue 1865).
+		const usesMaxCompletionTokens = this.usesMaxCompletionTokens(modelId, info)
 		const reasoningEffort = this.getReasoningEffort(info)
 
 		// Gemini validates thought signatures on function calls. A tool call without a signature
@@ -457,8 +476,9 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		}
 		const { id: modelId, info } = model
 
-		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
-		const usesMaxCompletionTokens = this.isGpt5(modelId) || info.requiresResponsesApi
+		// Newer OpenAI models require max_completion_tokens instead of the deprecated max_tokens
+		// parameter; a custom alias routed to an OpenAI-family backend needs it too (issue 1865).
+		const usesMaxCompletionTokens = this.usesMaxCompletionTokens(modelId, info)
 		const reasoningEffort = this.getReasoningEffort(info)
 
 		// The absolute deadline is enforced THROUGH the SDK call, not just as a

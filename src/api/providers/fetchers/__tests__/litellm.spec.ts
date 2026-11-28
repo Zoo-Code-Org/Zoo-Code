@@ -234,6 +234,44 @@ describe("getLiteLLMModels", () => {
 		})
 	})
 
+	it("derives requiresMaxCompletionTokens from the routed backend family (issue 1865)", async () => {
+		const mkRecord = (routedModel: string) => ({
+			model_name: "alias",
+			model_info: {
+				max_tokens: 8192,
+				max_input_tokens: 200000,
+				supports_vision: false,
+				supports_prompt_caching: false,
+			},
+			litellm_params: { model: routedModel },
+		})
+		const fetch = async (routed: string) => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [mkRecord(routed)] } })
+			return getLiteLLMModels("k", "http://localhost:4000")
+		}
+
+		// OpenAI-family routed backends — provider-prefixed or bare ids from
+		// custom_openai routes — require the modern parameter name.
+		expect((await fetch("openai/gpt-6-sol"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
+		expect((await fetch("openai/gpt-5.1"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
+		expect((await fetch("openai/o3-mini"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
+		expect((await fetch("gpt-5"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
+		expect((await fetch("o3-mini"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
+
+		// The openai/ prefix alone routes ANY OpenAI-compatible endpoint
+		// (local servers, custom api_base backends) where LiteLLM forwards
+		// max_tokens unchanged — the routed model name must be an OpenAI
+		// reasoning-era family (review 4674944438).
+		expect((await fetch("openai/mistral"))["alias"]?.requiresMaxCompletionTokens).toBeUndefined()
+		expect((await fetch("openai/gpt-4-turbo"))["alias"]?.requiresMaxCompletionTokens).toBeUndefined()
+
+		// Non-OpenAI routed backends keep max_tokens: the parameter name is
+		// provider-specific and LiteLLM passes it through untranslated.
+		expect((await fetch("anthropic/claude-3.5-sonnet"))["alias"]?.requiresMaxCompletionTokens).toBeUndefined()
+		expect((await fetch("gemini/gemini-2.5-pro"))["alias"]?.requiresMaxCompletionTokens).toBeUndefined()
+		expect((await fetch("gpt-4o"))["alias"]?.requiresMaxCompletionTokens).toBeUndefined()
+	})
+
 	it("marks GPT-6 Astra aliases for the documented Responses bridge", async () => {
 		mockedAxios.get.mockResolvedValue({
 			data: {
