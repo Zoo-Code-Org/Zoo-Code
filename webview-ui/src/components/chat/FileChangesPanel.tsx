@@ -37,12 +37,13 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 	// the request effect must not act on rows expanded under the previous task.
 	const expandedTaskIdRef = useRef(taskId)
 
-	// Reset expanded file rows and final content cache when the messages change
+	// Streaming replaces the messages array repeatedly. Keep the reader's expanded
+	// rows and scroll position until the task itself changes.
 	useEffect(() => {
 		setExpandedPaths(new Set())
 		setFinalContentByPath({})
 		pendingPathsRef.current = new Set()
-	}, [clineMessages, taskId])
+	}, [taskId])
 
 	// Originals are keyed by message id, which is stable across message updates, so they only reset per task
 	useEffect(() => {
@@ -147,7 +148,7 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 	const fileCount = byPath.size
 
 	return (
-		<Collapsible open={panelExpanded} onOpenChange={setPanelExpanded} className={cn("px-3", className)}>
+		<Collapsible open={panelExpanded} onOpenChange={setPanelExpanded} className={cn("px-3 shrink-0", className)}>
 			<CollapsibleTrigger
 				className={cn(
 					"flex items-center gap-2 w-full py-2 rounded-md text-left text-vscode-foreground",
@@ -178,7 +179,11 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 					</div>
 				) : null}
 			</CollapsibleTrigger>
-			<CollapsibleContent>
+			<CollapsibleContent
+				data-testid="file-changes-list"
+				className="max-h-[40vh] overflow-y-auto overscroll-contain"
+				tabIndex={0}
+				aria-label={t("chat:fileChangesInConversation.header", { count: fileCount })}>
 				<div className="flex flex-col gap-1 pb-2 pl-6">
 					{Array.from(byPath.entries()).map(([path, entries]) => {
 						const originalContent =
