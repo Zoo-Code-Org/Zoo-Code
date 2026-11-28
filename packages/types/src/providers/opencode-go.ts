@@ -41,8 +41,11 @@ export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
  * https://opencode.ai/docs/go/#usage-limits. It also includes explicitly
  * curated Responses-format models whose gateway metadata is not available
  * through `/models`. The fetcher merges the live `/models` payload on top of
- * these defaults so that context-window and max-token values stay in sync
- * with the gateway while capability flags and pricing remain correct.
+ * these defaults so that max-token and image-support values stay in sync
+ * with the gateway while capability flags, pricing, and the curated context
+ * windows remain correct. The registry context window is authoritative for
+ * curated models: the `/models` endpoint reports a blanket `context_window`
+ * for every model, so a live value must not override it.
  *
  * `supportsPromptCache` has two distinct meanings depending on the wire format:
  *
