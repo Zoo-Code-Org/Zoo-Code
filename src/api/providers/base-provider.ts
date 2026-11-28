@@ -30,6 +30,15 @@ function wrapEntersSchemaMap(key: string, value: unknown): boolean {
 	return WRAP_SCHEMA_MAP_KEYWORDS.has(key) && typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+// Explicit own-property creation: a schema key like "__proto__" (legal in
+// JSON and produced by JSON.parse as an own property) must become an own
+// data property of the rebuilt copy, never a prototype change - the same
+// rule the strict-schema walkers apply (issue #547 review 4728045833,
+// review 4726391002).
+function defineOwnKey(target: Record<string, unknown>, key: string, value: unknown): void {
+	Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true })
+}
+
 // JSON Pointer (RFC 6901) escapes "~" as "~0" and "/" as "~1", so a
 // recorded prefix matches the way a reference names the property.
 function escapeWrapPointerToken(token: string): string {
@@ -65,7 +74,7 @@ function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: WrappedKeyRecord
 	const result: Record<string, unknown> = {}
 	for (const [key, value] of Object.entries(record)) {
 		if (!insideSchemaMap && WRAP_LITERAL_KEYWORDS.has(key)) {
-			result[key] = value
+			defineOwnKey(result, key, value)
 			continue
 		}
 		if (!insideSchemaMap && key === "$ref" && typeof value === "string") {
@@ -78,13 +87,13 @@ function rewriteWrappedPropertyRefs(node: unknown, wrappedKeys: WrappedKeyRecord
 					ref = `${wrapped.newPrefix}${ref.slice(wrapped.oldPrefix.length)}`
 				}
 			}
-			result[key] = ref
+			defineOwnKey(result, key, ref)
 			continue
 		}
-		result[key] = rewriteWrappedPropertyRefs(
-			value,
-			wrappedKeys,
-			insideSchemaMap ? false : wrapEntersSchemaMap(key, value),
+		defineOwnKey(
+			result,
+			key,
+			rewriteWrappedPropertyRefs(value, wrappedKeys, insideSchemaMap ? false : wrapEntersSchemaMap(key, value)),
 		)
 	}
 	return result

@@ -878,6 +878,102 @@ describe("stripUnsupportedStrictKeywords", () => {
 		expect((props.move as Schema).anyOf).toBeDefined()
 	})
 
+	it("applies every ancestor relocation to a nested moved reference (review 4728045843)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { pick: { $ref: "#/$defs/Choice/oneOf/0/oneOf/0" } },
+			required: ["pick"],
+			$defs: {
+				Choice: {
+					// The inner branch loses its pattern, so the inner
+					// oneOf relaxes under anyOf; the changed branch
+					// object then also strips the outer oneOf under
+					// anyOf. Both relocations must compose.
+					oneOf: [{ oneOf: [{ type: "string", pattern: "^a" }, { type: "number" }] }, { type: "boolean" }],
+				},
+			},
+		}
+		const stripped = strip(schema)
+		const pick = (stripped.properties as Schema).pick as Schema
+		// The inner move applies first, then the enclosing move applies
+		// to the updated segments: a loop that stopped at the first
+		// match emits the inner rewrite alone, and the pointer dangles
+		// on the outer oneOf location the emitted schema no longer has.
+		expect(pick.$ref).toBe("#/$defs/Choice/anyOf/0/anyOf/0")
+		expect(accepts(pick, "aa", stripped)).toBe(true)
+	})
+
+	it("relaxes unevaluatedItems when a dropped conditional branch evaluated items (review 4728045848)", () => {
+		const schema: Schema = {
+			type: "array",
+			if: { minItems: 2 },
+			then: { prefixItems: [true, true] },
+			else: { prefixItems: [true] },
+			unevaluatedItems: false,
+		}
+		const stripped = strip(schema)
+		// minItems leaves the predicate, both branches drop, and the
+		// prefixItems rules were what evaluated the leading items: the
+		// retained unevaluatedItems: false would reject an item no
+		// remaining keyword evaluates, so it relaxes.
+		expect(stripped.unevaluatedItems).toBe(true)
+		expect(stripped.then).toBeUndefined()
+		expect(stripped.else).toBeUndefined()
+	})
+
+	it("keeps unevaluatedItems when the conditional's predicate strips unchanged (review 4728045848 control)", () => {
+		const schema: Schema = {
+			type: "array",
+			if: { minItems: 1 },
+			then: { prefixItems: [true] },
+			else: { prefixItems: [true, true] },
+			unevaluatedItems: false,
+		}
+		const stripped = strip(schema)
+		// minItems: 1 is a supported value: nothing is removed, the
+		// branches stay, and the closed-array rule is an ordinary one.
+		expect(stripped.unevaluatedItems).toBe(false)
+		expect(stripped.then).toStrictEqual({ prefixItems: [true] })
+	})
+
+	it("propagates conditional evaluation loss to an enclosing allOf closure (review 4728045852)", () => {
+		const schema: Schema = {
+			type: "object",
+			allOf: [
+				{
+					if: { properties: { kind: { pattern: "^a$" } } },
+					then: { properties: { x: { type: "string" } } },
+				},
+			],
+			unevaluatedProperties: false,
+		}
+		const stripped = strip(schema)
+		// The conjunct applies at the root instance location, so the x
+		// evaluations its dropped then branch performed leave the root:
+		// a closure relaxation on the conditional's own node alone
+		// leaves the root rule stranded, and it would reject a value
+		// the original accepted. The root closure relaxes through the
+		// same-instance allOf hop.
+		expect(stripped.unevaluatedProperties).toBe(true)
+	})
+
+	it("keeps an allOf closure when the conjunct's conditional strips unchanged (review 4728045852 control)", () => {
+		const schema: Schema = {
+			type: "object",
+			allOf: [
+				{
+					if: { properties: { kind: { type: "string" } } },
+					then: { properties: { x: { type: "string" } } },
+				},
+			],
+			unevaluatedProperties: false,
+		}
+		const stripped = strip(schema)
+		// Nothing is removed anywhere: the branches stay and the closed
+		// root rule is an ordinary one.
+		expect(stripped.unevaluatedProperties).toBe(false)
+	})
+
 	it.each([
 		["anyOf with a failing sibling type", { type: "string", anyOf: [{}] }, 1, false],
 		["anyOf with a passing sibling type", { type: "string", anyOf: [{}] }, "ok", true],

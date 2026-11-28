@@ -553,26 +553,41 @@ function relocateMovedRefs(
  * the child evaluated (issue #547 review 4725679723).
  */
 function containsPatternProperties(value: unknown, seen: Set<unknown>, root: unknown): boolean {
-	if (Array.isArray(value)) {
-		return value.some((entry) => containsPatternProperties(entry, seen, root))
-	}
-	if (!isRecord(value) || seen.has(value)) {
-		return false
-	}
-	seen.add(value)
-	if (typeof value.$ref === "string") {
-		// The referenced target carries the rule the pointer applies at
-		// validation time; seen keeps a self-referential chain finite
-		// (review 4726390999).
-		const resolved = resolveLocalRef(root, value.$ref)
-		if (resolved.resolved && containsPatternProperties(resolved.target, seen, root)) {
+	// An explicit worklist instead of recursion: seen bounds the walk by
+	// DISTINCT nodes, so a long acyclic chain of reference aliases costs
+	// linear work and never one call frame per alias - the recursive form
+	// exhausted the call stack on 120000 distinct targets (issue #547
+	// review 4728045838).
+	const pending: unknown[] = [value]
+	while (pending.length > 0) {
+		const node = pending.pop()
+		if (Array.isArray(node)) {
+			for (const entry of node) {
+				pending.push(entry)
+			}
+			continue
+		}
+		if (!isRecord(node) || seen.has(node)) {
+			continue
+		}
+		seen.add(node)
+		if (typeof node.$ref === "string") {
+			// The referenced target carries the rule the pointer applies
+			// at validation time; seen keeps a self-referential chain
+			// finite (review 4726390999).
+			const resolved = resolveLocalRef(root, node.$ref)
+			if (resolved.resolved) {
+				pending.push(resolved.target)
+			}
+		}
+		if ("patternProperties" in node) {
 			return true
 		}
+		for (const entry of Object.values(node)) {
+			pending.push(entry)
+		}
 	}
-	if ("patternProperties" in value) {
-		return true
-	}
-	return Object.values(value).some((entry) => containsPatternProperties(entry, seen, root))
+	return false
 }
 
 /**
@@ -585,26 +600,39 @@ function containsPatternProperties(value: unknown, seen: Set<unknown>, root: unk
  * (issue #547 review 4726104165, reference form 4726390999).
  */
 function containsContainsRule(value: unknown, seen: Set<unknown>, root: unknown): boolean {
-	if (Array.isArray(value)) {
-		return value.some((entry) => containsContainsRule(entry, seen, root))
-	}
-	if (!isRecord(value) || seen.has(value)) {
-		return false
-	}
-	seen.add(value)
-	if (typeof value.$ref === "string") {
-		// The referenced target carries the rule the pointer applies at
-		// validation time; seen keeps a self-referential chain finite
-		// (review 4726390999).
-		const resolved = resolveLocalRef(root, value.$ref)
-		if (resolved.resolved && containsContainsRule(resolved.target, seen, root)) {
+	// The same worklist bound as containsPatternProperties: seen bounds
+	// the walk by distinct nodes, so an acyclic alias chain never grows
+	// one call frame per alias (issue #547 review 4728045838).
+	const pending: unknown[] = [value]
+	while (pending.length > 0) {
+		const node = pending.pop()
+		if (Array.isArray(node)) {
+			for (const entry of node) {
+				pending.push(entry)
+			}
+			continue
+		}
+		if (!isRecord(node) || seen.has(node)) {
+			continue
+		}
+		seen.add(node)
+		if (typeof node.$ref === "string") {
+			// The referenced target carries the rule the pointer applies
+			// at validation time; seen keeps a self-referential chain
+			// finite (review 4726390999).
+			const resolved = resolveLocalRef(root, node.$ref)
+			if (resolved.resolved) {
+				pending.push(resolved.target)
+			}
+		}
+		if ("contains" in node) {
 			return true
 		}
+		for (const entry of Object.values(node)) {
+			pending.push(entry)
+		}
 	}
-	if ("contains" in value) {
-		return true
-	}
-	return Object.values(value).some((entry) => containsContainsRule(entry, seen, root))
+	return false
 }
 
 /**
@@ -737,6 +765,22 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 							}
 							return containsContainsRule(value[index], new Set(), root)
 						})
+				} else {
+					// The branch objects compiled unchanged, but branches that
+					// only reference schemas ($ref) apply their targets at
+					// validation time: a relaxed target can lose the
+					// evaluations its rules performed, and a retained
+					// unevaluatedProperties or unevaluatedItems rule at this
+					// level then rejects values the original accepted (issue
+					// #547 review 4728045839). The oneOf relaxation below
+					// uses the same target check.
+					const refs: string[] = []
+					collectRefPointers(value, new Set(), refs)
+					if (refs.length > 0 && !referencesUnchangedTargets(refs, root, depth, memo)) {
+						childEvaluationLost = childEvaluationLost || containsPatternProperties(value, new Set(), root)
+						childItemEvaluationLost =
+							childItemEvaluationLost || containsContainsRule(value, new Set(), root)
+					}
 				}
 				let relaxed = key === "oneOf" && branchesChanged
 				if (!relaxed && key === "oneOf") {

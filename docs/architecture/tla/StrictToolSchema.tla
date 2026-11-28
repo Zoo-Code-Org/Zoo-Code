@@ -54,6 +54,12 @@
 \* 4726390984 sort-once, 4726390978 header length, and the test-oracle
 \* tightenings 4726390991, 4726390993, 4726390997, 4726390983.
 \* R15 totals: 0 covered, 2 added, 10 gap.
+\* R16: 0 added, 4 gap (4728045833 wrap-walker own key - the 4726391002
+\* own-key contract, unit regression; 4728045843 nested relocation
+\* pointer composition - the pointer-map contract family, unit
+\* regression beside the single-move case; 4728045848 and 4728045852
+\* unevaluated* interplay - the 4726391005 family, unit regressions).
+\* R16 totals: 0 covered, 0 added, 4 gap.
 
 EXTENDS Naturals, TLC
 

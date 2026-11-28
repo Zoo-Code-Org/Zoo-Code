@@ -70,6 +70,11 @@ type RefRelocation = { oldPrefix: string; newPrefix: string }
 type StripFacts = {
 	relocations: RefRelocation[]
 	changedPaths: string[][]
+	// Paths of the nodes whose conditional dropped an evaluating branch:
+	// the loss travels to enclosing closures through same-instance
+	// applicators (reachesThroughAllOfHops), because a conjunct applies
+	// at the same instance location (review 4728045852).
+	lostEvaluations: { path: string[]; kind: "properties" | "items" }[]
 	measuredChangedPaths?: string[][]
 	measuredRelocations?: RefRelocation[]
 }
@@ -176,6 +181,43 @@ function carriesPropertyEvaluation(value: unknown, seen: Set<unknown> = new Set(
 		return true
 	}
 	return Object.values(value).some((entry) => carriesPropertyEvaluation(entry, seen))
+}
+
+// Whether a subtree evaluates array items through items, prefixItems,
+// additionalItems or contains rules: a dropped conditional branch that did
+// takes those evaluations with it, so a retained unevaluatedItems rule at
+// the conditional's level would forbid an item the original accepted
+// (review 4728045848).
+function carriesItemEvaluation(value: unknown, seen: Set<unknown> = new Set()): boolean {
+	if (Array.isArray(value)) {
+		return value.some((entry) => carriesItemEvaluation(entry, seen))
+	}
+	if (!isRecord(value) || seen.has(value)) {
+		return false
+	}
+	seen.add(value)
+	if ("items" in value || "prefixItems" in value || "additionalItems" in value || "contains" in value) {
+		return true
+	}
+	return Object.values(value).some((entry) => carriesItemEvaluation(entry, seen))
+}
+
+// True when the loss path reaches here through same-instance applicators
+// only: every hop between this node and the conditional is an allOf
+// branch - allOf applies at the same instance location, so its
+// evaluations contribute to this level's closures, while a properties or
+// items hop applies at another instance and its evaluations do not
+// (review 4728045852).
+function reachesThroughAllOfHops(here: string[], lost: string[]): boolean {
+	if (lost.length < here.length + 2 || (lost.length - here.length) % 2 !== 0) {
+		return false
+	}
+	for (let index = here.length; index < lost.length; index += 2) {
+		if (lost[index] !== "allOf") {
+			return false
+		}
+	}
+	return here.every((segment, index) => lost[index] === segment)
 }
 
 // True when one decoded path equals the other or sits inside it: a
@@ -302,10 +344,13 @@ function isUnsupportedKeyword(key: string, value: unknown): boolean {
  * re-encoded per segment (review 4726391009). Matching is segment-boundary
  * exact, so "#/$defs/a" does not collide with a property named with the
  * same prefix, and the longest prefix applies first - relocations arrive
- * pre-sorted once per strip. Literal values under const, enum, default and
- * examples stay verbatim at schema positions; entries of a name-to-schema
- * map are schemas and their references relocate with everything else
- * (review 4726104168).
+ * pre-sorted once per strip. Every matching relocation applies: nested
+ * moves compose, an ancestor move rewriting the updated segments of an
+ * inner move, because the emitted schema only has the outermost new
+ * location (review 4728045843). Literal values under const, enum, default
+ * and examples stay verbatim at schema positions; entries of a
+ * name-to-schema map are schemas and their references relocate with
+ * everything else (review 4726104168).
  */
 function rewriteRelocatedRefs(node: unknown, relocations: RefRelocation[], insideSchemaMap = false): unknown {
 	if (relocations.length === 0) {
@@ -327,22 +372,24 @@ function rewriteRelocatedRefs(node: unknown, relocations: RefRelocation[], insid
 			let ref = value
 			const refSegments = decodePointerSegments(ref)
 			if (refSegments !== undefined) {
+				// Every matching relocation applies to the updated
+				// segments: a reference to a branch that moved inside a
+				// subtree which itself moved needs the ancestor move too,
+				// or the pointer would name the old outer location the
+				// emitted schema no longer has (review 4728045843).
+				let segments = refSegments
 				for (const relocation of relocations) {
 					const oldSegments = decodePathSegments(relocation.oldPrefix)
-					if (!relocationMatches(refSegments, oldSegments)) {
+					if (!relocationMatches(segments, oldSegments)) {
 						continue
 					}
 					// The new location's decoded segments plus the
 					// untouched decoded tail, re-encoded as a fragment:
 					// the pointer keeps naming the same target constraint
 					// after the move (review 4726391009).
-					const newSegments = [
-						...decodePathSegments(relocation.newPrefix),
-						...refSegments.slice(oldSegments.length),
-					]
-					ref = `#/${newSegments.map(encodePointerSegment).join("/")}`
-					break
+					segments = [...decodePathSegments(relocation.newPrefix), ...segments.slice(oldSegments.length)]
 				}
+				ref = `#/${segments.map(encodePointerSegment).join("/")}`
 			}
 			defineOwnKey(result, key, ref)
 			continue
@@ -461,11 +508,12 @@ function inlineUnresolvableRefs(
 export function stripUnsupportedStrictKeywords(schema: unknown, insideNot = false): unknown {
 	// Pass one measures: the same strip with every reference-aware decision
 	// kept, so the changed-path set is complete before any decision is made.
-	const measured: StripFacts = { relocations: [], changedPaths: [] }
+	const measured: StripFacts = { relocations: [], changedPaths: [], lostEvaluations: [] }
 	stripNode(schema, insideNot, "#", measured)
 	const facts: StripFacts = {
 		relocations: [],
 		changedPaths: [],
+		lostEvaluations: [],
 		measuredChangedPaths: measured.changedPaths,
 		measuredRelocations: measured.relocations,
 	}
@@ -623,6 +671,7 @@ function stripNode(schema: unknown, insideNot: boolean, path: string, facts: Str
 		removed.if = ifOriginal
 	}
 	let conditionalEvaluationLost = false
+	let conditionalItemEvaluationLost = false
 	for (const branch of conditionalBranches) {
 		if (conditionalStripped && !insideNot) {
 			// The stripped predicate selects the other branch for values
@@ -639,6 +688,7 @@ function stripNode(schema: unknown, insideNot: boolean, path: string, facts: Str
 			// forbid a value the original accepted, so it relaxes below
 			// (review 4726391005).
 			conditionalEvaluationLost = conditionalEvaluationLost || carriesPropertyEvaluation(branch.original)
+			conditionalItemEvaluationLost = conditionalItemEvaluationLost || carriesItemEvaluation(branch.original)
 			delete result[branch.key]
 			removed[branch.key] = branch.original
 		}
@@ -648,6 +698,66 @@ function stripNode(schema: unknown, insideNot: boolean, path: string, facts: Str
 			result.unevaluatedProperties = true
 		} else if (isRecord(result.unevaluatedProperties)) {
 			result.unevaluatedProperties = true
+		}
+	}
+	// The same dependency for array closures: a dropped branch that
+	// evaluated items (its items, prefixItems, additionalItems or
+	// contains rules) strands a retained unevaluatedItems rule. A
+	// retained items evaluates every remaining index, so the restriction
+	// stays only beside one (review 4728045848).
+	if (conditionalItemEvaluationLost && !("items" in result)) {
+		if (result.unevaluatedItems === false) {
+			result.unevaluatedItems = true
+		} else if (isRecord(result.unevaluatedItems)) {
+			result.unevaluatedItems = true
+		}
+	}
+	// The loss travels up through same-instance applicators: a
+	// conditional embedded through allOf applies at THIS location too,
+	// so evaluation it lost inside its dropped branches strands a
+	// retained closure here as well - the relaxations above only reach
+	// the conditional's own node (review 4728045852). The decision runs
+	// in the deciding pass, when the loss record is complete (the same
+	// rule the other reference-aware decisions follow).
+	if (deciding) {
+		const here = decodePathSegments(path)
+		let allOfPropertyLoss = false
+		let allOfItemLoss = false
+		for (const lost of facts.lostEvaluations) {
+			if (!reachesThroughAllOfHops(here, lost.path)) {
+				continue
+			}
+			if (lost.kind === "properties") {
+				allOfPropertyLoss = true
+			} else {
+				allOfItemLoss = true
+			}
+		}
+		if (allOfPropertyLoss) {
+			if (result.unevaluatedProperties === false) {
+				result.unevaluatedProperties = true
+			} else if (isRecord(result.unevaluatedProperties)) {
+				result.unevaluatedProperties = true
+			}
+		}
+		if (allOfItemLoss && !("items" in result)) {
+			if (result.unevaluatedItems === false) {
+				result.unevaluatedItems = true
+			} else if (isRecord(result.unevaluatedItems)) {
+				result.unevaluatedItems = true
+			}
+		}
+	}
+	// Record where the loss happened: an enclosing node consults these
+	// paths through the same-instance hop check above. Each pass
+	// records its own drops, so the deciding pass sees exactly the
+	// drops it made.
+	if (conditionalStripped && !insideNot) {
+		if (conditionalEvaluationLost) {
+			facts.lostEvaluations.push({ path: decodePathSegments(path), kind: "properties" })
+		}
+		if (conditionalItemEvaluationLost) {
+			facts.lostEvaluations.push({ path: decodePathSegments(path), kind: "items" })
 		}
 	}
 	for (const pending of pendingNotDrops) {

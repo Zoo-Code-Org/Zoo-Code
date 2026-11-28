@@ -2768,6 +2768,85 @@ describe("DeepSeekHandler", () => {
 			expect(String(conjunct.description)).toContain("minItems")
 		})
 
+		it("relaxes unevaluatedProperties across a long alias chain without exhausting the stack (review 4728045838)", () => {
+			// A flat chain of 120000 DISTINCT reference aliases reached
+			// from a changed applicator branch: seen stops cycles but the
+			// walk added one call frame per alias, and the chain outran
+			// the call stack during conversion. The worklist form visits
+			// the same distinct targets in linear space.
+			const aliases: Record<string, unknown> = {}
+			for (let level = 0; level < 120000; level++) {
+				aliases[`a${level}`] = { $ref: `#/$defs/a${level + 1}` }
+			}
+			aliases.a120000 = { patternProperties: { "^x$": { type: "string" } } }
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						required: ["x"],
+						$defs: aliases,
+						properties: {
+							x: {
+								allOf: [{ $ref: "#/$defs/a0", minItems: 1 }],
+								unevaluatedProperties: false,
+							},
+						},
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			const prop = (params.properties as Record<string, Record<string, unknown>>).x
+			// The branch lost minItems, and the chain's far end carries
+			// the patternProperties rule that evaluated the keys: the
+			// stranded unevaluatedProperties: false relaxes exactly like
+			// the inline case - gracefully, not with a RangeError.
+			expect(prop.unevaluatedProperties).toBe(true)
+		})
+
+		it("relaxes unevaluatedItems when only the referenced target changed and the branch stayed identical (review 4728045839)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						required: ["values"],
+						$defs: { strings: { contains: { type: "string" } } },
+						properties: {
+							values: {
+								// The branch is a bare reference: it
+								// compiles to itself, so the branch loop
+								// sees no change. Its target still lost
+								// the contains rule that evaluated the
+								// items, and a retained
+								// unevaluatedItems: false would reject the
+								// item the original accepted.
+								allOf: [{ $ref: "#/$defs/strings" }],
+								unevaluatedItems: false,
+							},
+						},
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as {
+				properties?: Record<string, Record<string, unknown>>
+			}
+			const arr = (params.properties ?? {}).values as Record<string, unknown>
+			// The loss is detected through the reference target - the
+			// same target check the oneOf relaxation uses - and the
+			// unchanged branch keeps its exact shape.
+			expect(arr.unevaluatedItems).toBe(true)
+			expect(arr.allOf).toStrictEqual([{ $ref: "#/$defs/strings" }])
+		})
+
 		it("keeps unevaluatedItems when items and prefixItems are both present (review 4725679660)", () => {
 			const tools = convert([
 				{

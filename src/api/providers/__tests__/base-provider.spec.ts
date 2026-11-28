@@ -1003,6 +1003,50 @@ describe("BaseProvider", () => {
 			expect(parameters.properties.mirror).toStrictEqual({ $ref: "#/properties/value/anyOf/0/oneOf/0" })
 		})
 
+		it("keeps a sibling's own __proto__ property through the wrap-reference walk (#2653 review 4728045833)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "wrapped_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								// Optional multi-null oneOf: the wrap takes
+								// the scalar route and every sibling schema
+								// passes through the wrap-reference walker.
+								value: { oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+								// The computed key makes "__proto__" an OWN
+								// data property of the map, the way a
+								// caller's JSON.parse'd schema arrives - a
+								// plain literal key would set the prototype
+								// instead.
+								sibling: {
+									type: "object",
+									properties: { ["__proto__"]: { type: "string" } },
+									required: ["__proto__"],
+								},
+							},
+							required: [],
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// Rebuilding the map with plain assignments invokes the
+			// inherited accessor: the entry silently disappears while the
+			// required list still names it. Own-property creation keeps the
+			// entry beside its declared schema.
+			const siblingProperties = parameters.properties.sibling.properties as Record<string, unknown>
+			expect(Object.prototype.hasOwnProperty.call(siblingProperties, "__proto__")).toBe(true)
+			expect(siblingProperties["__proto__"]).toStrictEqual({ type: "string" })
+			expect(Object.getPrototypeOf(siblingProperties)).toBe(Object.prototype)
+			expect(parameters.properties.sibling.required).toStrictEqual(["__proto__"])
+		})
+
 		it("treats integers as numbers in the oracle while keeping oneOf exclusive (mock, #547)", () => {
 			// Mock evidence only: the oracle mirrors Draft 2020-12 numeric
 			// types (#2653 review 4682419243). An integer is also a number; a

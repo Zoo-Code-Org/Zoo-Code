@@ -39,6 +39,11 @@
 \*             additionalProperties or unevaluatedProperties rule, and the
 \*             retained rule then rejects values the original accepted
 \*             (review 4719336022).
+\* Failure 15: an applicator branch that only references a schema compiles
+\*             to itself although the referenced target lost its contains
+\*             or patternProperties rule - the stranded unevaluatedItems:
+\*             false or unevaluatedProperties: false then rejects values
+\*             the original accepted (review 4728045839).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
 \*             SatPreserved, SiblingConjunctKept, ArraySatKept,
 \*             CondEvalRelaxed. The reference-relocation invariants live
@@ -62,7 +67,7 @@
 \* fidelity (4712438384, JSON.parse regression test). The
 \* reference-relocation subsystem is modeled in DeepSeekRefRelocation.tla.
 \* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).
-\* Result: Fixed holds in 2097152 states. ForceRequired fails RequiredPreserved. KeepPattern
+\* Result: Fixed holds in 8388608 states (R16 inputs). ForceRequired fails RequiredPreserved. KeepPattern
 \* fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
 \* KeepOneOf, KeepClosed and KeepConditional each fail SatPreserved.
 \* AbsorbAnyOf fails SiblingConjunctKept. TLC found no state outside the
@@ -84,7 +89,14 @@
 \* R15 (4726390999) 1 covered: childContains2 already admits a contains
 \* carried behind a $ref, so the walk's reference following is a code
 \* conformance fix pinned by the referenced-case unit regression.
-\* 1 covered, 0 added, 0 gap.
+\* R16 (4728045839) 2 added: childRefContains2 - an UNCHANGED child
+\* applicator branch whose referenced target lost contains relaxes the
+\* stranded unevaluatedItems rule (ArraySatKept); childRefPat2 - the
+\* patternProperties counterpart relaxes the stranded
+\* unevaluatedProperties rule (SatPreserved). 1 gap (4728045838): the
+\* boundedness of the evaluation-loss walks is a work count, not
+\* expressible here - the iterative worklist is pinned by the
+\* 120000-alias regression test. 2 added, 1 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
@@ -115,6 +127,9 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* rules (uepSchema2). condEvalLost2: the changed conditional dropped a
 \* branch (or stripped a predicate) that itself evaluated keys. childContains2:
 \* a changed child applicator branch carried a contains rule.
+\* childRefContains2: an UNCHANGED child applicator branch references a
+\* target that carried contains and lost it. childRefPat2: the same
+\* route for a target whose patternProperties evaluations are gone.
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
@@ -122,7 +137,8 @@ Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            uneval2 : BOOLEAN, containsClosed2 : BOOLEAN,
            arrEvaluator2 : BOOLEAN, partialPrefix2 : BOOLEAN,
            uepSchema2 : BOOLEAN, condEvalLost2 : BOOLEAN,
-           childContains2 : BOOLEAN]
+           childContains2 : BOOLEAN, childRefContains2 : BOOLEAN,
+           childRefPat2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -163,11 +179,13 @@ Decisions(i) ==
          overlapSafe |-> i.oneOf2 /\ (i.branchKw \/ refChanged),
          apRelaxed |-> i.closed2 /\ ~i.uneval2 /\ ~i.uepSchema2,
          uepRelaxed |-> (i.closed2 /\ i.uneval2 /\ ~i.uepSchema2)
-                        \/ (i.cond2 /\ i.condEvalLost2),
+                        \/ (i.cond2 /\ i.condEvalLost2)
+                        \/ i.childRefPat2,
          uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
          siblingKept |-> TRUE,
-         uiRelaxed |-> (i.containsClosed2 \/ i.childContains2) /\ ~i.arrEvaluator2]
+         uiRelaxed |-> (i.containsClosed2 \/ i.childContains2 \/ i.childRefContains2)
+                        /\ ~i.arrEvaluator2]
     IN CASE Variant = "ForceRequired" ->
         [fixed EXCEPT !["required"] = {1, 2}]
     [] Variant = "KeepPattern" ->
@@ -254,6 +272,7 @@ ClosedPart(i) ==
     IF ~i.closed2 THEN TRUE
     ELSE IF Variant = "KeepPattern" THEN TRUE
     ELSE IF i.cond2 /\ i.condEvalLost2 THEN Decisions(i).uepRelaxed
+    ELSE IF i.closed2 /\ i.childRefPat2 THEN Decisions(i).uepRelaxed
     ELSE IF i.uepSchema2 THEN Decisions(i).uepSchemaKept
     ELSE IF i.uneval2 THEN Decisions(i).uepRelaxed
     ELSE Decisions(i).apRelaxed
@@ -286,9 +305,12 @@ SiblingConjunctKept ==
 \* unevaluated and the restriction relaxes (review 4719935091). A changed
 \* child applicator branch that carried contains loses its item
 \* evaluations too, so the relaxation applies through childContains2 even
-\* though this node's removed record holds no contains (4726104165).
+\* though this node's removed record holds no contains (4726104165). The
+\* same loss arrives through an UNCHANGED branch that only references a
+\* target which lost its contains rule (childRefContains2, review
+\* 4728045839).
 ArraySatKept ==
-    ((in.containsClosed2 \/ in.childContains2) /\ ~in.arrEvaluator2) => Decisions(in).uiRelaxed
+    ((in.containsClosed2 \/ in.childContains2 \/ in.childRefContains2) /\ ~in.arrEvaluator2) => Decisions(in).uiRelaxed
 
 \* Safety (review 4726104161): a changed conditional whose dropped branch
 \* or stripped predicate evaluated keys strands a retained
