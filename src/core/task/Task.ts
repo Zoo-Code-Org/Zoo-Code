@@ -6,6 +6,7 @@ import { v7 as uuidv7 } from "uuid"
 import EventEmitter from "events"
 
 import { AskIgnoredError } from "./AskIgnoredError"
+import { snapshotHistory } from "../task-persistence/historySnapshot"
 import { RateLimitClock, createRateLimitClock } from "./RateLimitClock"
 
 import { Anthropic } from "@anthropic-ai/sdk"
@@ -1641,7 +1642,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async saveApiConversationHistory(merge = true): Promise<boolean> {
 		try {
 			await saveApiMessages({
-				messages: structuredClone(this.apiConversationHistory),
+				messages: snapshotHistory(this.apiConversationHistory),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
 				merge,
@@ -1846,7 +1847,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async saveClineMessages(merge = true): Promise<boolean> {
 		try {
 			await saveTaskMessages({
-				messages: structuredClone(this.clineMessages),
+				messages: snapshotHistory(this.clineMessages),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
 				merge,

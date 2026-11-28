@@ -307,6 +307,134 @@ describe("Task persistence", () => {
 	})
 
 	// ── saveApiConversationHistory (via retrySaveApiConversationHistory) ──
+	describe.each(["UI", "API"] as const)("%s history snapshot isolation", (kind) => {
+		function fixture() {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "snapshot isolation",
+				startTask: false,
+			})
+			const legacy = { nested: { chunks: ["initial"] } }
+			const message =
+				kind === "UI"
+					? { type: "say" as const, say: "reasoning" as const, ts: 1, text: "thinking", legacy }
+					: { role: "assistant" as const, content: [{ type: "text" as const, text: "response" }], legacy }
+			if (message.role === "assistant") task.apiConversationHistory.push(message)
+			else task.clineMessages.push(message)
+			return {
+				task,
+				legacy,
+				mock: kind === "UI" ? mockSaveTaskMessages : mockSaveApiMessages,
+				save: () => (kind === "UI" ? task["saveClineMessages"]() : task["saveApiConversationHistory"]()),
+			}
+		}
+
+		it("takes isolated, ordered nested snapshots even while another save is pending", async () => {
+			const { legacy, mock, save } = fixture()
+			const gate = createDeferred<void>()
+			const snapshots: unknown[][] = []
+			mock.mockImplementation(async ({ messages }: { messages: unknown[] }) => {
+				snapshots.push(messages)
+				await gate.promise
+				return messages
+			})
+			try {
+				const first = save()
+				legacy.nested.chunks.push("second")
+				const second = save()
+				legacy.nested.chunks.push("after both calls")
+				expect(snapshots).toHaveLength(2)
+				expect(snapshots[0]).toEqual([expect.objectContaining({ legacy: { nested: { chunks: ["initial"] } } })])
+				expect(snapshots[1]).toEqual([
+					expect.objectContaining({ legacy: { nested: { chunks: ["initial", "second"] } } }),
+				])
+				expect(snapshots[0]).not.toBe(snapshots[1])
+				gate.resolve()
+				expect(await Promise.all([first, second])).toEqual([true, true])
+				expect(mock).toHaveBeenNthCalledWith(1, expect.objectContaining({ merge: true }))
+				expect(mock).toHaveBeenNthCalledWith(2, expect.objectContaining({ merge: true }))
+			} finally {
+				gate.resolve()
+				mock.mockReset().mockResolvedValue([])
+			}
+		})
+
+		it("retries a failed save with a fresh snapshot without changing the failed snapshot", async () => {
+			const { legacy, mock, save } = fixture()
+			const snapshots: unknown[][] = []
+			mock.mockImplementationOnce(async ({ messages }: { messages: unknown[] }) => {
+				snapshots.push(messages)
+				throw new Error("disk unavailable")
+			})
+			mock.mockImplementationOnce(async ({ messages }: { messages: unknown[] }) => {
+				snapshots.push(messages)
+				return messages
+			})
+			expect(await save()).toBe(false)
+			legacy.nested.chunks.push("retry")
+			expect(await save()).toBe(true)
+			expect(snapshots[0]).toEqual([expect.objectContaining({ legacy: { nested: { chunks: ["initial"] } } })])
+			expect(snapshots[1]).toEqual([
+				expect.objectContaining({ legacy: { nested: { chunks: ["initial", "retry"] } } }),
+			])
+		})
+
+		it("preserves references crossing special legacy objects through the actual save", async () => {
+			const { legacy, mock, save } = fixture()
+			const extended = Object.assign(legacy, { special: new Map<string, unknown>() })
+			extended.special.set("parent", extended)
+			mock.mockImplementationOnce(async ({ messages }: { messages: Array<{ legacy: typeof extended }> }) => {
+				const saved = messages[0].legacy
+				expect(saved).not.toBe(extended)
+				expect(saved.special.get("parent")).toBe(saved)
+				extended.nested.chunks.push("changed while saving")
+				expect(saved.nested.chunks).toEqual(["initial"])
+				return messages
+			})
+			expect(await save()).toBe(true)
+		})
+	})
+
+	it("API backoff retries snapshot nested history again after a failed attempt", async () => {
+		vi.useFakeTimers()
+		try {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "retry",
+				startTask: false,
+			})
+			const toolInput = { chunks: ["initial"] }
+			task.apiConversationHistory.push({
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call", name: "write_to_file", input: toolInput }],
+			})
+			const snapshots: unknown[][] = []
+			mockSaveApiMessages.mockImplementationOnce(async ({ messages }: { messages: unknown[] }) => {
+				snapshots.push(messages)
+				toolInput.chunks.push("retry")
+				throw new Error("temporary write failure")
+			})
+			mockSaveApiMessages.mockImplementationOnce(async ({ messages }: { messages: unknown[] }) => {
+				snapshots.push(messages)
+				return messages
+			})
+			const saved = task.retrySaveApiConversationHistory()
+			await vi.runAllTimersAsync()
+			expect(await saved).toBe(true)
+			expect(snapshots[0]).toEqual([
+				expect.objectContaining({ content: [expect.objectContaining({ input: { chunks: ["initial"] } })] }),
+			])
+			expect(snapshots[1]).toEqual([
+				expect.objectContaining({
+					content: [expect.objectContaining({ input: { chunks: ["initial", "retry"] } })],
+				}),
+			])
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 
 	describe("saveApiConversationHistory", () => {
 		it("returns true on success", async () => {
